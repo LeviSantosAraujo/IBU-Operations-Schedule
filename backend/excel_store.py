@@ -129,15 +129,21 @@ def download_excel_from_blob() -> Optional[bytes]:
     return blob_get(BLOB_KEY)
 
 def excel_file_exists() -> bool:
-    """Check if Excel file exists (blob or local)"""
+    """Check if Excel file exists (blob, local, or memory)"""
     if BLOB_ENABLED and os.getenv("BLOB_READ_WRITE_TOKEN"):
         return _blob_exists()
     if EXCEL_FILE_PATH:
         return os.path.exists(EXCEL_FILE_PATH)
+    # Check in-memory storage
+    try:
+        from main import EXCEL_DATA_STORE
+        return "current" in EXCEL_DATA_STORE
+    except:
+        pass
     return False
 
 def _get_workbook() -> Optional[Workbook]:
-    """Get workbook from either blob or local storage"""
+    """Get workbook from blob, local, or memory storage"""
     # Try blob first if token is available
     if BLOB_ENABLED and os.getenv("BLOB_READ_WRITE_TOKEN"):
         wb = _read_excel_from_blob()
@@ -147,6 +153,14 @@ def _get_workbook() -> Optional[Workbook]:
     # Fall back to local file
     if EXCEL_FILE_PATH and os.path.exists(EXCEL_FILE_PATH):
         return load_workbook(EXCEL_FILE_PATH)
+    
+    # Try in-memory storage
+    try:
+        from main import EXCEL_DATA_STORE
+        if "current" in EXCEL_DATA_STORE:
+            return load_workbook(io.BytesIO(EXCEL_DATA_STORE["current"]))
+    except:
+        pass
     
     return None
 

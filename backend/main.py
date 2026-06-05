@@ -69,37 +69,49 @@ async def excel_status():
         "file_exists": exists
     }
 
+# Global in-memory storage for production
+EXCEL_DATA_STORE: Dict[str, bytes] = {}
+
 @app.post("/api/excel/upload")
 async def upload_excel(file: UploadFile = File(...)):
-    """Upload an Excel file to use as database (stores in Blob or local)"""
+    """Upload an Excel file to use as database (stores in memory for production)"""
     if not file.filename.endswith(('.xlsx', '.xls')):
         raise HTTPException(status_code=400, detail="Only Excel files (.xlsx, .xls) are allowed")
     
-    # Read file content
-    file_content = await file.read()
-    
-    # Try to upload to blob storage first
-    if upload_excel_to_blob(file_content):
-        return {
-            "message": "Excel file uploaded successfully to cloud storage",
-            "filename": file.filename
-        }
-    
-    # Fallback to local storage if blob is not available
     try:
-        # Save to local uploads directory
-        upload_path = UPLOAD_DIR / file.filename
-        with open(upload_path, "wb") as f:
-            f.write(file_content)
+        # Read file content
+        file_content = await file.read()
         
-        # Set as the active Excel file
-        set_excel_file(str(upload_path))
+        # Store in memory (production-safe)
+        EXCEL_DATA_STORE["current"] = file_content
         
-        return {
-            "message": "Excel file uploaded successfully to local storage",
-            "filename": file.filename,
-            "storage_type": "local"
-        }
+        # Try to upload to blob storage if available
+        if upload_excel_to_blob(file_content):
+            return {
+                "message": "Excel file uploaded successfully to cloud storage",
+                "filename": file.filename
+            }
+        
+        # Try local storage fallback
+        try:
+            upload_path = UPLOAD_DIR / file.filename
+            with open(upload_path, "wb") as f:
+                f.write(file_content)
+            set_excel_file(str(upload_path))
+            
+            return {
+                "message": "Excel file uploaded successfully to local storage",
+                "filename": file.filename,
+                "storage_type": "local"
+            }
+        except:
+            # If both blob and local fail, we still have the in-memory copy
+            return {
+                "message": "Excel file uploaded successfully to memory storage",
+                "filename": file.filename,
+                "storage_type": "memory"
+            }
+            
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to upload Excel file: {str(e)}")
 
