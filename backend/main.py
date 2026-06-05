@@ -94,31 +94,50 @@ def extract_employees_from_schedule(wb) -> List[Dict]:
     """Extract employee names from schedule sheets"""
     employees = []
     manager_names = ['fran', 'aashima']  # Known managers
+    skip_names = ['events', 'total', 'grand total', 'total pt daily hours', '']
     
-    # Look for schedule sheets (they contain employee data)
+    print(f"Workbook sheets: {wb.sheetnames}")
+    
+    # Check all sheets for employee data
     for sheet_name in wb.sheetnames:
-        if 'schedule' in sheet_name.lower() or sheet_name.lower().startswith('ops'):
-            sheet = wb[sheet_name]
-            print(f"Scanning sheet: {sheet_name}")
-            
-            # Look for employee names in first column (typically rows 4-20)
-            for row in range(4, 25):  # Typical employee rows
-                cell_value = sheet.cell(row=row, column=1).value
-                if cell_value and isinstance(cell_value, str):
-                    name = cell_value.strip()
-                    # Skip header rows and totals
-                    if name and name.lower() not in ['events', 'total', 'grand total', '']:
+        sheet = wb[sheet_name]
+        print(f"Scanning sheet: {sheet_name}, max_row: {sheet.max_row}")
+        
+        # Look for "EVENTS" header to identify schedule sheets
+        events_row = None
+        for row in range(1, min(10, sheet.max_row + 1)):
+            cell_value = sheet.cell(row=row, column=1).value
+            if cell_value and isinstance(cell_value, str) and 'events' in cell_value.lower():
+                events_row = row
+                print(f"Found EVENTS header at row {row}")
+                break
+        
+        # If no EVENTS header, try scanning all rows for names
+        start_row = events_row + 1 if events_row else 1
+        
+        # Look for employee names in first column
+        for row in range(start_row, min(sheet.max_row + 1, 50)):  # Scan up to 50 rows
+            cell_value = sheet.cell(row=row, column=1).value
+            if cell_value and isinstance(cell_value, str):
+                name = cell_value.strip()
+                # Skip empty, header rows and totals
+                if name and name.lower() not in skip_names and len(name) > 1:
+                    # Check if it looks like a person name (not a number or code)
+                    if not name.replace('.', '').replace('-', '').isdigit():
                         # Check if it's a manager
                         is_manager = any(mgr in name.lower() for mgr in manager_names)
                         emp_type = 'manager' if is_manager else 'staff'
                         
-                        employees.append({
-                            'id': f"emp_{len(employees)+1:03d}",
-                            'name': name,
-                            'type': emp_type
-                        })
-                        print(f"Found employee: {name} ({emp_type})")
+                        # Avoid duplicates
+                        if not any(e['name'] == name for e in employees):
+                            employees.append({
+                                'id': f"emp_{len(employees)+1:03d}",
+                                'name': name,
+                                'type': emp_type
+                            })
+                            print(f"Found employee: {name} ({emp_type})")
     
+    print(f"Total employees found: {len(employees)}")
     return employees
 
 @app.post("/api/excel/upload")
