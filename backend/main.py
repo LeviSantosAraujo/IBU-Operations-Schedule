@@ -92,26 +92,37 @@ async def excel_status():
 @app.post("/api/excel/upload")
 async def upload_excel(file: UploadFile = File(...)):
     """Upload an Excel file to use as database"""
+    print(f"Upload request received. Filename: {file.filename}, Content-Type: {file.content_type}")
+    
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="No filename provided")
+    
     if not file.filename.endswith(('.xlsx', '.xls')):
+        print(f"Invalid file extension: {file.filename}")
         raise HTTPException(status_code=400, detail="Only Excel files (.xlsx, .xls) are allowed")
     
     try:
         # Just read the file to validate it's a valid Excel file
         file_content = await file.read()
+        print(f"File read successfully. Size: {len(file_content)} bytes")
         
         # Try to parse it as Excel to validate
         try:
             from openpyxl import load_workbook
             wb = load_workbook(io.BytesIO(file_content))
             wb.close()
+            print("Excel file validated successfully")
         except Exception as e:
+            print(f"Excel validation failed: {e}")
             raise HTTPException(status_code=400, detail=f"Invalid Excel file: {str(e)}")
         
         # Store in memory for now (minimal approach)
         try:
             from storage import store_excel_data
             store_excel_data(file_content, file.filename)
-        except:
+            print("File stored successfully")
+        except Exception as e:
+            print(f"Storage failed (continuing anyway): {e}")
             # If storage fails, just continue - we validated the file
             pass
         
@@ -123,6 +134,9 @@ async def upload_excel(file: UploadFile = File(...)):
     except HTTPException:
         raise
     except Exception as e:
+        print(f"Unexpected upload error: {e}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Failed to upload Excel file: {str(e)}")
 
 @app.post("/api/excel/select")
