@@ -6,6 +6,7 @@ from datetime import date, datetime
 import uuid
 import os
 import shutil
+import io
 from pathlib import Path
 from pydantic import BaseModel
 
