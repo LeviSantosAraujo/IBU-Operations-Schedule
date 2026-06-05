@@ -71,21 +71,37 @@ async def excel_status():
 
 @app.post("/api/excel/upload")
 async def upload_excel(file: UploadFile = File(...)):
-    """Upload an Excel file to use as database (stores in Blob)"""
+    """Upload an Excel file to use as database (stores in Blob or local)"""
     if not file.filename.endswith(('.xlsx', '.xls')):
         raise HTTPException(status_code=400, detail="Only Excel files (.xlsx, .xls) are allowed")
     
     # Read file content
     file_content = await file.read()
     
-    # Upload to blob storage
+    # Try to upload to blob storage first
     if upload_excel_to_blob(file_content):
         return {
             "message": "Excel file uploaded successfully to cloud storage",
             "filename": file.filename
         }
-    else:
-        raise HTTPException(status_code=500, detail="Failed to upload to cloud storage")
+    
+    # Fallback to local storage if blob is not available
+    try:
+        # Save to local uploads directory
+        upload_path = UPLOAD_DIR / file.filename
+        with open(upload_path, "wb") as f:
+            f.write(file_content)
+        
+        # Set as the active Excel file
+        set_excel_file(str(upload_path))
+        
+        return {
+            "message": "Excel file uploaded successfully to local storage",
+            "filename": file.filename,
+            "storage_type": "local"
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to upload Excel file: {str(e)}")
 
 @app.post("/api/excel/select")
 async def select_excel_file(request: ExcelPathRequest):

@@ -16,15 +16,9 @@ from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
 from models import Employee, Availability, WeeklySchedule, Shift, EmployeeType, AvailabilityType, JobType, Floor
 import io
 
-# Try to import Vercel Blob (for cloud deployment)
-try:
-    from vercel_blob import BlobClient
-    BLOB_ENABLED = True
-    print("Vercel Blob storage enabled")
-except ImportError as e:
-    BLOB_ENABLED = False
-    BlobClient = None
-    print(f"Vercel Blob not available: {e}")
+# Import blob storage configuration
+from blob_config import blob_put, blob_get, blob_exists, BLOB_AVAILABLE
+BLOB_ENABLED = BLOB_AVAILABLE
 
 # Global path to the current Excel file (local storage)
 EXCEL_FILE_PATH: Optional[str] = None
@@ -57,8 +51,7 @@ def _read_excel_from_blob() -> Optional[Workbook]:
         return None
     
     try:
-        blob = BlobClient.from_env()
-        blob_data = blob.get(BLOB_KEY)
+        blob_data = blob_get(BLOB_KEY)
         if blob_data:
             return load_workbook(io.BytesIO(blob_data))
     except Exception as e:
@@ -78,16 +71,18 @@ def _write_excel_to_blob(wb: Workbook) -> bool:
         return False
     
     try:
-        blob = BlobClient.from_env()
         # Save workbook to bytes
         buffer = io.BytesIO()
         wb.save(buffer)
         buffer.seek(0)
         
         # Upload to blob
-        blob.put(BLOB_KEY, buffer.read())
-        print(f"Successfully wrote to blob: {BLOB_KEY}")
-        return True
+        if blob_put(BLOB_KEY, buffer.read()):
+            print(f"Successfully wrote to blob: {BLOB_KEY}")
+            return True
+        else:
+            print("Failed to upload to blob")
+            return False
     except Exception as e:
         print(f"Error writing to blob: {e}")
         import traceback
@@ -99,12 +94,7 @@ def _blob_exists() -> bool:
     if not BLOB_ENABLED or not BLOB_KEY:
         return False
     
-    try:
-        blob = BlobClient.from_env()
-        blob.get(BLOB_KEY)
-        return True
-    except:
-        return False
+    return blob_exists(BLOB_KEY)
 
 def upload_excel_to_blob(file_data: bytes) -> bool:
     """Upload Excel file data directly to blob storage"""
@@ -119,10 +109,12 @@ def upload_excel_to_blob(file_data: bytes) -> bool:
         return False
     
     try:
-        blob = BlobClient.from_env()
-        blob.put(BLOB_KEY, file_data)
-        print(f"upload_excel_to_blob: Successfully uploaded {len(file_data)} bytes to blob")
-        return True
+        if blob_put(BLOB_KEY, file_data):
+            print(f"upload_excel_to_blob: Successfully uploaded {len(file_data)} bytes to blob")
+            return True
+        else:
+            print("upload_excel_to_blob: Failed to upload to blob")
+            return False
     except Exception as e:
         print(f"Error uploading to blob: {e}")
         import traceback
@@ -134,16 +126,11 @@ def download_excel_from_blob() -> Optional[bytes]:
     if not BLOB_ENABLED or not BLOB_KEY:
         return None
     
-    try:
-        blob = BlobClient.from_env()
-        return blob.get(BLOB_KEY)
-    except Exception as e:
-        print(f"Error downloading from blob: {e}")
-        return None
+    return blob_get(BLOB_KEY)
 
 def excel_file_exists() -> bool:
     """Check if Excel file exists (blob or local)"""
-    if BLOB_ENABLED:
+    if BLOB_ENABLED and os.getenv("BLOB_READ_WRITE_TOKEN"):
         return _blob_exists()
     if EXCEL_FILE_PATH:
         return os.path.exists(EXCEL_FILE_PATH)
@@ -151,8 +138,8 @@ def excel_file_exists() -> bool:
 
 def _get_workbook() -> Optional[Workbook]:
     """Get workbook from either blob or local storage"""
-    # Try blob first
-    if BLOB_ENABLED:
+    # Try blob first if token is available
+    if BLOB_ENABLED and os.getenv("BLOB_READ_WRITE_TOKEN"):
         wb = _read_excel_from_blob()
         if wb:
             return wb
@@ -167,8 +154,8 @@ def _save_workbook(wb: Workbook) -> bool:
     """Save workbook to either blob or local storage"""
     saved = False
     
-    # Save to blob if enabled
-    if BLOB_ENABLED:
+    # Save to blob if enabled and token is available
+    if BLOB_ENABLED and os.getenv("BLOB_READ_WRITE_TOKEN"):
         saved = _write_excel_to_blob(wb)
     
     # Also save to local if path is set
