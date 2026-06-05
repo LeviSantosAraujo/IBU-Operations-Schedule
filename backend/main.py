@@ -22,7 +22,7 @@ from excel_store import (
     set_excel_file, get_excel_file, ensure_excel_structure,
     set_manager_password, verify_manager_password, manager_has_password,
     initialize_from_excel, get_all_week_schedule_dates,
-    initialize_sample_employees
+    initialize_sample_employees, set_blob_key
 )
 from scheduler import SchedulingEngine, generate_schedule
 from auth import AuthManager, require_auth, require_manager, require_self_or_manager
@@ -573,4 +573,7 @@ async def health_check():
 
 if __name__ == "__main__":
     import uvicorn
+    # Initialize blob storage for cloud deployment
+    if os.getenv("BLOB_READ_WRITE_TOKEN"):
+        set_blob_key("ibu_schedule.xlsx")
     uvicorn.run(app, host="0.0.0.0", port=8000)

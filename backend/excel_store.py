@@ -3,6 +3,7 @@ Excel-based data storage system for IBU Schedule
 - Uses Excel as the primary database
 - Creates tabs: Config, PWDs, Employees, Availability, and weekly schedule tabs
 - Real-time read/write to Excel
+- Supports both local file system and Vercel Blob storage
 """
 
 import os
@@ -13,20 +14,114 @@ from pathlib import Path
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
 from models import Employee, Availability, WeeklySchedule, Shift, EmployeeType, AvailabilityType, JobType, Floor
+import io
 
-# Global path to the current Excel file
+# Try to import Vercel Blob (for cloud deployment)
+try:
+    from vercel_blob import BlobClient
+    BLOB_ENABLED = True
+except ImportError:
+    BLOB_ENABLED = False
+    BlobClient = None
+
+# Global path to the current Excel file (local storage)
 EXCEL_FILE_PATH: Optional[str] = None
+# Blob storage key (for cloud storage)
+BLOB_KEY: Optional[str] = "ibu_schedule.xlsx"
 
 def set_excel_file(path: str):
-    """Set the active Excel file path"""
+    """Set the active Excel file path (local storage)"""
     global EXCEL_FILE_PATH
     EXCEL_FILE_PATH = path
     # Ensure file exists with proper structure
     ensure_excel_structure(path)
 
 def get_excel_file() -> Optional[str]:
-    """Get the current Excel file path"""
+    """Get the current Excel file path (local storage)"""
     return EXCEL_FILE_PATH
+
+def set_blob_key(key: str):
+    """Set the blob storage key (cloud storage)"""
+    global BLOB_KEY
+    BLOB_KEY = key
+
+def get_blob_key() -> Optional[str]:
+    """Get the current blob storage key"""
+    return BLOB_KEY
+
+def _read_excel_from_blob() -> Optional[Workbook]:
+    """Read Excel file from Vercel Blob storage"""
+    if not BLOB_ENABLED or not BLOB_KEY:
+        return None
+    
+    try:
+        blob = BlobClient.from_env()
+        blob_data = blob.get(BLOB_KEY)
+        if blob_data:
+            return load_workbook(io.BytesIO(blob_data))
+    except Exception as e:
+        print(f"Error reading from blob: {e}")
+    return None
+
+def _write_excel_to_blob(wb: Workbook) -> bool:
+    """Write Excel file to Vercel Blob storage"""
+    if not BLOB_ENABLED or not BLOB_KEY:
+        return False
+    
+    try:
+        blob = BlobClient.from_env()
+        # Save workbook to bytes
+        buffer = io.BytesIO()
+        wb.save(buffer)
+        buffer.seek(0)
+        
+        # Upload to blob
+        blob.put(BLOB_KEY, buffer.read())
+        return True
+    except Exception as e:
+        print(f"Error writing to blob: {e}")
+        return False
+
+def _blob_exists() -> bool:
+    """Check if Excel file exists in blob storage"""
+    if not BLOB_ENABLED or not BLOB_KEY:
+        return False
+    
+    try:
+        blob = BlobClient.from_env()
+        blob.get(BLOB_KEY)
+        return True
+    except:
+        return False
+
+def _get_workbook() -> Optional[Workbook]:
+    """Get workbook from either blob or local storage"""
+    # Try blob first
+    if BLOB_ENABLED:
+        wb = _read_excel_from_blob()
+        if wb:
+            return wb
+    
+    # Fall back to local file
+    if EXCEL_FILE_PATH and os.path.exists(EXCEL_FILE_PATH):
+        return load_workbook(EXCEL_FILE_PATH)
+    
+    return None
+
+def _save_workbook(wb: Workbook) -> bool:
+    """Save workbook to either blob or local storage"""
+    saved = False
+    
+    # Save to blob if enabled
+    if BLOB_ENABLED:
+        saved = _write_excel_to_blob(wb)
+    
+    # Also save to local if path is set
+    if EXCEL_FILE_PATH:
+        wb.save(EXCEL_FILE_PATH)
+        saved = True
+    
+    return saved
 
 def ensure_excel_structure(filepath: str):
     """Create Excel file with all required tabs if it doesn't exist"""
@@ -149,10 +244,10 @@ def hash_password(password: str) -> str:
 
 def set_manager_password(employee_id: str, employee_name: str, password: str):
     """Set password for a manager in the PWDs tab"""
-    if not EXCEL_FILE_PATH:
-        raise ValueError("No Excel file set")
+    wb = _get_workbook()
+    if not wb:
+        raise ValueError("No Excel file available")
     
-    wb = load_workbook(EXCEL_FILE_PATH)
     sheet = wb['PWDs']
     
     # Check if employee already has password
@@ -161,7 +256,7 @@ def set_manager_password(employee_id: str, employee_name: str, password: str):
             # Update existing
             sheet.cell(row=row, column=3, value=hash_password(password))
             sheet.cell(row=row, column=5, value=datetime.now().isoformat())
-            wb.save(EXCEL_FILE_PATH)
+            _save_workbook(wb)
             wb.close()
             return
     
@@ -173,16 +268,16 @@ def set_manager_password(employee_id: str, employee_name: str, password: str):
     sheet.cell(row=new_row, column=4, value='manager')
     sheet.cell(row=new_row, column=5, value=datetime.now().isoformat())
     
-    wb.save(EXCEL_FILE_PATH)
+    _save_workbook(wb)
     wb.close()
 
 def verify_manager_password(employee_id: str, password: str) -> bool:
     """Verify manager password"""
-    if not EXCEL_FILE_PATH:
+    wb = _get_workbook()
+    if not wb:
         return False
     
     try:
-        wb = load_workbook(EXCEL_FILE_PATH)
         sheet = wb['PWDs']
         
         for row in range(2, sheet.max_row + 1):
@@ -199,11 +294,11 @@ def verify_manager_password(employee_id: str, password: str) -> bool:
 
 def manager_has_password(employee_id: str) -> bool:
     """Check if manager has set a password"""
-    if not EXCEL_FILE_PATH:
+    wb = _get_workbook()
+    if not wb:
         return False
     
     try:
-        wb = load_workbook(EXCEL_FILE_PATH)
         sheet = wb['PWDs']
         
         for row in range(2, sheet.max_row + 1):
@@ -221,11 +316,11 @@ def manager_has_password(employee_id: str) -> bool:
 
 def get_all_employees() -> List[Employee]:
     """Get all employees from Excel"""
-    if not EXCEL_FILE_PATH or not os.path.exists(EXCEL_FILE_PATH):
+    wb = _get_workbook()
+    if not wb:
         return []
     
     try:
-        wb = load_workbook(EXCEL_FILE_PATH, data_only=True)
         if 'Employees' not in wb.sheetnames:
             wb.close()
             return []
@@ -272,10 +367,10 @@ def get_employee_by_id(employee_id: str) -> Optional[Employee]:
 
 def save_employee(employee: Employee) -> Employee:
     """Save or update employee in Excel"""
-    if not EXCEL_FILE_PATH:
-        raise ValueError("No Excel file set")
+    wb = _get_workbook()
+    if not wb:
+        raise ValueError("No Excel file available")
     
-    wb = load_workbook(EXCEL_FILE_PATH)
     sheet = wb['Employees']
     
     # Check if employee exists
@@ -298,22 +393,22 @@ def save_employee(employee: Employee) -> Employee:
     sheet.cell(row=found_row, column=7, value=employee.active)
     sheet.cell(row=found_row, column=8, value=employee.created_at.isoformat() if isinstance(employee.created_at, datetime) else str(employee.created_at))
     
-    wb.save(EXCEL_FILE_PATH)
+    _save_workbook(wb)
     wb.close()
     return employee
 
 def delete_employee(employee_id: str) -> bool:
     """Delete employee from Excel"""
-    if not EXCEL_FILE_PATH:
+    wb = _get_workbook()
+    if not wb:
         return False
     
-    wb = load_workbook(EXCEL_FILE_PATH)
     sheet = wb['Employees']
     
     for row in range(2, sheet.max_row + 1):
         if str(sheet.cell(row=row, column=1).value) == employee_id:
             sheet.delete_rows(row)
-            wb.save(EXCEL_FILE_PATH)
+            _save_workbook(wb)
             wb.close()
             return True
     
@@ -324,11 +419,11 @@ def delete_employee(employee_id: str) -> bool:
 
 def get_availabilities(week_start_date: Optional[date] = None, employee_id: Optional[str] = None) -> List[Availability]:
     """Get availabilities from Excel"""
-    if not EXCEL_FILE_PATH or not os.path.exists(EXCEL_FILE_PATH):
+    wb = _get_workbook()
+    if not wb:
         return []
     
     try:
-        wb = load_workbook(EXCEL_FILE_PATH, data_only=True)
         if 'Availability' not in wb.sheetnames:
             wb.close()
             return []
@@ -389,10 +484,10 @@ def get_availability_for_week(employee_id: str, week_start_date: date) -> Option
 
 def save_availability(availability: Availability) -> Availability:
     """Save availability to Excel"""
-    if not EXCEL_FILE_PATH:
+    wb = _get_workbook()
+    if not wb:
         raise ValueError("Excel database not configured. Please ask your manager to set up the Excel file.")
     
-    wb = load_workbook(EXCEL_FILE_PATH)
     sheet = wb['Availability']
     
     # Check if availability exists
@@ -432,7 +527,7 @@ def save_availability(availability: Availability) -> Availability:
     sheet.cell(row=found_row, column=15, value=availability.approved_by)
     sheet.cell(row=found_row, column=16, value=availability.approved_at.isoformat() if availability.approved_at else None)
     
-    wb.save(EXCEL_FILE_PATH)
+    _save_workbook(wb)
     wb.close()
     return availability
 
@@ -523,10 +618,10 @@ def get_schedule_by_week(week_start_date: date) -> Optional[WeeklySchedule]:
 
 def save_schedule(schedule: WeeklySchedule) -> WeeklySchedule:
     """Save schedule to Excel in its own tab"""
-    if not EXCEL_FILE_PATH:
-        raise ValueError("No Excel file set")
+    wb = _get_workbook()
+    if not wb:
+        raise ValueError("No Excel file available")
     
-    wb = load_workbook(EXCEL_FILE_PATH)
     sheet = ensure_schedule_sheet(wb, schedule.week_start_date)
     
     # Clear existing data (keep header)
@@ -551,17 +646,17 @@ def save_schedule(schedule: WeeklySchedule) -> WeeklySchedule:
         sheet.cell(row=row, column=10, value=shift.is_event)
         sheet.cell(row=row, column=11, value=shift.event_name)
     
-    wb.save(EXCEL_FILE_PATH)
+    _save_workbook(wb)
     wb.close()
     return schedule
 
 def get_all_schedules() -> List[WeeklySchedule]:
     """Get all schedules from week tabs"""
-    if not EXCEL_FILE_PATH or not os.path.exists(EXCEL_FILE_PATH):
+    wb = _get_workbook()
+    if not wb:
         return []
     
     try:
-        wb = load_workbook(EXCEL_FILE_PATH, data_only=True)
         schedules = []
         
         for sheet_name in wb.sheetnames:
@@ -624,15 +719,15 @@ def get_all_schedules() -> List[WeeklySchedule]:
 
 def delete_schedule(week_start_date: date) -> bool:
     """Delete a schedule by removing its tab"""
-    if not EXCEL_FILE_PATH:
+    wb = _get_workbook()
+    if not wb:
         return False
     
-    wb = load_workbook(EXCEL_FILE_PATH)
     sheet_name = get_schedule_sheet_name(week_start_date)
     
     if sheet_name in wb.sheetnames:
         wb.remove(wb[sheet_name])
-        wb.save(EXCEL_FILE_PATH)
+        _save_workbook(wb)
         wb.close()
         return True
     
@@ -680,11 +775,11 @@ def get_floor_coverage(floor: str, day_of_week: str, time_slot: str, week_start_
 
 def get_system_config() -> Dict[str, Any]:
     """Get system config from Excel"""
-    if not EXCEL_FILE_PATH or not os.path.exists(EXCEL_FILE_PATH):
+    wb = _get_workbook()
+    if not wb:
         return {}
     
     try:
-        wb = load_workbook(EXCEL_FILE_PATH, data_only=True)
         if 'Config' not in wb.sheetnames:
             wb.close()
             return {}
@@ -706,10 +801,9 @@ def get_system_config() -> Dict[str, Any]:
 
 def save_system_config(config: Dict[str, Any]):
     """Save system config to Excel"""
-    if not EXCEL_FILE_PATH:
-        raise ValueError("No Excel file set")
-    
-    wb = load_workbook(EXCEL_FILE_PATH)
+    wb = _get_workbook()
+    if not wb:
+        raise ValueError("No Excel file available")
     
     if 'Config' not in wb.sheetnames:
         wb.create_sheet('Config', 0)
@@ -727,14 +821,15 @@ def save_system_config(config: Dict[str, Any]):
         sheet.cell(row=row, column=1, value=key)
         sheet.cell(row=row, column=2, value=str(value))
     
-    wb.save(EXCEL_FILE_PATH)
+    _save_workbook(wb)
     wb.close()
 
 # ============ Sample Data Initialization ============
 
 def initialize_sample_employees():
     """Initialize the employee list when creating a new Excel file"""
-    if not EXCEL_FILE_PATH or not os.path.exists(EXCEL_FILE_PATH):
+    wb = _get_workbook()
+    if not wb:
         return
     
     # Check if employees already exist
