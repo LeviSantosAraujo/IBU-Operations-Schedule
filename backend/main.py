@@ -90,6 +90,37 @@ async def excel_status():
             "file_exists": False
         }
 
+def extract_employees_from_schedule(wb) -> List[Dict]:
+    """Extract employee names from schedule sheets"""
+    employees = []
+    manager_names = ['fran', 'aashima']  # Known managers
+    
+    # Look for schedule sheets (they contain employee data)
+    for sheet_name in wb.sheetnames:
+        if 'schedule' in sheet_name.lower() or sheet_name.lower().startswith('ops'):
+            sheet = wb[sheet_name]
+            print(f"Scanning sheet: {sheet_name}")
+            
+            # Look for employee names in first column (typically rows 4-20)
+            for row in range(4, 25):  # Typical employee rows
+                cell_value = sheet.cell(row=row, column=1).value
+                if cell_value and isinstance(cell_value, str):
+                    name = cell_value.strip()
+                    # Skip header rows and totals
+                    if name and name.lower() not in ['events', 'total', 'grand total', '']:
+                        # Check if it's a manager
+                        is_manager = any(mgr in name.lower() for mgr in manager_names)
+                        emp_type = 'manager' if is_manager else 'staff'
+                        
+                        employees.append({
+                            'id': f"emp_{len(employees)+1:03d}",
+                            'name': name,
+                            'type': emp_type
+                        })
+                        print(f"Found employee: {name} ({emp_type})")
+    
+    return employees
+
 @app.post("/api/excel/upload")
 async def upload_excel(file: UploadFile = File(...)):
     """Upload an Excel file to use as database"""
@@ -103,33 +134,59 @@ async def upload_excel(file: UploadFile = File(...)):
         raise HTTPException(status_code=400, detail="Only Excel files (.xlsx, .xls) are allowed")
     
     try:
-        # Just read the file to validate it's a valid Excel file
+        # Read the file
         file_content = await file.read()
         print(f"File read successfully. Size: {len(file_content)} bytes")
         
-        # Try to parse it as Excel to validate
-        try:
-            from openpyxl import load_workbook
-            wb = load_workbook(io.BytesIO(file_content))
-            wb.close()
-            print("Excel file validated successfully")
-        except Exception as e:
-            print(f"Excel validation failed: {e}")
-            raise HTTPException(status_code=400, detail=f"Invalid Excel file: {str(e)}")
+        # Parse as Excel
+        from openpyxl import load_workbook
+        wb = load_workbook(io.BytesIO(file_content))
+        print("Excel file loaded successfully")
         
-        # Store in memory for now (minimal approach)
+        # Extract employees from schedule
+        employees = extract_employees_from_schedule(wb)
+        print(f"Extracted {len(employees)} employees from schedule")
+        
+        # Create or update Employees sheet
+        if 'Employees' not in wb.sheetnames:
+            wb.create_sheet('Employees')
+        
+        emp_sheet = wb['Employees']
+        emp_sheet.delete_rows(1, emp_sheet.max_row)  # Clear existing
+        
+        # Add headers
+        headers = ['ID', 'Name', 'Type', 'Active', 'Max_Hours']
+        for col, header in enumerate(headers, 1):
+            emp_sheet.cell(row=1, column=col, value=header)
+        
+        # Add employee data
+        for idx, emp in enumerate(employees, 2):
+            emp_sheet.cell(row=idx, column=1, value=emp['id'])
+            emp_sheet.cell(row=idx, column=2, value=emp['name'])
+            emp_sheet.cell(row=idx, column=3, value=emp['type'])
+            emp_sheet.cell(row=idx, column=4, value='Yes')
+            emp_sheet.cell(row=idx, column=5, value=40 if emp['type'] == 'manager' else 20)
+        
+        # Save updated workbook
+        buffer = io.BytesIO()
+        wb.save(buffer)
+        buffer.seek(0)
+        updated_content = buffer.read()
+        
+        # Store in storage
         try:
             from storage import store_excel_data
-            store_excel_data(file_content, file.filename)
-            print("File stored successfully")
+            store_excel_data(updated_content, file.filename)
+            print("File stored successfully with employees")
         except Exception as e:
-            print(f"Storage failed (continuing anyway): {e}")
-            # If storage fails, just continue - we validated the file
-            pass
+            print(f"Storage failed: {e}")
+        
+        wb.close()
         
         return {
-            "message": "Excel file uploaded successfully",
-            "filename": file.filename
+            "message": f"Excel file uploaded successfully with {len(employees)} employees",
+            "filename": file.filename,
+            "employees_added": len(employees)
         }
             
     except HTTPException:
