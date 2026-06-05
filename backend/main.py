@@ -186,8 +186,8 @@ async def upload_excel(file: UploadFile = File(...)):
         emp_sheet = wb['Employees']
         emp_sheet.delete_rows(1, emp_sheet.max_row)  # Clear existing
         
-        # Add headers
-        headers = ['ID', 'Name', 'Type', 'Active', 'Max_Hours']
+        # Add headers matching the expected structure in excel_store.py
+        headers = ['ID', 'Name', 'Email', 'Type', 'Max_Hours', 'Preferences', 'Active', 'Created_At']
         for col, header in enumerate(headers, 1):
             emp_sheet.cell(row=1, column=col, value=header)
         
@@ -195,9 +195,12 @@ async def upload_excel(file: UploadFile = File(...)):
         for idx, emp in enumerate(employees, 2):
             emp_sheet.cell(row=idx, column=1, value=emp['id'])
             emp_sheet.cell(row=idx, column=2, value=emp['name'])
-            emp_sheet.cell(row=idx, column=3, value=emp['type'])
-            emp_sheet.cell(row=idx, column=4, value='Yes')
+            emp_sheet.cell(row=idx, column=3, value='')  # Email
+            emp_sheet.cell(row=idx, column=4, value='manager' if emp['type'] == 'manager' else 'student_worker')
             emp_sheet.cell(row=idx, column=5, value=40 if emp['type'] == 'manager' else 20)
+            emp_sheet.cell(row=idx, column=6, value='{}')  # Preferences JSON
+            emp_sheet.cell(row=idx, column=7, value='Yes')
+            emp_sheet.cell(row=idx, column=8, value=datetime.now().isoformat())
         
         # Save updated workbook
         buffer = io.BytesIO()
