@@ -20,9 +20,11 @@ import io
 try:
     from vercel_blob import BlobClient
     BLOB_ENABLED = True
-except ImportError:
+    print("Vercel Blob storage enabled")
+except ImportError as e:
     BLOB_ENABLED = False
     BlobClient = None
+    print(f"Vercel Blob not available: {e}")
 
 # Global path to the current Excel file (local storage)
 EXCEL_FILE_PATH: Optional[str] = None
@@ -65,7 +67,14 @@ def _read_excel_from_blob() -> Optional[Workbook]:
 
 def _write_excel_to_blob(wb: Workbook) -> bool:
     """Write Excel file to Vercel Blob storage"""
-    if not BLOB_ENABLED or not BLOB_KEY:
+    if not BLOB_ENABLED:
+        print("Blob storage not enabled")
+        return False
+    if not BLOB_KEY:
+        print("No BLOB_KEY set")
+        return False
+    if not os.getenv("BLOB_READ_WRITE_TOKEN"):
+        print("BLOB_READ_WRITE_TOKEN not set")
         return False
     
     try:
@@ -77,9 +86,12 @@ def _write_excel_to_blob(wb: Workbook) -> bool:
         
         # Upload to blob
         blob.put(BLOB_KEY, buffer.read())
+        print(f"Successfully wrote to blob: {BLOB_KEY}")
         return True
     except Exception as e:
         print(f"Error writing to blob: {e}")
+        import traceback
+        traceback.print_exc()
         return False
 
 def _blob_exists() -> bool:
@@ -96,15 +108,25 @@ def _blob_exists() -> bool:
 
 def upload_excel_to_blob(file_data: bytes) -> bool:
     """Upload Excel file data directly to blob storage"""
-    if not BLOB_ENABLED or not BLOB_KEY:
+    if not BLOB_ENABLED:
+        print("upload_excel_to_blob: Blob storage not enabled")
+        return False
+    if not BLOB_KEY:
+        print("upload_excel_to_blob: No BLOB_KEY set")
+        return False
+    if not os.getenv("BLOB_READ_WRITE_TOKEN"):
+        print("upload_excel_to_blob: BLOB_READ_WRITE_TOKEN not set")
         return False
     
     try:
         blob = BlobClient.from_env()
         blob.put(BLOB_KEY, file_data)
+        print(f"upload_excel_to_blob: Successfully uploaded {len(file_data)} bytes to blob")
         return True
     except Exception as e:
         print(f"Error uploading to blob: {e}")
+        import traceback
+        traceback.print_exc()
         return False
 
 def download_excel_from_blob() -> Optional[bytes]:
