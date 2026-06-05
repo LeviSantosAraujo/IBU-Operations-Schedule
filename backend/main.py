@@ -56,6 +56,17 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ============ Health Check ============
+
+@app.get("/api/health")
+async def health_check():
+    """Simple health check to verify API is working"""
+    return {
+        "status": "healthy",
+        "timestamp": datetime.now().isoformat(),
+        "message": "API is working"
+    }
+
 # ============ Excel File Management ============
 
 @app.get("/api/excel/status")
