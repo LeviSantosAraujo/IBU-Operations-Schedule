@@ -17,7 +17,7 @@ export default function FloorCoverage() {
   const [summary, setSummary] = useState<any>(null)
   const [expanded, setExpanded] = useState<string | null>(null)
   const [detailData, setDetailData] = useState<any>(null)
-  const [loading, setLoading] = useState(false)
+  const [_loading, setLoading] = useState(false)
 
   useEffect(() => {
     loadSummary()
@@ -75,8 +75,8 @@ export default function FloorCoverage() {
           <label className="font-medium">Week Starting:</label>
           <DatePicker
             selected={weekStart}
-            onChange={(date) => date && setWeekStart(startOfWeek(date, { weekStartsOn: 1 }))}
-            filterDate={(date) => date.getDay() === 1}
+            onChange={(date: Date | null) => date && setWeekStart(startOfWeek(date, { weekStartsOn: 1 }))}
+            filterDate={(date: Date) => date.getDay() === 1}
             className="border rounded px-3 py-2"
             dateFormat="yyyy-MM-dd"
           />

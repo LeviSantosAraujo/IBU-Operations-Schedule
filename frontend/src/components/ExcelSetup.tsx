@@ -6,7 +6,7 @@ interface ExcelSetupProps {
 }
 
 export default function ExcelSetup({ onSetupComplete }: ExcelSetupProps) {
-  const [status, setStatus] = useState<{ configured: boolean; file_path?: string; file_exists?: boolean } | null>(null)
+  const [_status, setStatus] = useState<{ configured: boolean; file_path?: string; file_exists?: boolean } | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [selectedFile, setSelectedFile] = useState<File | null>(null)

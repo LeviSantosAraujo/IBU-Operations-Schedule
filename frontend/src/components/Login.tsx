@@ -1,5 +1,4 @@
 import { useState, useEffect } from 'react'
-import { auth } from '../auth'
 import { getEmployees } from '../api'
 import { LogIn, User, Shield, Lock, Key } from 'lucide-react'
 

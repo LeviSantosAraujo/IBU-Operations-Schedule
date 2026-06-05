@@ -3,9 +3,8 @@ import DatePicker from 'react-datepicker'
 import 'react-datepicker/dist/react-datepicker.css'
 import { format, startOfWeek, addDays, parseISO } from 'date-fns'
 import { 
-  getSchedules, getSchedule, generateSchedule, saveSchedule, 
-  getEmployees, getEmployeeAvailability, updateScheduleShifts, publishSchedule,
-  deleteSchedule, getEmployeeHoursSummary
+  getSchedule, generateSchedule, saveSchedule, 
+  getEmployees, publishSchedule, getEmployeeHoursSummary
 } from '../api'
 import { 
   Plus, Trash2, Save, Play, Calendar, ChevronLeft, ChevronRight, 
@@ -13,7 +12,7 @@ import {
 } from 'lucide-react'
 
 const days = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']
-const floors = ['ground', 'second', 'sixth']
+const _floors = ['ground', 'second', 'sixth']
 const floorColors: any = {
   'ground': 'floor-ground',
   'second': 'floor-second',
@@ -37,7 +36,7 @@ export default function ScheduleManager() {
   const [weekStart, setWeekStart] = useState<Date>(startOfWeek(addDays(new Date(), 7), { weekStartsOn: 1 }))
   const [schedule, setSchedule] = useState<any>(null)
   const [employees, setEmployees] = useState<any[]>([])
-  const [loading, setLoading] = useState(false)
+  const [_loading, setLoading] = useState(false)
   const [generating, setGenerating] = useState(false)
   const [selectedEmployee, setSelectedEmployee] = useState('')
   const [showAddShift, setShowAddShift] = useState(false)
@@ -184,7 +183,7 @@ export default function ScheduleManager() {
   }
 
   const weekDates = getWeekDates()
-  const formattedWeekStart = format(weekStart, 'yyyy-MM-dd')
+  const _formattedWeekStart = format(weekStart, 'yyyy-MM-dd')
 
   return (
     <div>
@@ -204,8 +203,8 @@ export default function ScheduleManager() {
             <Calendar className="w-4 h-4" />
             <DatePicker
               selected={weekStart}
-              onChange={(date) => date && setWeekStart(startOfWeek(date, { weekStartsOn: 1 }))}
-              filterDate={(date) => date.getDay() === 1}
+              onChange={(date: Date | null) => date && setWeekStart(startOfWeek(date, { weekStartsOn: 1 }))}
+              filterDate={(date: Date) => date.getDay() === 1}
               className="border rounded px-3 py-1"
               dateFormat="yyyy-MM-dd"
             />
@@ -400,7 +399,7 @@ export default function ScheduleManager() {
                       const shifts = getShiftsForCell(emp.id, day)
                       return (
                         <td key={`${emp.id}-${day}`} className="p-1 schedule-cell align-top">
-                          {shifts.map(shift => (
+                          {shifts.map((shift: Shift) => (
                             <div 
                               key={shift.id} 
                               className={`shift-card ${floorColors[shift.floor || 'ground']} relative group`}

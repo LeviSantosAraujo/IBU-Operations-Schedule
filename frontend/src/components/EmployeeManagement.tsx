@@ -10,7 +10,7 @@ const employeeTypes = [
 
 export default function EmployeeManagement() {
   const [employees, setEmployees] = useState<any[]>([])
-  const [loading, setLoading] = useState(false)
+  const [_loading, setLoading] = useState(false)
   const [editing, setEditing] = useState<string | null>(null)
   const [showAdd, setShowAdd] = useState(false)
   const [formData, setFormData] = useState({
