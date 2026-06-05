@@ -61,13 +61,22 @@ app.add_middleware(
 @app.get("/api/excel/status")
 async def excel_status():
     """Check if Excel file is configured"""
-    file_path = get_excel_file()
-    exists = excel_file_exists()
-    return {
-        "configured": exists or file_path is not None,
-        "file_path": file_path or ("blob_storage" if exists else None),
-        "file_exists": exists
-    }
+    try:
+        file_path = get_excel_file()
+        exists = excel_file_exists()
+        return {
+            "configured": exists or file_path is not None,
+            "file_path": file_path or ("blob_storage" if exists else None),
+            "file_exists": exists
+        }
+    except Exception as e:
+        # Return safe default if there's any error
+        print(f"Error checking Excel status: {e}")
+        return {
+            "configured": False,
+            "file_path": None,
+            "file_exists": False
+        }
 
 @app.post("/api/excel/upload")
 async def upload_excel(file: UploadFile = File(...)):

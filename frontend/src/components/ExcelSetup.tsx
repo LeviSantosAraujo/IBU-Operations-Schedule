@@ -25,7 +25,9 @@ export default function ExcelSetup({ onSetupComplete }: ExcelSetupProps) {
         onSetupComplete()
       }
     } catch (err) {
-      setError('Failed to check Excel status')
+      // Don't show error on initial status check - it's expected when not configured
+      console.error('Status check failed:', err)
+      setStatus({ configured: false, file_path: undefined, file_exists: false })
     }
   }
 
