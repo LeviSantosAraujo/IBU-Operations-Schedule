@@ -16,9 +16,8 @@ from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
 from models import Employee, Availability, WeeklySchedule, Shift, EmployeeType, AvailabilityType, JobType, Floor
 import io
 
-# Import blob storage configuration
-from blob_config import blob_put, blob_get, blob_exists, BLOB_AVAILABLE
-BLOB_ENABLED = BLOB_AVAILABLE
+# Import storage module
+from storage import get_workbook, save_workbook, excel_file_exists as storage_file_exists
 
 # Global path to the current Excel file (local storage)
 EXCEL_FILE_PATH: Optional[str] = None
@@ -45,139 +44,34 @@ def get_blob_key() -> Optional[str]:
     """Get the current blob storage key"""
     return BLOB_KEY
 
-def _read_excel_from_blob() -> Optional[Workbook]:
-    """Read Excel file from Vercel Blob storage"""
-    if not BLOB_ENABLED or not BLOB_KEY:
-        return None
-    
-    try:
-        blob_data = blob_get(BLOB_KEY)
-        if blob_data:
-            return load_workbook(io.BytesIO(blob_data))
-    except Exception as e:
-        print(f"Error reading from blob: {e}")
-    return None
-
-def _write_excel_to_blob(wb: Workbook) -> bool:
-    """Write Excel file to Vercel Blob storage"""
-    if not BLOB_ENABLED:
-        print("Blob storage not enabled")
-        return False
-    if not BLOB_KEY:
-        print("No BLOB_KEY set")
-        return False
-    if not os.getenv("BLOB_READ_WRITE_TOKEN"):
-        print("BLOB_READ_WRITE_TOKEN not set")
-        return False
-    
-    try:
-        # Save workbook to bytes
-        buffer = io.BytesIO()
-        wb.save(buffer)
-        buffer.seek(0)
-        
-        # Upload to blob
-        if blob_put(BLOB_KEY, buffer.read()):
-            print(f"Successfully wrote to blob: {BLOB_KEY}")
-            return True
-        else:
-            print("Failed to upload to blob")
-            return False
-    except Exception as e:
-        print(f"Error writing to blob: {e}")
-        import traceback
-        traceback.print_exc()
-        return False
-
-def _blob_exists() -> bool:
-    """Check if Excel file exists in blob storage"""
-    if not BLOB_ENABLED or not BLOB_KEY:
-        return False
-    
-    return blob_exists(BLOB_KEY)
-
-def upload_excel_to_blob(file_data: bytes) -> bool:
-    """Upload Excel file data directly to blob storage"""
-    if not BLOB_ENABLED:
-        print("upload_excel_to_blob: Blob storage not enabled")
-        return False
-    if not BLOB_KEY:
-        print("upload_excel_to_blob: No BLOB_KEY set")
-        return False
-    if not os.getenv("BLOB_READ_WRITE_TOKEN"):
-        print("upload_excel_to_blob: BLOB_READ_WRITE_TOKEN not set")
-        return False
-    
-    try:
-        if blob_put(BLOB_KEY, file_data):
-            print(f"upload_excel_to_blob: Successfully uploaded {len(file_data)} bytes to blob")
-            return True
-        else:
-            print("upload_excel_to_blob: Failed to upload to blob")
-            return False
-    except Exception as e:
-        print(f"Error uploading to blob: {e}")
-        import traceback
-        traceback.print_exc()
-        return False
-
-def download_excel_from_blob() -> Optional[bytes]:
-    """Download Excel file from blob storage as bytes"""
-    if not BLOB_ENABLED or not BLOB_KEY:
-        return None
-    
-    return blob_get(BLOB_KEY)
 
 def excel_file_exists() -> bool:
-    """Check if Excel file exists (blob, local, or memory)"""
-    if BLOB_ENABLED and os.getenv("BLOB_READ_WRITE_TOKEN"):
-        return _blob_exists()
-    if EXCEL_FILE_PATH:
-        return os.path.exists(EXCEL_FILE_PATH)
-    # Check in-memory storage
-    try:
-        from main import EXCEL_DATA_STORE
-        return "current" in EXCEL_DATA_STORE
-    except:
-        pass
-    return False
+    """Check if Excel file exists in any storage"""
+    # Check local file first
+    if EXCEL_FILE_PATH and os.path.exists(EXCEL_FILE_PATH):
+        return True
+    
+    # Check storage module (blob, local, memory)
+    return storage_file_exists()
 
 def _get_workbook() -> Optional[Workbook]:
-    """Get workbook from blob, local, or memory storage"""
-    # Try blob first if token is available
-    if BLOB_ENABLED and os.getenv("BLOB_READ_WRITE_TOKEN"):
-        wb = _read_excel_from_blob()
-        if wb:
-            return wb
-    
-    # Fall back to local file
+    """Get workbook from any available storage"""
+    # Try local file first
     if EXCEL_FILE_PATH and os.path.exists(EXCEL_FILE_PATH):
         return load_workbook(EXCEL_FILE_PATH)
     
-    # Try in-memory storage
-    try:
-        from main import EXCEL_DATA_STORE
-        if "current" in EXCEL_DATA_STORE:
-            return load_workbook(io.BytesIO(EXCEL_DATA_STORE["current"]))
-    except:
-        pass
-    
-    return None
+    # Try storage module (blob, local, memory)
+    return get_workbook()
 
 def _save_workbook(wb: Workbook) -> bool:
-    """Save workbook to either blob or local storage"""
-    saved = False
-    
-    # Save to blob if enabled and token is available
-    if BLOB_ENABLED and os.getenv("BLOB_READ_WRITE_TOKEN"):
-        saved = _write_excel_to_blob(wb)
-    
-    # Also save to local if path is set
+    """Save workbook to storage"""
+    # Save to local if path is set
     if EXCEL_FILE_PATH:
         wb.save(EXCEL_FILE_PATH)
-        saved = True
+        return True
     
-    return saved
+    # Use storage module
+    return save_workbook(wb)
 
 def ensure_excel_structure(filepath: str):
     """Create Excel file with all required tabs if it doesn't exist"""

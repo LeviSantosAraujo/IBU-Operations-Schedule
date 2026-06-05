@@ -22,9 +22,9 @@ from excel_store import (
     set_excel_file, get_excel_file, ensure_excel_structure,
     set_manager_password, verify_manager_password, manager_has_password,
     initialize_from_excel, get_all_week_schedule_dates,
-    initialize_sample_employees, set_blob_key, upload_excel_to_blob,
-    download_excel_from_blob, excel_file_exists
+    initialize_sample_employees, set_blob_key
 )
+from storage import store_excel_data, excel_file_exists
 from scheduler import SchedulingEngine, generate_schedule
 from auth import AuthManager, require_auth, require_manager, require_self_or_manager
 
@@ -69,12 +69,9 @@ async def excel_status():
         "file_exists": exists
     }
 
-# Global in-memory storage for production
-EXCEL_DATA_STORE: Dict[str, bytes] = {}
-
 @app.post("/api/excel/upload")
 async def upload_excel(file: UploadFile = File(...)):
-    """Upload an Excel file to use as database (stores in memory for production)"""
+    """Upload an Excel file to use as database"""
     if not file.filename.endswith(('.xlsx', '.xls')):
         raise HTTPException(status_code=400, detail="Only Excel files (.xlsx, .xls) are allowed")
     
@@ -82,35 +79,14 @@ async def upload_excel(file: UploadFile = File(...)):
         # Read file content
         file_content = await file.read()
         
-        # Store in memory (production-safe)
-        EXCEL_DATA_STORE["current"] = file_content
-        
-        # Try to upload to blob storage if available
-        if upload_excel_to_blob(file_content):
+        # Store using the new storage module
+        if store_excel_data(file_content, file.filename):
             return {
-                "message": "Excel file uploaded successfully to cloud storage",
+                "message": "Excel file uploaded successfully",
                 "filename": file.filename
             }
-        
-        # Try local storage fallback
-        try:
-            upload_path = UPLOAD_DIR / file.filename
-            with open(upload_path, "wb") as f:
-                f.write(file_content)
-            set_excel_file(str(upload_path))
-            
-            return {
-                "message": "Excel file uploaded successfully to local storage",
-                "filename": file.filename,
-                "storage_type": "local"
-            }
-        except:
-            # If both blob and local fail, we still have the in-memory copy
-            return {
-                "message": "Excel file uploaded successfully to memory storage",
-                "filename": file.filename,
-                "storage_type": "memory"
-            }
+        else:
+            raise HTTPException(status_code=500, detail="Failed to store Excel file")
             
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to upload Excel file: {str(e)}")
