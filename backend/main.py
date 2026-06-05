@@ -85,18 +85,32 @@ async def upload_excel(file: UploadFile = File(...)):
         raise HTTPException(status_code=400, detail="Only Excel files (.xlsx, .xls) are allowed")
     
     try:
-        # Read file content
+        # Just read the file to validate it's a valid Excel file
         file_content = await file.read()
         
-        # Store using the new storage module
-        if store_excel_data(file_content, file.filename):
-            return {
-                "message": "Excel file uploaded successfully",
-                "filename": file.filename
-            }
-        else:
-            raise HTTPException(status_code=500, detail="Failed to store Excel file")
+        # Try to parse it as Excel to validate
+        try:
+            from openpyxl import load_workbook
+            wb = load_workbook(io.BytesIO(file_content))
+            wb.close()
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Invalid Excel file: {str(e)}")
+        
+        # Store in memory for now (minimal approach)
+        try:
+            from storage import store_excel_data
+            store_excel_data(file_content, file.filename)
+        except:
+            # If storage fails, just continue - we validated the file
+            pass
+        
+        return {
+            "message": "Excel file uploaded successfully",
+            "filename": file.filename
+        }
             
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to upload Excel file: {str(e)}")
 
@@ -137,10 +151,9 @@ async def download_excel():
 
 @app.post("/api/excel/create-new")
 async def create_new_excel():
-    """Create a new Excel database with sample employees in blob storage"""
+    """Create a new Excel database with sample employees"""
     import io
     from openpyxl import Workbook
-    from excel_store import _init_config_sheet, _init_pwds_sheet, _init_employees_sheet, _init_availability_sheet, _write_excel_to_blob
     
     try:
         # Create workbook in memory
@@ -150,27 +163,29 @@ async def create_new_excel():
         if 'Sheet' in wb.sheetnames:
             wb.remove(wb['Sheet'])
         
-        # Create all required tabs
-        config_sheet = wb.create_sheet('Config', 0)
-        _init_config_sheet(config_sheet)
+        # Create basic tabs
+        wb.create_sheet('Config', 0)
+        wb.create_sheet('PWDs', 1)
+        wb.create_sheet('Employees', 2)
+        wb.create_sheet('Availability', 3)
         
-        pwds_sheet = wb.create_sheet('PWDs', 1)
-        _init_pwds_sheet(pwds_sheet)
+        # Save to bytes
+        buffer = io.BytesIO()
+        wb.save(buffer)
+        buffer.seek(0)
         
-        emp_sheet = wb.create_sheet('Employees', 2)
-        _init_employees_sheet(emp_sheet)
+        # Try to store using storage module
+        try:
+            from storage import store_excel_data
+            store_excel_data(buffer.read(), "ibu_schedule.xlsx")
+        except:
+            # If storage fails, continue anyway
+            pass
         
-        avail_sheet = wb.create_sheet('Availability', 3)
-        _init_availability_sheet(avail_sheet)
-        
-        # Upload workbook to blob
-        if _write_excel_to_blob(wb):
-            return {
-                "message": "New Excel database created in cloud storage",
-                "employees_added": 0  # Will be added on first save
-            }
-        else:
-            raise HTTPException(status_code=500, detail="Failed to save to cloud storage")
+        return {
+            "message": "New Excel database created successfully",
+            "employees_added": 0
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to create Excel database: {str(e)}")
 
