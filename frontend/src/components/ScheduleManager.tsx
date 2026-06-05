@@ -12,7 +12,6 @@ import {
 } from 'lucide-react'
 
 const days = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']
-const _floors = ['ground', 'second', 'sixth']
 const floorColors: any = {
   'ground': 'floor-ground',
   'second': 'floor-second',
@@ -183,7 +182,6 @@ export default function ScheduleManager() {
   }
 
   const weekDates = getWeekDates()
-  const _formattedWeekStart = format(weekStart, 'yyyy-MM-dd')
 
   return (
     <div>
