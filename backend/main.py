@@ -22,7 +22,8 @@ from excel_store import (
     set_excel_file, get_excel_file, ensure_excel_structure,
     set_manager_password, verify_manager_password, manager_has_password,
     initialize_from_excel, get_all_week_schedule_dates,
-    initialize_sample_employees, set_blob_key
+    initialize_sample_employees, set_blob_key, upload_excel_to_blob,
+    download_excel_from_blob, excel_file_exists
 )
 from scheduler import SchedulingEngine, generate_schedule
 from auth import AuthManager, require_auth, require_manager, require_self_or_manager
@@ -61,34 +62,30 @@ app.add_middleware(
 async def excel_status():
     """Check if Excel file is configured"""
     file_path = get_excel_file()
+    exists = excel_file_exists()
     return {
-        "configured": file_path is not None,
-        "file_path": file_path,
-        "file_exists": os.path.exists(file_path) if file_path else False
+        "configured": exists or file_path is not None,
+        "file_path": file_path or ("blob_storage" if exists else None),
+        "file_exists": exists
     }
 
 @app.post("/api/excel/upload")
 async def upload_excel(file: UploadFile = File(...)):
-    """Upload an Excel file to use as database"""
+    """Upload an Excel file to use as database (stores in Blob)"""
     if not file.filename.endswith(('.xlsx', '.xls')):
         raise HTTPException(status_code=400, detail="Only Excel files (.xlsx, .xls) are allowed")
     
-    # Save uploaded file
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"schedule_{timestamp}_{file.filename}"
-    file_path = UPLOAD_DIR / filename
+    # Read file content
+    file_content = await file.read()
     
-    with open(file_path, "wb") as f:
-        shutil.copyfileobj(file.file, f)
-    
-    # Set as active file
-    set_excel_file(str(file_path))
-    
-    return {
-        "message": "Excel file uploaded successfully",
-        "file_path": str(file_path),
-        "filename": filename
-    }
+    # Upload to blob storage
+    if upload_excel_to_blob(file_content):
+        return {
+            "message": "Excel file uploaded successfully to cloud storage",
+            "filename": file.filename
+        }
+    else:
+        raise HTTPException(status_code=500, detail="Failed to upload to cloud storage")
 
 @app.post("/api/excel/select")
 async def select_excel_file(request: ExcelPathRequest):
@@ -105,32 +102,64 @@ async def select_excel_file(request: ExcelPathRequest):
 
 @app.get("/api/excel/download")
 async def download_excel():
-    """Download the current Excel file"""
-    file_path = get_excel_file()
-    if not file_path or not os.path.exists(file_path):
-        raise HTTPException(status_code=404, detail="No Excel file configured")
+    """Download the current Excel file from blob storage"""
+    from fastapi.responses import StreamingResponse
+    import io
     
-    return FileResponse(file_path, filename="IBU_Schedule.xlsx")
+    # Try to get from blob first
+    file_data = download_excel_from_blob()
+    if file_data:
+        return StreamingResponse(
+            io.BytesIO(file_data),
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": "attachment; filename=IBU_Schedule.xlsx"}
+        )
+    
+    # Fall back to local file
+    file_path = get_excel_file()
+    if file_path and os.path.exists(file_path):
+        return FileResponse(file_path, filename="IBU_Schedule.xlsx")
+    
+    raise HTTPException(status_code=404, detail="No Excel file configured")
 
 @app.post("/api/excel/create-new")
 async def create_new_excel():
-    """Create a new Excel database with sample employees"""
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"schedule_{timestamp}_new.xlsx"
-    file_path = UPLOAD_DIR / filename
+    """Create a new Excel database with sample employees in blob storage"""
+    import io
+    from openpyxl import Workbook
+    from excel_store import _init_config_sheet, _init_pwds_sheet, _init_employees_sheet, _init_availability_sheet, _write_excel_to_blob
     
-    # Create the file structure
-    ensure_excel_structure(str(file_path))
-    set_excel_file(str(file_path))
-    
-    # Add sample employees (Fran, Aashima, and all staff)
-    initialize_sample_employees()
-    
-    return {
-        "message": "New Excel database created with employees",
-        "file_path": str(file_path),
-        "employees_added": 17
-    }
+    try:
+        # Create workbook in memory
+        wb = Workbook()
+        
+        # Remove default sheet
+        if 'Sheet' in wb.sheetnames:
+            wb.remove(wb['Sheet'])
+        
+        # Create all required tabs
+        config_sheet = wb.create_sheet('Config', 0)
+        _init_config_sheet(config_sheet)
+        
+        pwds_sheet = wb.create_sheet('PWDs', 1)
+        _init_pwds_sheet(pwds_sheet)
+        
+        emp_sheet = wb.create_sheet('Employees', 2)
+        _init_employees_sheet(emp_sheet)
+        
+        avail_sheet = wb.create_sheet('Availability', 3)
+        _init_availability_sheet(avail_sheet)
+        
+        # Upload workbook to blob
+        if _write_excel_to_blob(wb):
+            return {
+                "message": "New Excel database created in cloud storage",
+                "employees_added": 0  # Will be added on first save
+            }
+        else:
+            raise HTTPException(status_code=500, detail="Failed to save to cloud storage")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to create Excel database: {str(e)}")
 
 # ============ Password Management ============
 

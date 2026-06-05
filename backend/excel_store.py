@@ -94,6 +94,39 @@ def _blob_exists() -> bool:
     except:
         return False
 
+def upload_excel_to_blob(file_data: bytes) -> bool:
+    """Upload Excel file data directly to blob storage"""
+    if not BLOB_ENABLED or not BLOB_KEY:
+        return False
+    
+    try:
+        blob = BlobClient.from_env()
+        blob.put(BLOB_KEY, file_data)
+        return True
+    except Exception as e:
+        print(f"Error uploading to blob: {e}")
+        return False
+
+def download_excel_from_blob() -> Optional[bytes]:
+    """Download Excel file from blob storage as bytes"""
+    if not BLOB_ENABLED or not BLOB_KEY:
+        return None
+    
+    try:
+        blob = BlobClient.from_env()
+        return blob.get(BLOB_KEY)
+    except Exception as e:
+        print(f"Error downloading from blob: {e}")
+        return None
+
+def excel_file_exists() -> bool:
+    """Check if Excel file exists (blob or local)"""
+    if BLOB_ENABLED:
+        return _blob_exists()
+    if EXCEL_FILE_PATH:
+        return os.path.exists(EXCEL_FILE_PATH)
+    return False
+
 def _get_workbook() -> Optional[Workbook]:
     """Get workbook from either blob or local storage"""
     # Try blob first
