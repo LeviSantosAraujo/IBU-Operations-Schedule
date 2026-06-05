@@ -56,12 +56,18 @@ def excel_file_exists() -> bool:
 
 def _get_workbook() -> Optional[Workbook]:
     """Get workbook from any available storage"""
+    print(f"_get_workbook called. EXCEL_FILE_PATH: {EXCEL_FILE_PATH}")
+    
     # Try local file first
     if EXCEL_FILE_PATH and os.path.exists(EXCEL_FILE_PATH):
+        print(f"Loading from local file: {EXCEL_FILE_PATH}")
         return load_workbook(EXCEL_FILE_PATH)
     
     # Try storage module (blob, local, memory)
-    return get_workbook()
+    print("Trying storage module")
+    wb = get_workbook()
+    print(f"Storage module returned: {wb}")
+    return wb
 
 def _save_workbook(wb: Workbook) -> bool:
     """Save workbook to storage"""
