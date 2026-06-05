@@ -93,8 +93,9 @@ async def excel_status():
 def extract_employees_from_schedule(wb) -> List[Dict]:
     """Extract employee names from schedule sheets"""
     employees = []
-    manager_names = ['fran', 'aashima']  # Known managers
+    manager_names = ['fran', 'aashima', 'francisco']  # Known managers
     skip_names = ['events', 'total', 'grand total', 'total pt daily hours', '']
+    skip_phrases = ['shifts', 'availability', 'blank', 'until', 'after', 'before', '12-3p', '12-3 pm', 'eod', 'anytime', 'all day', 'interns', 'ibu ops']
     
     print(f"Workbook sheets: {wb.sheetnames}")
     
@@ -122,8 +123,20 @@ def extract_employees_from_schedule(wb) -> List[Dict]:
                 name = cell_value.strip()
                 # Skip empty, header rows and totals
                 if name and name.lower() not in skip_names and len(name) > 1:
+                    # Skip if it contains skip phrases
+                    if any(phrase in name.lower() for phrase in skip_phrases):
+                        continue
+                    
+                    # Skip if it's too long (likely a phrase/instruction)
+                    if len(name) > 50:
+                        continue
+                    
+                    # Skip if it contains time patterns
+                    if ':' in name and ('am' in name.lower() or 'pm' in name.lower()):
+                        continue
+                    
                     # Check if it looks like a person name (not a number or code)
-                    if not name.replace('.', '').replace('-', '').isdigit():
+                    if not name.replace('.', '').replace('-', '').replace(' ', '').isdigit():
                         # Check if it's a manager
                         is_manager = any(mgr in name.lower() for mgr in manager_names)
                         emp_type = 'manager' if is_manager else 'staff'
