@@ -1,0 +1,39 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  @apply bg-gray-50;
+}
+
+.availability-cell {
+  @apply border border-gray-300 p-2 text-center cursor-pointer transition-colors;
+  min-width: 80px;
+}
+
+.schedule-cell {
+  @apply border border-gray-200 p-1 min-h-24 bg-white;
+}
+
+.employee-card {
+  @apply bg-blue-100 border border-blue-300 rounded p-2 mb-1 cursor-move shadow-sm;
+}
+
+.shift-card {
+  @apply text-xs p-1 rounded mb-1 border-l-4;
+}
+
+/* Availability colors */
+.avail-blank { background-color: #FFFFFF; }
+.avail-until12pm { background-color: #90EE90; }
+.avail-until3pm { background-color: #87CEEB; }
+.avail-after330pm { background-color: #FFB6C1; }
+.avail-12-3 { background-color: #ADD8E6; }
+.avail-after12eod { background-color: #FFDAB9; }
+.avail-before12after330 { background-color: #DDA0DD; }
+.avail-off { background-color: #333333; color: white; }
+
+/* Floor colors for shifts */
+.floor-ground { border-left-color: #10B981; background-color: #D1FAE5; }
+.floor-second { border-left-color: #3B82F6; background-color: #DBEAFE; }
+.floor-sixth { border-left-color: #8B5CF6; background-color: #EDE9FE; }

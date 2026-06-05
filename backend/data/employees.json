@@ -1,0 +1,172 @@
+[
+  {
+    "id": "emp1",
+    "name": "Fran",
+    "email": null,
+    "employee_type": "manager",
+    "max_hours_per_week": 80,
+    "preferences": {},
+    "active": true,
+    "created_at": "2026-06-04 18:57:53.670374"
+  },
+  {
+    "id": "emp2",
+    "name": "Aashima",
+    "email": null,
+    "employee_type": "manager",
+    "max_hours_per_week": 80,
+    "preferences": {},
+    "active": true,
+    "created_at": "2026-06-04 18:57:53.670383"
+  },
+  {
+    "id": "emp3",
+    "name": "Mickaela C",
+    "email": null,
+    "employee_type": "student_worker",
+    "max_hours_per_week": 24,
+    "preferences": {},
+    "active": true,
+    "created_at": "2026-06-04 18:57:53.670384"
+  },
+  {
+    "id": "emp4",
+    "name": "Kavya C",
+    "email": null,
+    "employee_type": "student_worker",
+    "max_hours_per_week": 24,
+    "preferences": {},
+    "active": true,
+    "created_at": "2026-06-04 18:57:53.670386"
+  },
+  {
+    "id": "emp5",
+    "name": "Pablo 2",
+    "email": null,
+    "employee_type": "student_worker",
+    "max_hours_per_week": 24,
+    "preferences": {},
+    "active": true,
+    "created_at": "2026-06-04 18:57:53.670387"
+  },
+  {
+    "id": "emp6",
+    "name": "Viviana 3",
+    "email": null,
+    "employee_type": "student_worker",
+    "max_hours_per_week": 24,
+    "preferences": {},
+    "active": true,
+    "created_at": "2026-06-04 18:57:53.670388"
+  },
+  {
+    "id": "emp7",
+    "name": "Anastasia 3",
+    "email": null,
+    "employee_type": "student_worker",
+    "max_hours_per_week": 24,
+    "preferences": {},
+    "active": true,
+    "created_at": "2026-06-04 18:57:53.670390"
+  },
+  {
+    "id": "emp8",
+    "name": "MEG 3",
+    "email": null,
+    "employee_type": "student_worker",
+    "max_hours_per_week": 24,
+    "preferences": {},
+    "active": true,
+    "created_at": "2026-06-04 18:57:53.670391"
+  },
+  {
+    "id": "emp9",
+    "name": "Achal 2",
+    "email": null,
+    "employee_type": "student_worker",
+    "max_hours_per_week": 24,
+    "preferences": {},
+    "active": true,
+    "created_at": "2026-06-04 18:57:53.670392"
+  },
+  {
+    "id": "emp10",
+    "name": "PRIYANKA 2",
+    "email": null,
+    "employee_type": "student_worker",
+    "max_hours_per_week": 24,
+    "preferences": {},
+    "active": true,
+    "created_at": "2026-06-04 18:57:53.670394"
+  },
+  {
+    "id": "emp11",
+    "name": "Arta C",
+    "email": null,
+    "employee_type": "student_worker",
+    "max_hours_per_week": 24,
+    "preferences": {},
+    "active": true,
+    "created_at": "2026-06-04 18:57:53.670395"
+  },
+  {
+    "id": "emp12",
+    "name": "Taran C",
+    "email": null,
+    "employee_type": "student_worker",
+    "max_hours_per_week": 24,
+    "preferences": {},
+    "active": true,
+    "created_at": "2026-06-04 18:57:53.670396"
+  },
+  {
+    "id": "emp13",
+    "name": "Sagar C",
+    "email": null,
+    "employee_type": "student_worker",
+    "max_hours_per_week": 24,
+    "preferences": {},
+    "active": true,
+    "created_at": "2026-06-04 18:57:53.670397"
+  },
+  {
+    "id": "emp14",
+    "name": "Itshan 3",
+    "email": null,
+    "employee_type": "student_worker",
+    "max_hours_per_week": 24,
+    "preferences": {},
+    "active": true,
+    "created_at": "2026-06-04 18:57:53.670398"
+  },
+  {
+    "id": "emp15",
+    "name": "Arnob 2",
+    "email": null,
+    "employee_type": "student_worker",
+    "max_hours_per_week": 24,
+    "preferences": {},
+    "active": true,
+    "created_at": "2026-06-04 18:57:53.670400"
+  },
+  {
+    "id": "emp16",
+    "name": "Intern-Levi 7",
+    "email": null,
+    "employee_type": "intern",
+    "max_hours_per_week": 15,
+    "preferences": {},
+    "active": true,
+    "created_at": "2026-06-04 18:57:53.670401"
+  },
+  {
+    "id": "emp17",
+    "name": "Intern-Himanshu 7",
+    "email": null,
+    "employee_type": "intern",
+    "max_hours_per_week": 15,
+    "preferences": {},
+    "active": true,
+    "created_at": "2026-06-04 18:57:53.670402"
+  }
+]

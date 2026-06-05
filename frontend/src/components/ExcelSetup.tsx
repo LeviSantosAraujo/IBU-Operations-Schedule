@@ -1,0 +1,175 @@
+import { useState, useEffect } from 'react'
+import { FileSpreadsheet, Upload, Plus, Check, AlertCircle } from 'lucide-react'
+
+interface ExcelSetupProps {
+  onSetupComplete: () => void
+}
+
+export default function ExcelSetup({ onSetupComplete }: ExcelSetupProps) {
+  const [status, setStatus] = useState<{ configured: boolean; file_path?: string; file_exists?: boolean } | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+  const [selectedFile, setSelectedFile] = useState<File | null>(null)
+
+  useEffect(() => {
+    checkStatus()
+  }, [])
+
+  const checkStatus = async () => {
+    try {
+      const response = await fetch('/api/excel/status')
+      const data = await response.json()
+      setStatus(data)
+      if (data.configured && data.file_exists) {
+        // Already configured, move to login
+        onSetupComplete()
+      }
+    } catch (err) {
+      setError('Failed to check Excel status')
+    }
+  }
+
+  const handleCreateNew = async () => {
+    setLoading(true)
+    setError('')
+    
+    try {
+      const response = await fetch('/api/excel/create-new', {
+        method: 'POST'
+      })
+      
+      if (!response.ok) {
+        throw new Error('Failed to create Excel file')
+      }
+      
+      const data = await response.json()
+      setStatus({ configured: true, file_path: data.file_path, file_exists: true })
+      onSetupComplete()
+    } catch (err) {
+      setError('Failed to create new Excel database')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      setSelectedFile(e.target.files[0])
+    }
+  }
+
+  const handleUpload = async () => {
+    if (!selectedFile) {
+      setError('Please select a file first')
+      return
+    }
+
+    setLoading(true)
+    setError('')
+
+    const formData = new FormData()
+    formData.append('file', selectedFile)
+
+    try {
+      const response = await fetch('/api/excel/upload', {
+        method: 'POST',
+        body: formData
+      })
+
+      if (!response.ok) {
+        throw new Error('Failed to upload Excel file')
+      }
+
+      const data = await response.json()
+      setStatus({ configured: true, file_path: data.file_path, file_exists: true })
+      onSetupComplete()
+    } catch (err) {
+      setError('Failed to upload Excel file')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-gray-100">
+      <div className="bg-white p-8 rounded-lg shadow-lg w-full max-w-lg">
+        <div className="text-center mb-6">
+          <FileSpreadsheet className="w-16 h-16 text-green-600 mx-auto mb-4" />
+          <h1 className="text-2xl font-bold text-gray-900">Excel Database Setup</h1>
+          <p className="text-gray-600 mt-2">
+            The scheduling system uses an Excel file as its database.
+            Choose how you want to set it up.
+          </p>
+        </div>
+
+        {error && (
+          <div className="mb-4 p-3 bg-red-100 text-red-700 rounded flex items-center gap-2">
+            <AlertCircle className="w-5 h-5" />
+            {error}
+          </div>
+        )}
+
+        <div className="space-y-4">
+          {/* Create New Database */}
+          <div className="border rounded-lg p-4 hover:border-blue-500 transition-colors">
+            <button
+              onClick={handleCreateNew}
+              disabled={loading}
+              className="w-full flex items-center gap-3 text-left"
+            >
+              <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
+                <Plus className="w-5 h-5 text-blue-600" />
+              </div>
+              <div className="flex-1">
+                <h3 className="font-medium">Create New Database</h3>
+                <p className="text-sm text-gray-500">Start with a fresh Excel file</p>
+              </div>
+            </button>
+          </div>
+
+          {/* Upload Existing */}
+          <div className="border rounded-lg p-4 hover:border-green-500 transition-colors">
+            <div className="flex items-center gap-3 mb-3">
+              <div className="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center">
+                <Upload className="w-5 h-5 text-green-600" />
+              </div>
+              <div className="flex-1">
+                <h3 className="font-medium">Upload Existing Excel</h3>
+                <p className="text-sm text-gray-500">Use your existing schedule spreadsheet</p>
+              </div>
+            </div>
+            
+            <div className="ml-13 pl-13">
+              <input
+                type="file"
+                accept=".xlsx,.xls"
+                onChange={handleFileSelect}
+                className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:text-sm file:font-semibold file:bg-green-50 file:text-green-700 hover:file:bg-green-100 mb-2"
+              />
+              {selectedFile && (
+                <button
+                  onClick={handleUpload}
+                  disabled={loading}
+                  className="w-full bg-green-600 text-white py-2 rounded hover:bg-green-700 disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                  <Check className="w-4 h-4" />
+                  {loading ? 'Uploading...' : `Upload ${selectedFile.name}`}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-6 text-sm text-gray-500 bg-gray-50 p-3 rounded">
+          <p className="font-medium mb-1">What happens:</p>
+          <ul className="list-disc list-inside space-y-1">
+            <li>Employees, passwords, and availability stored in Excel tabs</li>
+            <li>Each week's schedule gets its own tab (e.g., "Schedule_2024_01_15")</li>
+            <li>You can download the Excel anytime to view or edit offline</li>
+            <li>Changes made in Excel will be reflected in the system</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  )
+}
