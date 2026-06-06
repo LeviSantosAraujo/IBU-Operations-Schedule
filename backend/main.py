@@ -398,14 +398,19 @@ async def login(request: LoginRequest):
                 raise HTTPException(status_code=401, detail="Invalid password")
         # If no password set yet, allow login (first time setup)
     
+    print(f"Generating token for employee_id: {request.employee_id}")
     token = AuthManager.login(request.employee_id)
+    print(f"Token generated successfully: {token[:20] if token else 'None'}...")
     
-    return {
+    response_data = {
         "token": token,
         "employee": employee,
         "role": employee.employee_type,
         "requires_password_setup": employee.employee_type == EmployeeType.MANAGER and not manager_has_password(request.employee_id)
     }
+    print(f"Preparing response: {response_data}")
+    
+    return response_data
 
 @app.post("/api/logout")
 async def logout(authorization: Optional[str] = Header(None)):
