@@ -12,10 +12,9 @@ class AuthManager:
     @staticmethod
     def login(employee_id: str) -> str:
         """Create a session for an employee and return token"""
-        # Lazy import to avoid circular imports
-        from data_store import get_all_employees
-        employees = get_all_employees()
-        employee = next((e for e in employees if e.id == employee_id), None)
+        # Use Excel-based employee lookup instead of data_store
+        from main import get_employee_by_id
+        employee = get_employee_by_id(employee_id)
         
         if not employee:
             raise HTTPException(status_code=401, detail="Invalid employee")
