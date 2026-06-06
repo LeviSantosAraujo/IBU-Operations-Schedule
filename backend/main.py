@@ -522,6 +522,7 @@ async def submit_availability(
     authorization: Optional[str] = Header(None)
 ):
     """Submit or update availability - employees can only submit their own"""
+    print(f"Authorization header: {authorization}")
     print(f"Availability submission: {availability}")
     user = require_auth(authorization)
     
