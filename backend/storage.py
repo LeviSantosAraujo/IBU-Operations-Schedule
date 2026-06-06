@@ -16,10 +16,22 @@ BLOB_AVAILABLE = False
 def _init_vercel_blob():
     """Initialize Vercel Blob storage"""
     global BLOB_STORAGE, BLOB_AVAILABLE
-    # Disable blob storage for now to prevent upload failures
-    BLOB_AVAILABLE = False
-    BLOB_STORAGE = None
-    print("Vercel Blob storage disabled (using memory storage)")
+    # Enable blob storage for persistent Excel storage
+    if os.getenv("BLOB_READ_WRITE_TOKEN"):
+        try:
+            from vercel_blob import BlobClient
+            BLOB_STORAGE = BlobClient
+            BLOB_AVAILABLE = True
+            print("Vercel Blob storage enabled")
+            return True
+        except Exception as e:
+            print(f"Failed to initialize Vercel Blob: {e}")
+            BLOB_AVAILABLE = False
+            BLOB_STORAGE = None
+    else:
+        print("BLOB_READ_WRITE_TOKEN not set, using memory storage")
+        BLOB_AVAILABLE = False
+        BLOB_STORAGE = None
     return False
 
 def blob_put(key: str, data: bytes) -> bool:
