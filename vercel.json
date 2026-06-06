@@ -5,11 +5,11 @@
   "rewrites": [
     {
       "source": "/api/(.*)",
-      "dest": "/api/index.py"
+      "destination": "/api/index.py"
     },
     {
       "source": "/(.*)",
-      "dest": "/frontend/dist/index.html"
+      "destination": "/frontend/dist/index.html"
     }
   ]
 }
