@@ -522,11 +522,13 @@ async def submit_availability(
     authorization: Optional[str] = Header(None)
 ):
     """Submit or update availability - employees can only submit their own"""
+    print(f"Availability submission: {availability}")
     user = require_auth(authorization)
     
     # Auto-generate ID if not provided
     if not availability.id:
         availability.id = f"avail_{availability.employee_id}_{availability.week_start_date}"
+        print(f"Auto-generated ID: {availability.id}")
     
     # Employees can only submit their own availability
     if user["role"] != "manager" and availability.employee_id != user["employee_id"]:
