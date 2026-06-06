@@ -1,10 +1,11 @@
 {
   "version": 2,
+  "framework": "vite",
   "buildCommand": "cd frontend && npm install && npm run build",
   "outputDirectory": "frontend/dist",
   "rewrites": [
     {
-      "source": "/api/(.*)",
+      "source": "/api/:path*",
       "destination": "/api/index.py"
     },
     {
