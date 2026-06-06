@@ -181,9 +181,13 @@ async def upload_excel(
     file: UploadFile = File(...),
     authorization: Optional[str] = Header(None)
 ):
-    """Upload an Excel file to use as database - managers only"""
-    user = require_manager(authorization)
-    print(f"Upload request by manager: {user['employee_name']}. Filename: {file.filename}, Content-Type: {file.content_type}")
+    """Upload an Excel file to use as database - managers only, or anyone if no database exists"""
+    # Allow upload if no database exists (initial setup)
+    if not excel_file_exists():
+        print(f"Initial setup upload by unauthenticated user. Filename: {file.filename}")
+    else:
+        user = require_manager(authorization)
+        print(f"Upload request by manager: {user['employee_name']}. Filename: {file.filename}, Content-Type: {file.content_type}")
     
     if not file.filename:
         raise HTTPException(status_code=400, detail="No filename provided")
@@ -296,9 +300,13 @@ async def download_excel():
 
 @app.post("/api/excel/create-new")
 async def create_new_excel(authorization: Optional[str] = Header(None)):
-    """Create a new Excel database with sample employees - managers only"""
-    user = require_manager(authorization)
-    print(f"Create new Excel request by manager: {user['employee_name']}")
+    """Create a new Excel database with sample employees - managers only, or anyone if no database exists"""
+    # Allow creation if no database exists (initial setup)
+    if not excel_file_exists():
+        print(f"Initial setup create-new by unauthenticated user")
+    else:
+        user = require_manager(authorization)
+        print(f"Create new Excel request by manager: {user['employee_name']}")
     import io
     from openpyxl import Workbook
     

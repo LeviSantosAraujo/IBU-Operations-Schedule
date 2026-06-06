@@ -17,8 +17,10 @@ export default function Login({ onLogin }: LoginProps) {
   const [showPasswordSetup, setShowPasswordSetup] = useState(false)
   const [newPassword, setNewPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
+  const [dbConfigured, setDbConfigured] = useState<boolean | null>(null)
 
   useEffect(() => {
+    checkDatabaseStatus()
     loadEmployees()
   }, [])
 
@@ -32,6 +34,16 @@ export default function Login({ onLogin }: LoginProps) {
       }
     }
   }, [selectedEmployee])
+
+  const checkDatabaseStatus = async () => {
+    try {
+      const response = await fetch('/api/excel/status')
+      const data = await response.json()
+      setDbConfigured(data.configured && data.file_exists)
+    } catch (err) {
+      setDbConfigured(false)
+    }
+  }
 
   const loadEmployees = async () => {
     try {
@@ -230,6 +242,19 @@ export default function Login({ onLogin }: LoginProps) {
           <h1 className="text-2xl font-bold text-blue-900">IBU Schedule System</h1>
           <p className="text-gray-600 mt-2">Please select your name to continue</p>
         </div>
+
+        {dbConfigured === false && (
+          <div className="mb-4 p-3 bg-yellow-100 text-yellow-700 rounded">
+            <p className="font-medium">No database configured</p>
+            <p className="text-sm mt-1">Please set up the Excel database first.</p>
+            <button
+              onClick={() => window.location.href = '/setup'}
+              className="mt-2 text-sm underline hover:text-yellow-800"
+            >
+              Go to Database Setup
+            </button>
+          </div>
+        )}
 
         {error && (
           <div className="mb-4 p-3 bg-red-100 text-red-700 rounded">
