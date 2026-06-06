@@ -372,13 +372,20 @@ async def check_has_password(employee_id: str):
 @app.post("/api/login")
 async def login(request: LoginRequest):
     """Login as an employee with optional password for managers"""
+    print(f"Login attempt for employee_id: {request.employee_id}")
+    
     # Check if Excel file is configured (in storage or local)
     from storage import excel_file_exists
     if not excel_file_exists() and not get_excel_file():
         raise HTTPException(status_code=400, detail="No Excel database configured. Please upload or select an Excel file first.")
     
     employee = get_employee_by_id(request.employee_id)
+    print(f"Employee lookup result: {employee}")
+    
     if not employee:
+        # Log all available employees for debugging
+        all_employees = get_all_employees()
+        print(f"Available employees: {[(e.id, e.name) for e in all_employees]}")
         raise HTTPException(status_code=404, detail="Employee not found")
     
     # Managers need password verification
