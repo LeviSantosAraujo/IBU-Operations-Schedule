@@ -2,6 +2,11 @@
 
 A comprehensive automated scheduling system built with Python (FastAPI) and React. This system handles employee availability, weighted auto-scheduling, floor coverage tracking, and multi-week storage.
 
+## Deployment Notes
+- Uses Vercel for hosting
+- Python dependencies in root requirements.txt
+- Frontend built with Vite
+
 ## Features
 
 ### For Employees
