@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { getEmployees } from '../api'
-import { LogIn, User, Shield, Lock, Key } from 'lucide-react'
+import { LogIn, User, Shield, Lock, Key, ArrowLeft, Settings } from 'lucide-react'
 
 interface LoginProps {
   onLogin: () => void
@@ -203,9 +203,30 @@ export default function Login({ onLogin }: LoginProps) {
     )
   }
 
+  const handleGoBack = () => {
+    window.location.href = '/setup'
+  }
+
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-100">
       <div className="bg-white p-8 rounded-lg shadow-lg w-full max-w-md">
+        <div className="flex items-center justify-between mb-4">
+          <button
+            onClick={handleGoBack}
+            className="text-gray-500 hover:text-gray-700 flex items-center gap-1 text-sm"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            Back to Setup
+          </button>
+          <button
+            onClick={handleGoBack}
+            className="text-blue-600 hover:text-blue-800 flex items-center gap-1 text-sm"
+          >
+            <Settings className="w-4 h-4" />
+            Change Database
+          </button>
+        </div>
+        
         <div className="text-center mb-6">
           <h1 className="text-2xl font-bold text-blue-900">IBU Schedule System</h1>
           <p className="text-gray-600 mt-2">Please select your name to continue</p>

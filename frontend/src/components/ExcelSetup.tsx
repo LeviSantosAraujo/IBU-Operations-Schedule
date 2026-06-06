@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { FileSpreadsheet, Upload, Plus, Check, AlertCircle } from 'lucide-react'
+import { FileSpreadsheet, Upload, Plus, Check, AlertCircle, ArrowLeft, Home } from 'lucide-react'
 
 interface ExcelSetupProps {
   onSetupComplete: () => void
@@ -92,9 +92,24 @@ export default function ExcelSetup({ onSetupComplete }: ExcelSetupProps) {
     }
   }
 
+  const handleGoToLogin = () => {
+    // Navigate back to login if database is already configured
+    window.location.href = '/'
+  }
+
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-100">
       <div className="bg-white p-8 rounded-lg shadow-lg w-full max-w-lg">
+        <div className="flex items-center justify-between mb-4">
+          <button
+            onClick={handleGoToLogin}
+            className="text-gray-500 hover:text-gray-700 flex items-center gap-1 text-sm"
+          >
+            <Home className="w-4 h-4" />
+            Home
+          </button>
+        </div>
+        
         <div className="text-center mb-6">
           <FileSpreadsheet className="w-16 h-16 text-green-600 mx-auto mb-4" />
           <h1 className="text-2xl font-bold text-gray-900">Excel Database Setup</h1>

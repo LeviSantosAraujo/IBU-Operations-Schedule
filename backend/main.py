@@ -90,9 +90,23 @@ async def excel_status():
             "file_exists": False
         }
 
+def normalize_name(name: str) -> str:
+    """Normalize name for duplicate detection"""
+    # Remove common suffixes and extra info
+    name = name.lower()
+    suffixes = [' smanager', ' supervisor', ' ops support', ' training', ' intern', ' temp', ' last day', ' break', ' tr', ' wk1', ' wk2', ' wk3', ' wk4', ' wk5', ' wk6', ' wk7']
+    for suffix in suffixes:
+        if name.endswith(suffix):
+            name = name[:-len(suffix)].strip()
+    # Remove numbers at the end
+    while name and name[-1].isdigit():
+        name = name[:-1].strip()
+    return name
+
 def extract_employees_from_schedule(wb) -> List[Dict]:
     """Extract employee names from schedule sheets"""
     employees = []
+    seen_normalized = set()
     manager_names = ['fran', 'aashima', 'francisco']  # Known managers
     skip_names = ['events', 'total', 'grand total', 'total pt daily hours', '']
     skip_phrases = ['shifts', 'availability', 'blank', 'until', 'after', 'before', '12-3p', '12-3 pm', 'eod', 'anytime', 'all day', 'interns', 'ibu ops']
@@ -137,18 +151,26 @@ def extract_employees_from_schedule(wb) -> List[Dict]:
                     
                     # Check if it looks like a person name (not a number or code)
                     if not name.replace('.', '').replace('-', '').replace(' ', '').isdigit():
+                        # Normalize for duplicate detection
+                        normalized = normalize_name(name)
+                        
                         # Check if it's a manager
                         is_manager = any(mgr in name.lower() for mgr in manager_names)
                         emp_type = 'manager' if is_manager else 'staff'
                         
-                        # Avoid duplicates
-                        if not any(e['name'] == name for e in employees):
+                        # Avoid duplicates (check normalized name)
+                        if normalized not in seen_normalized:
+                            seen_normalized.add(normalized)
+                            # Use the cleanest version of the name (remove numbers and suffixes)
+                            clean_name = normalized.title()
+                            if clean_name.lower() in ['fran', 'aashima']:
+                                clean_name = clean_name  # Keep as-is
                             employees.append({
                                 'id': f"emp_{len(employees)+1:03d}",
-                                'name': name,
+                                'name': clean_name,
                                 'type': emp_type
                             })
-                            print(f"Found employee: {name} ({emp_type})")
+                            print(f"Found employee: {clean_name} ({emp_type}) from '{name}'")
     
     print(f"Total employees found: {len(employees)}")
     return employees
