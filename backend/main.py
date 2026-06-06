@@ -107,16 +107,17 @@ def extract_employees_from_schedule(wb) -> List[Dict]:
     """Extract employee names from schedule sheets"""
     employees = []
     seen_normalized = set()
-    manager_names = ['fran', 'aashima', 'francisco']  # Known managers
+    manager_names = ['fran', 'aashima']  # Known managers (removed Francisco)
     skip_names = ['events', 'total', 'grand total', 'total pt daily hours', '']
     skip_phrases = ['shifts', 'availability', 'blank', 'until', 'after', 'before', '12-3p', '12-3 pm', 'eod', 'anytime', 'all day', 'interns', 'ibu ops']
     
     print(f"Workbook sheets: {wb.sheetnames}")
     
-    # Check all sheets for employee data
-    for sheet_name in wb.sheetnames:
+    # Only use the first sheet (most recent week)
+    if wb.sheetnames:
+        sheet_name = wb.sheetnames[0]
         sheet = wb[sheet_name]
-        print(f"Scanning sheet: {sheet_name}, max_row: {sheet.max_row}")
+        print(f"Scanning first sheet (most recent): {sheet_name}, max_row: {sheet.max_row}")
         
         # Look for "EVENTS" header to identify schedule sheets
         events_row = None
