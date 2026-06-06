@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { getEmployees } from '../api'
-import { LogIn, User, Shield, Lock, Key, ArrowLeft, Settings } from 'lucide-react'
+import { LogIn, User, Shield, Lock, Key, ArrowLeft } from 'lucide-react'
 
 interface LoginProps {
   onLogin: () => void
@@ -210,7 +210,7 @@ export default function Login({ onLogin }: LoginProps) {
   }
 
   const handleGoBack = () => {
-    window.location.href = '/setup'
+    window.location.href = '/'
   }
 
   return (
@@ -222,14 +222,7 @@ export default function Login({ onLogin }: LoginProps) {
             className="text-gray-500 hover:text-gray-700 flex items-center gap-1 text-sm"
           >
             <ArrowLeft className="w-4 h-4" />
-            Back to Setup
-          </button>
-          <button
-            onClick={handleGoBack}
-            className="text-blue-600 hover:text-blue-800 flex items-center gap-1 text-sm"
-          >
-            <Settings className="w-4 h-4" />
-            Change Database
+            Home
           </button>
         </div>
         
