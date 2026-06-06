@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { FileSpreadsheet, Upload, Plus, Check, AlertCircle, ArrowLeft, Home } from 'lucide-react'
+import { FileSpreadsheet, Upload, Plus, Check, AlertCircle, Home } from 'lucide-react'
 
 interface ExcelSetupProps {
   onSetupComplete: () => void
