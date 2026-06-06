@@ -439,10 +439,17 @@ async def get_me(authorization: Optional[str] = Header(None)):
 @app.get("/api/employees", response_model=List[Employee])
 async def list_employees(active_only: bool = False):
     """List all employees"""
-    employees = get_all_employees()
-    if active_only:
-        employees = [e for e in employees if e.active]
-    return employees
+    print(f"Employees request: active_only={active_only}")
+    try:
+        employees = get_all_employees()
+        print(f"Found {len(employees)} employees")
+        if active_only:
+            employees = [e for e in employees if e.active]
+            print(f"Filtered to {len(employees)} active employees")
+        return employees
+    except Exception as e:
+        print(f"Error loading employees: {e}")
+        raise HTTPException(status_code=500, detail=f"Error loading employees: {str(e)}")
 
 @app.get("/api/employees/{employee_id}", response_model=Employee)
 async def get_employee(employee_id: str):
