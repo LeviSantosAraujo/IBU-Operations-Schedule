@@ -1,6 +1,6 @@
 import { BrowserRouter as Router, Routes, Route, Link, useNavigate, Navigate } from 'react-router-dom'
 import { useState, useEffect } from 'react'
-import { Calendar, Users, LayoutGrid, LogOut, Shield, User, Bell } from 'lucide-react'
+import { Calendar, Users, LayoutGrid, LogOut, Shield, User, Bell, FileSpreadsheet } from 'lucide-react'
 import { auth } from './auth'
 import Login from './components/Login'
 import ExcelSetup from './components/ExcelSetup'
@@ -8,6 +8,7 @@ import AvailabilityInput from './components/AvailabilityInput'
 import ScheduleManager from './components/ScheduleManager'
 import EmployeeManagement from './components/EmployeeManagement'
 import FloorCoverage from './components/FloorCoverage'
+import DatabaseManagement from './components/DatabaseManagement'
 
 // Protected Route Component
 function ProtectedRoute({ 
@@ -85,6 +86,10 @@ function AppLayout() {
                       <Users className="w-4 h-4 mr-2" />
                       Employees
                     </Link>
+                    <Link to="/database" className="flex items-center px-3 py-2 rounded hover:bg-blue-800">
+                      <FileSpreadsheet className="w-4 h-4 mr-2" />
+                      Database
+                    </Link>
                   </>
                 )}
                 {/* Everyone sees availability */}
@@ -149,6 +154,11 @@ function AppLayout() {
               <EmployeeManagement />
             </ProtectedRoute>
           } />
+          <Route path="/database" element={
+            <ProtectedRoute requireManager>
+              <DatabaseManagement />
+            </ProtectedRoute>
+          } />
         </Routes>
       </main>
     </div>
@@ -157,40 +167,9 @@ function AppLayout() {
 
 function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(auth.isAuthenticated())
-  const [excelConfigured, setExcelConfigured] = useState<boolean | null>(null)
-  
-  useEffect(() => {
-    checkExcelStatus()
-  }, [])
-  
-  const checkExcelStatus = async () => {
-    try {
-      const response = await fetch('/api/excel/status')
-      const data = await response.json()
-      setExcelConfigured(data.configured && data.file_exists)
-    } catch (err) {
-      setExcelConfigured(false)
-    }
-  }
-  
-  const handleExcelSetupComplete = () => {
-    setExcelConfigured(true)
-  }
   
   const handleLogin = () => {
     setIsLoggedIn(true)
-  }
-  
-  // Show loading while checking Excel status
-  if (excelConfigured === null) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-100">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
-          <p className="mt-4 text-gray-600">Loading...</p>
-        </div>
-      </div>
-    )
   }
   
   return (
@@ -200,21 +179,18 @@ function App() {
           path="/login" 
           element={
             isLoggedIn ? <Navigate to="/" replace /> : 
-            !excelConfigured ? <Navigate to="/setup" replace /> :
             <Login onLogin={handleLogin} />
           } 
         />
         <Route 
           path="/setup" 
           element={
-            excelConfigured ? <Navigate to="/login" replace /> :
-            <ExcelSetup onSetupComplete={handleExcelSetupComplete} />
+            <ExcelSetup onSetupComplete={() => {}} />
           } 
         />
         <Route 
           path="/*" 
           element={
-            !excelConfigured ? <Navigate to="/setup" replace /> :
             isLoggedIn ? <AppLayout /> : <Navigate to="/login" replace />
           } 
         />
