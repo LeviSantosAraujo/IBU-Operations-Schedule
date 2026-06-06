@@ -69,18 +69,24 @@ export default function Login({ onLogin }: LoginProps) {
         password: isManager ? password : undefined
       }
       
+      console.log('Login attempt with data:', loginData)
+      
       const response = await fetch('/api/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(loginData)
       })
       
+      console.log('Response status:', response.status, response.ok)
+      
       if (!response.ok) {
         const errorData = await response.json()
+        console.error('Login failed:', errorData)
         throw new Error(errorData.detail || 'Login failed')
       }
       
       const data = await response.json()
+      console.log('Login successful:', data)
       
       // If manager needs password setup, show that first
       if (data.requires_password_setup) {
