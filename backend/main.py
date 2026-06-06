@@ -524,6 +524,10 @@ async def submit_availability(
     """Submit or update availability - employees can only submit their own"""
     user = require_auth(authorization)
     
+    # Auto-generate ID if not provided
+    if not availability.id:
+        availability.id = f"avail_{availability.employee_id}_{availability.week_start_date}"
+    
     # Employees can only submit their own availability
     if user["role"] != "manager" and availability.employee_id != user["employee_id"]:
         raise HTTPException(status_code=403, detail="Can only submit your own availability")

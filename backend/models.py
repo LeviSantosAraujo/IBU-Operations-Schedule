@@ -58,7 +58,7 @@ class Employee(BaseModel):
     created_at: datetime = Field(default_factory=datetime.now)
 
 class Availability(BaseModel):
-    id: str
+    id: Optional[str] = None  # Optional - will be auto-generated if not provided
     employee_id: str
     week_start_date: date
     monday: AvailabilityType = AvailabilityType.BLANK
