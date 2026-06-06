@@ -444,7 +444,28 @@ def save_availability(availability: Availability) -> Availability:
     if not wb:
         raise ValueError("Excel database not configured. Please ask your manager to set up the Excel file.")
     
-    sheet = wb['Availability']
+    # Create Availability sheet if it doesn't exist
+    if 'Availability' not in wb.sheetnames:
+        sheet = wb.create_sheet('Availability')
+        # Add headers
+        sheet.cell(row=1, column=1, value='ID')
+        sheet.cell(row=1, column=2, value='Employee ID')
+        sheet.cell(row=1, column=3, value='Employee Name')
+        sheet.cell(row=1, column=4, value='Week Start Date')
+        sheet.cell(row=1, column=5, value='Monday')
+        sheet.cell(row=1, column=6, value='Tuesday')
+        sheet.cell(row=1, column=7, value='Wednesday')
+        sheet.cell(row=1, column=8, value='Thursday')
+        sheet.cell(row=1, column=9, value='Friday')
+        sheet.cell(row=1, column=10, value='Saturday')
+        sheet.cell(row=1, column=11, value='Sunday')
+        sheet.cell(row=1, column=12, value='Submitted At')
+        sheet.cell(row=1, column=13, value='Notes')
+        sheet.cell(row=1, column=14, value='Approved')
+        sheet.cell(row=1, column=15, value='Approved By')
+        sheet.cell(row=1, column=16, value='Approved At')
+    else:
+        sheet = wb['Availability']
     
     # Check if availability exists
     found_row = None
