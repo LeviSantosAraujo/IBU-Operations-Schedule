@@ -177,9 +177,13 @@ def extract_employees_from_schedule(wb) -> List[Dict]:
     return employees
 
 @app.post("/api/excel/upload")
-async def upload_excel(file: UploadFile = File(...)):
-    """Upload an Excel file to use as database"""
-    print(f"Upload request received. Filename: {file.filename}, Content-Type: {file.content_type}")
+async def upload_excel(
+    file: UploadFile = File(...),
+    authorization: Optional[str] = Header(None)
+):
+    """Upload an Excel file to use as database - managers only"""
+    user = require_manager(authorization)
+    print(f"Upload request by manager: {user['employee_name']}. Filename: {file.filename}, Content-Type: {file.content_type}")
     
     if not file.filename:
         raise HTTPException(status_code=400, detail="No filename provided")
@@ -291,8 +295,10 @@ async def download_excel():
     raise HTTPException(status_code=404, detail="No Excel file configured")
 
 @app.post("/api/excel/create-new")
-async def create_new_excel():
-    """Create a new Excel database with sample employees"""
+async def create_new_excel(authorization: Optional[str] = Header(None)):
+    """Create a new Excel database with sample employees - managers only"""
+    user = require_manager(authorization)
+    print(f"Create new Excel request by manager: {user['employee_name']}")
     import io
     from openpyxl import Workbook
     
