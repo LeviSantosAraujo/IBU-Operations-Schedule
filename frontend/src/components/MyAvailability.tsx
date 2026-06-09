@@ -2,9 +2,9 @@ import { useState, useEffect } from 'react'
 import DatePicker from 'react-datepicker'
 import 'react-datepicker/dist/react-datepicker.css'
 import { format, addDays, startOfWeek } from 'date-fns'
-import { createAvailabilityRequest, getMyAvailabilityRequests } from '../api'
+import { createAvailabilityRequest, getMyAvailabilityRequests, getEmployee, updateEmployee } from '../api'
 import { auth } from '../auth'
-import { Plus, Calendar, Clock, X } from 'lucide-react'
+import { Plus, Calendar, Clock, X, Save } from 'lucide-react'
 
 const daysOfWeek = [
   { value: 'monday', label: 'Monday' },
@@ -46,13 +46,42 @@ export default function MyAvailability() {
   const [myRequests, setMyRequests] = useState<any[]>([])
   const [loading, setLoading] = useState(false)
   const [saved, setSaved] = useState(false)
+  const [preferencesSaved, setPreferencesSaved] = useState(false)
   const [showDayOffModal, setShowDayOffModal] = useState(false)
   const [dayOffDate, setDayOffDate] = useState<Date | null>(null)
   const [dayOffComment, setDayOffComment] = useState('')
 
   useEffect(() => {
     loadMyRequests()
+    loadEmployeePreferences()
   }, [])
+
+  const loadEmployeePreferences = async () => {
+    try {
+      const user = auth.getUser()
+      if (user) {
+        const employee = await getEmployee(user.employee_id)
+        if (employee && employee.preferences) {
+          setJobPreferences(employee.preferences)
+        }
+      }
+    } catch (err) {
+      console.error('Error loading employee preferences:', err)
+    }
+  }
+
+  const handleSavePreferences = async () => {
+    try {
+      const user = auth.getUser()
+      if (user) {
+        await updateEmployee(user.employee_id, { preferences: jobPreferences })
+        setPreferencesSaved(true)
+        setTimeout(() => setPreferencesSaved(false), 3000)
+      }
+    } catch (err) {
+      alert('Error saving preferences. Please try again.')
+    }
+  }
 
   const loadMyRequests = async () => {
     try {
@@ -304,6 +333,13 @@ export default function MyAvailability() {
               </div>
             ))}
           </div>
+          <button
+            onClick={handleSavePreferences}
+            className="mt-3 flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 text-sm"
+          >
+            <Save className="w-4 h-4" />
+            {preferencesSaved ? 'Preferences Saved!' : 'Save Preferences'}
+          </button>
         </div>
 
         {/* Comment */}
