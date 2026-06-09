@@ -12,7 +12,7 @@
   "installCommand": "cd frontend && npm install",
   "rewrites": [
     {
-      "source": "/api/:path*",
+      "source": "/api/(.*)",
       "destination": "/api/index.py"
     },
     {
