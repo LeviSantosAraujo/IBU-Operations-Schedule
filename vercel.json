@@ -8,6 +8,7 @@
       "PYO3_USE_ABI3_FORWARD_COMPATIBILITY": "1"
     }
   },
+  "pythonVersion": "3.13",
   "rewrites": [
     {
       "source": "/api/:path*",
