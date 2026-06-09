@@ -392,50 +392,67 @@ export default function MyAvailability() {
           <p className="text-gray-500">No requests submitted yet.</p>
         ) : (
           <div className="space-y-3">
-            {myRequests.map((request) => (
-              <div key={request.id} className="p-4 border rounded">
-                <div className="flex justify-between items-start mb-2">
-                  <div>
-                    <span className={`px-2 py-1 rounded text-xs font-medium capitalize ${getStatusColor(request.status)}`}>
-                      {request.status}
-                    </span>
-                    <span className="ml-2 text-sm font-medium capitalize">
-                      {request.request_type || 'availability'}
-                    </span>
+            {myRequests.map((request) => {
+              // Get days display
+              const daysDisplay = Array.isArray(request.days_of_week)
+                ? request.days_of_week.map((d: string) => d.charAt(0).toUpperCase() + d.slice(1)).join(', ')
+                : request.day_of_week || 'N/A'
+
+              // Get request type description
+              let requestDescription = ''
+              if (request.request_type === 'day_off') {
+                requestDescription = `Day Off for ${daysDisplay}`
+              } else {
+                const timeRange = request.start_time && request.end_time
+                  ? ` (${request.start_time} - ${request.end_time})`
+                  : ''
+                requestDescription = `Available on ${daysDisplay}${timeRange}`
+              }
+
+              // Format dates
+              const startDate = request.start_date && request.start_date !== '1969-12-31'
+                ? new Date(request.start_date).toLocaleDateString()
+                : 'Not set'
+              const endDate = request.end_date && request.end_date !== '1969-12-31'
+                ? new Date(request.end_date).toLocaleDateString()
+                : 'Not set'
+
+              return (
+                <div key={request.id} className="p-4 border rounded">
+                  <div className="flex justify-between items-start mb-2">
+                    <div>
+                      <span className={`px-2 py-1 rounded text-xs font-medium capitalize ${getStatusColor(request.status)}`}>
+                        {request.status}
+                      </span>
+                      <span className="ml-2 text-sm font-medium text-gray-800">
+                        {requestDescription}
+                      </span>
+                    </div>
+                    <div className="text-xs text-gray-500">
+                      {request.created_at ? new Date(request.created_at).toLocaleDateString() : ''}
+                    </div>
                   </div>
-                  <div className="text-xs text-gray-500">
-                    {new Date(request.created_at).toLocaleDateString()}
-                  </div>
-                </div>
-                <div className="text-sm text-gray-700">
-                  <div className="flex items-center gap-2 mb-1">
-                    <Calendar className="w-4 h-4" />
-                    <span>
-                      {request.start_date} to {request.end_date}
-                    </span>
-                  </div>
-                  <div className="mb-1">
-                    <strong>Days:</strong> {request.days_of_week?.map((d: string) => d.charAt(0).toUpperCase() + d.slice(1)).join(', ') || request.day_of_week}
-                  </div>
-                  {request.request_type === 'availability' && request.start_time && request.end_time && (
+                  <div className="text-sm text-gray-700">
                     <div className="flex items-center gap-2 mb-1">
-                      <Clock className="w-4 h-4" />
-                      <span>{request.start_time} - {request.end_time}</span>
+                      <Calendar className="w-4 h-4" />
+                      <span>
+                        {startDate} to {endDate}
+                      </span>
                     </div>
-                  )}
-                  {request.employee_comment && (
-                    <div className="text-gray-600 italic">
-                      "{request.employee_comment}"
-                    </div>
-                  )}
-                  {request.manager_comment && (
-                    <div className="text-sm text-gray-600 mt-2">
-                      <strong>Manager note:</strong> {request.manager_comment}
-                    </div>
-                  )}
+                    {request.employee_comment && (
+                      <div className="text-gray-600 italic mt-2">
+                        "{request.employee_comment}"
+                      </div>
+                    )}
+                    {request.manager_comment && (
+                      <div className="text-sm text-gray-600 mt-2">
+                        <strong>Manager note:</strong> {request.manager_comment}
+                      </div>
+                    )}
+                  </div>
                 </div>
-              </div>
-            ))}
+              )
+            })}
           </div>
         )}
       </div>
