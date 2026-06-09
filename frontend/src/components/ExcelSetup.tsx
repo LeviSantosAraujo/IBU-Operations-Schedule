@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { FileSpreadsheet, Upload, Plus, Check, AlertCircle, Home, Shield } from 'lucide-react'
 import { auth } from '../auth'
+import { API_BASE_URL } from '../api'
 
 interface ExcelSetupProps {
   onSetupComplete: () => void
@@ -20,7 +21,7 @@ export default function ExcelSetup({ onSetupComplete }: ExcelSetupProps) {
 
   const checkStatus = async () => {
     try {
-      const response = await fetch('/api/excel/status')
+      const response = await fetch(`${API_BASE_URL}/excel/status`)
       const data = await response.json()
       setStatus(data)
       if (data.configured && data.file_exists) {
@@ -39,7 +40,7 @@ export default function ExcelSetup({ onSetupComplete }: ExcelSetupProps) {
     setError('')
     
     try {
-      const response = await fetch('/api/excel/create-new', {
+      const response = await fetch(`${API_BASE_URL}/excel/create-new`, {
         method: 'POST',
         headers: auth.getAuthHeaders()
       })
@@ -77,7 +78,7 @@ export default function ExcelSetup({ onSetupComplete }: ExcelSetupProps) {
     formData.append('file', selectedFile)
 
     try {
-      const response = await fetch('/api/excel/upload', {
+      const response = await fetch(`${API_BASE_URL}/excel/upload`, {
         method: 'POST',
         headers: auth.getAuthHeaders(),
         body: formData

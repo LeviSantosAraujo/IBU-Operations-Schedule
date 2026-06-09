@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { getEmployees } from '../api'
+import { API_BASE_URL, getEmployees } from '../api'
 import { LogIn, User, Shield, Lock, Key } from 'lucide-react'
 
 interface LoginProps {
@@ -37,7 +37,7 @@ export default function Login({ onLogin }: LoginProps) {
 
   const checkDatabaseStatus = async () => {
     try {
-      const response = await fetch('/api/excel/status')
+      const response = await fetch(`${API_BASE_URL}/excel/status`)
       const data = await response.json()
       setDbConfigured(data.configured && data.file_exists)
     } catch (err) {
@@ -56,7 +56,7 @@ export default function Login({ onLogin }: LoginProps) {
 
   const checkManagerPasswordStatus = async (employeeId: string) => {
     try {
-      const response = await fetch(`/api/managers/has-password/${employeeId}`)
+      const response = await fetch(`${API_BASE_URL}/managers/has-password/${employeeId}`)
       const data = await response.json()
       setNeedsPassword(!data.has_password)
     } catch (err) {
@@ -81,7 +81,7 @@ export default function Login({ onLogin }: LoginProps) {
         password: isManager ? password : undefined
       }
       
-      const response = await fetch('/api/login', {
+      const response = await fetch(`${API_BASE_URL}/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(loginData)
@@ -132,7 +132,7 @@ export default function Login({ onLogin }: LoginProps) {
     setError('')
 
     try {
-      const response = await fetch('/api/managers/set-password', {
+      const response = await fetch(`${API_BASE_URL}/managers/set-password`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

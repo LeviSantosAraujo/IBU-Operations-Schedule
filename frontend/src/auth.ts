@@ -1,6 +1,8 @@
 // Authentication utilities
 const TOKEN_KEY = 'ibu_schedule_token'
 const USER_KEY = 'ibu_schedule_user'
+const API_URL = import.meta.env.VITE_API_URL || ''
+const API_BASE_URL = `${API_URL}/api`
 
 export interface User {
   employee_id: string
@@ -10,7 +12,7 @@ export interface User {
 
 export const auth = {
   login: async (employeeId: string): Promise<User> => {
-    const response = await fetch('/api/login', {
+    const response = await fetch(`${API_BASE_URL}/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ employee_id: employeeId })
@@ -38,7 +40,7 @@ export const auth = {
   logout: async () => {
     const token = localStorage.getItem(TOKEN_KEY)
     if (token) {
-      await fetch('/api/logout', {
+      await fetch(`${API_BASE_URL}/logout`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}` }
       })

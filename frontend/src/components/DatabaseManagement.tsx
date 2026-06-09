@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { FileSpreadsheet, Upload, Plus, Download, AlertCircle, Check } from 'lucide-react'
 import { auth } from '../auth'
+import { API_BASE_URL } from '../api'
 
 export default function DatabaseManagement() {
   const [loading, setLoading] = useState(false)
@@ -9,7 +10,7 @@ export default function DatabaseManagement() {
 
   const handleDownload = async () => {
     try {
-      const response = await fetch('/api/excel/download', {
+      const response = await fetch(`${API_BASE_URL}/excel/download`, {
         headers: auth.getAuthHeaders()
       })
       
@@ -36,7 +37,7 @@ export default function DatabaseManagement() {
     setError('')
     
     try {
-      const response = await fetch('/api/excel/create-new', {
+      const response = await fetch(`${API_BASE_URL}/excel/create-new`, {
         method: 'POST',
         headers: auth.getAuthHeaders()
       })
@@ -72,7 +73,7 @@ export default function DatabaseManagement() {
     formData.append('file', selectedFile)
 
     try {
-      const response = await fetch('/api/excel/upload', {
+      const response = await fetch(`${API_BASE_URL}/excel/upload`, {
         method: 'POST',
         headers: auth.getAuthHeaders(),
         body: formData
