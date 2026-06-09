@@ -1,2 +1,3 @@
 [tool.vercel]
 entrypoint = "api:app"
+include = ["backend/**"]
