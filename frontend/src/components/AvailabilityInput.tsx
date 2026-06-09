@@ -249,7 +249,7 @@ export default function AvailabilityInput({ initialDate }: AvailabilityInputProp
           
           {saved && (
             <button
-              onClick={() => navigate('/schedule')}
+              onClick={() => navigate('/my-schedule')}
               className="flex items-center gap-2 bg-green-600 text-white px-6 py-2 rounded hover:bg-green-700"
             >
               <Calendar className="w-4 h-4" />
