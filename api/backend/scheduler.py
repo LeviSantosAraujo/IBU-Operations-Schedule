@@ -204,7 +204,13 @@ class SchedulingEngine:
             day_request = approved_requests[employee.id].get(shift.day_of_week)
             if day_request and day_request != AvailabilityType.OFF:
                 # Employee has an approved request for this day
-                if not self.is_time_within_availability(shift.start_time, shift.end_time, day_request):
+                if isinstance(day_request, dict) and day_request.get('type') == 'time_range':
+                    # Check if shift fits within the approved time range
+                    req_start = day_request.get('start', '00:00')
+                    req_end = day_request.get('end', '23:59')
+                    if not (shift.start_time >= req_start and shift.end_time <= req_end):
+                        return False, f"Shift {shift.start_time}-{shift.end_time} outside approved range {req_start}-{req_end}"
+                elif not self.is_time_within_availability(shift.start_time, shift.end_time, day_request):
                     return False, f"Not available on {shift.day_of_week} (approved availability)"
         
         # Priority 4: Fall back to general availability
@@ -313,9 +319,13 @@ class SchedulingEngine:
                                 if request_type == 'day_off':
                                     approved_requests[emp_id][day_name] = AvailabilityType.OFF
                                 else:
-                                    # For time range availability, mark as OFF during that time
-                                    # The scheduler will check time ranges when assigning shifts
-                                    approved_requests[emp_id][day_name] = AvailabilityType.OFF
+                                    # For time range availability, store the time range
+                                    # Format: {"type": "time_range", "start": "09:00", "end": "17:00"}
+                                    approved_requests[emp_id][day_name] = {
+                                        "type": "time_range",
+                                        "start": req.get('start_time', '00:00'),
+                                        "end": req.get('end_time', '23:59')
+                                    }
 
                             current_date += timedelta(days=1)
 

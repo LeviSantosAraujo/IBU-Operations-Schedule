@@ -175,7 +175,13 @@
     "email": "",
     "employee_type": "employee",
     "max_hours_per_week": 24,
-    "preferences": {},
+    "preferences": {
+      "ground_floor": 10,
+      "second_floor": 9,
+      "sixth_floor": 8,
+      "call_center": 7,
+      "event": 6
+    },
     "active": true,
     "created_at": "2026-06-09 19:28:04.828391"
   }
