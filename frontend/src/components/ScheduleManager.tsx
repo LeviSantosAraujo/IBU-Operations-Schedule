@@ -158,11 +158,17 @@ export default function ScheduleManager() {
   const loadAvailabilityRequests = async () => {
     try {
       const data = await getAvailabilityRequests()
-      // Load all requests - filter by date range for new schema, week_start_date for old schema
+      // Only load pending requests - approved requests already have locked shifts
       const formattedDate = format(weekStart, 'yyyy-MM-dd')
       const weekEnd = format(addDays(weekStart, 6), 'yyyy-MM-dd')
 
       const weekRequests = data.filter((r: any) => {
+        // Only include pending requests
+        const status = r.status?.toLowerCase() || ''
+        if (status !== 'pending' && status !== 'availabilityrequeststatus.pending') {
+          return false
+        }
+
         // Handle new schema with start_date/end_date
         if (r.start_date && r.end_date) {
           return r.start_date <= weekEnd && r.end_date >= formattedDate
