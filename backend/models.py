@@ -5,7 +5,8 @@ from enum import Enum
 
 class EmployeeType(str, Enum):
     INTERN = "intern"  # 15 hrs/week max
-    STUDENT_WORKER = "student_worker"  # 24 hrs/week max
+    EMPLOYEE = "employee"  # 24 hrs/week max (was student_worker)
+    STUDENT_WORKER = "student_worker"  # Legacy - maps to employee
     MANAGER = "manager"  # no limit
 
 class AvailabilityType(str, Enum):
@@ -17,6 +18,7 @@ class AvailabilityType(str, Enum):
     AFTER_12_EOD = "after_12_eod"  # after 12 - eod
     BEFORE_12_AFTER_330 = "before_12_after_330"  # Before 12 and after 3:30
     OFF = "off"  # Not available
+    DAY_OFF = "day_off"  # Day off request
 
 class JobType(str, Enum):
     GROUND_FLOOR = "ground_floor"  # GR
@@ -57,6 +59,15 @@ class Employee(BaseModel):
     active: bool = True
     created_at: datetime = Field(default_factory=datetime.now)
 
+class EmployeeUpdate(BaseModel):
+    """Model for partial employee updates - all fields optional"""
+    name: Optional[str] = None
+    email: Optional[str] = None
+    employee_type: Optional[EmployeeType] = None
+    max_hours_per_week: Optional[int] = None
+    preferences: Optional[Dict[JobType, int]] = None
+    active: Optional[bool] = None
+
 class Availability(BaseModel):
     id: Optional[str] = None  # Optional - will be auto-generated if not provided
     employee_id: str
@@ -74,6 +85,20 @@ class Availability(BaseModel):
     approved_by: Optional[str] = None  # Manager employee_id who approved
     approved_at: Optional[datetime] = None
 
+class HourlyCoverageRequirement(BaseModel):
+    """Manager-defined per-hour coverage requirements for scheduling
+    This represents which locations need coverage at which hours"""
+    id: Optional[str] = None
+    week_start_date: date
+    day_of_week: str  # monday, tuesday, etc.
+    hour: int  # 0-23, the hour of the day
+    location: str  # e.g., "2nd Floor", "6th Floor", "Ground Floor", "Call Center", "80 Bloor"
+    required_employees: int = 1  # How many employees needed
+    is_call_center: bool = False  # Whether this location can be call center
+    created_by: str  # Manager employee_id
+    created_at: datetime = Field(default_factory=datetime.now)
+    notes: Optional[str] = None
+
 class Shift(BaseModel):
     id: str
     employee_id: str
@@ -81,10 +106,17 @@ class Shift(BaseModel):
     start_time: str  # HH:MM format
     end_time: str    # HH:MM format
     job_type: JobType
-    floor: Optional[Floor] = None
+    floor: Optional[Floor] = None  # Legacy - kept for compatibility
+    location: Optional[str] = None  # Human-readable location (e.g., "2nd Floor", "Call Center")
     hours: float
     is_event: bool = False
     event_name: Optional[str] = None
+    color: Optional[str] = None  # Background color from Excel cell
+    comment: Optional[str] = None  # Any unmapped text/comment from the cell
+    requires_break: bool = False  # Whether this shift requires a 30-min break (>5 hours)
+    break_provided: bool = False  # Whether a break was provided
+    locked: bool = False  # Locked availability - manager cannot schedule over this
+    locked_availability_type: Optional[str] = None  # The approved availability type
 
 class WeeklySchedule(BaseModel):
     id: str
@@ -95,6 +127,7 @@ class WeeklySchedule(BaseModel):
     updated_at: datetime = Field(default_factory=datetime.now)
     created_by: str = "manager"
     status: str = "draft"  # draft, published, archived
+    metadata: Optional[Dict[str, Any]] = Field(default_factory=dict)  # Additional metadata like generation time
 
 class ScheduleRequest(BaseModel):
     week_start_date: date
@@ -116,3 +149,49 @@ class SystemConfig(BaseModel):
     default_weights: Dict[str, int] = Field(default_factory=dict)
     scheduling_rules: Dict[str, Any] = Field(default_factory=dict)
     floor_requirements: Dict[Floor, Dict[str, int]] = Field(default_factory=dict)
+
+class AvailabilityRequestStatus(str, Enum):
+    PENDING = "pending"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+
+class AvailabilityRequest(BaseModel):
+    id: str
+    employee_id: str
+    day_of_week: str  # Monday, Tuesday, etc.
+    availability_type: AvailabilityType
+    week_start_date: date
+    status: AvailabilityRequestStatus = AvailabilityRequestStatus.PENDING
+    manager_comment: Optional[str] = None
+    description: Optional[str] = None  # Employee's reason for availability
+    preferences: Optional[Dict[str, int]] = None  # Job preferences (1-10)
+    created_at: datetime = Field(default_factory=datetime.now)
+    updated_at: Optional[datetime] = None
+
+class NotificationType(str, Enum):
+    AVAILABILITY_APPROVED = "availability_approved"
+    AVAILABILITY_REJECTED = "availability_rejected"
+    SCHEDULE_UPDATED = "schedule_updated"
+
+class Notification(BaseModel):
+    id: str
+    employee_id: str
+    type: NotificationType
+    message: str
+    created_at: datetime = Field(default_factory=datetime.now)
+    read: bool = False
+
+class Event(BaseModel):
+    """Event created by managers for a specific week"""
+    id: str
+    name: str
+    week_start_date: date  # The week this event belongs to
+    date: date  # The specific date of the event
+    start_time: str  # HH:MM format
+    end_time: str  # HH:MM format
+    location: str  # Where the event happens
+    people_needed: int  # Number of employees needed
+    description: Optional[str] = None
+    created_by: str  # Manager employee_id who created the event
+    created_at: datetime = Field(default_factory=datetime.now)
+    updated_at: Optional[datetime] = None

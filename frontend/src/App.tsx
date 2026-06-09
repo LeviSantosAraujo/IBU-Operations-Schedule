@@ -1,14 +1,13 @@
 import { BrowserRouter as Router, Routes, Route, Link, useNavigate, Navigate } from 'react-router-dom'
 import { useState, useEffect } from 'react'
-import { Calendar, Users, LayoutGrid, LogOut, Shield, User, Bell, FileSpreadsheet } from 'lucide-react'
+import { Users, LayoutGrid, LogOut, Shield, User, FileSpreadsheet } from 'lucide-react'
 import { auth } from './auth'
 import Login from './components/Login'
 import ExcelSetup from './components/ExcelSetup'
-import AvailabilityInput from './components/AvailabilityInput'
 import ScheduleManager from './components/ScheduleManager'
 import EmployeeManagement from './components/EmployeeManagement'
-import FloorCoverage from './components/FloorCoverage'
 import DatabaseManagement from './components/DatabaseManagement'
+import EmployeeScheduleView from './components/EmployeeScheduleView'
 
 // Protected Route Component
 function ProtectedRoute({ 
@@ -30,35 +29,25 @@ function ProtectedRoute({
 }
 
 // Main App Layout
-function AppLayout() {
+function AppLayout({ onLogout }: { onLogout: () => void }) {
   const navigate = useNavigate()
   const user = auth.getUser()
   const isManager = auth.isManager()
-  const [pendingApprovals, setPendingApprovals] = useState(0)
   
   useEffect(() => {
-    if (isManager) {
-      // Check for pending approvals
-      const checkPending = async () => {
-        try {
-          const response = await fetch('/api/availability/pending')
-          if (response.ok) {
-            const pending = await response.json()
-            setPendingApprovals(pending.length)
-          }
-        } catch (err) {
-          console.error('Failed to check pending approvals')
-        }
+    // Redirect managers to Schedule Manager, employees to Schedule
+    if (window.location.pathname === '/' || window.location.pathname === '') {
+      if (isManager) {
+        navigate('/manager', { replace: true })
+      } else {
+        navigate('/my-schedule', { replace: true })
       }
-      checkPending()
-      // Poll every 30 seconds
-      const interval = setInterval(checkPending, 30000)
-      return () => clearInterval(interval)
     }
-  }, [isManager])
-  
-  const handleLogout = async () => {
+  }, [navigate, isManager])
+
+  const handleLogoutClick = async () => {
     await auth.logout()
+    onLogout()
     navigate('/login')
   }
   
@@ -69,18 +58,21 @@ function AppLayout() {
         <div className="max-w-7xl mx-auto px-4">
           <div className="flex items-center justify-between h-16">
             <div className="flex items-center">
-              <div className="flex-shrink-0 font-bold text-xl">IBU Schedule System</div>
+              <div className="flex-shrink-0 font-bold text-xl">IBU Operations team schedule</div>
               <div className="ml-10 flex space-x-4">
+                {/* Employees see their schedule */}
+                {!isManager && (
+                  <Link to="/my-schedule" className="flex items-center px-3 py-2 rounded hover:bg-blue-800">
+                    <LayoutGrid className="w-4 h-4 mr-2" />
+                    Schedule
+                  </Link>
+                )}
                 {/* Managers see full menu */}
                 {isManager && (
                   <>
-                    <Link to="/" className="flex items-center px-3 py-2 rounded hover:bg-blue-800">
-                      <Calendar className="w-4 h-4 mr-2" />
-                      Schedule
-                    </Link>
-                    <Link to="/floor-coverage" className="flex items-center px-3 py-2 rounded hover:bg-blue-800">
+                    <Link to="/manager" className="flex items-center px-3 py-2 rounded hover:bg-blue-800">
                       <LayoutGrid className="w-4 h-4 mr-2" />
-                      Floor Coverage
+                      Schedule Manager
                     </Link>
                     <Link to="/employees" className="flex items-center px-3 py-2 rounded hover:bg-blue-800">
                       <Users className="w-4 h-4 mr-2" />
@@ -92,24 +84,11 @@ function AppLayout() {
                     </Link>
                   </>
                 )}
-                {/* Everyone sees availability */}
-                <Link to="/availability" className="flex items-center px-3 py-2 rounded hover:bg-blue-800">
-                  <LayoutGrid className="w-4 h-4 mr-2" />
-                  My Availability
-                </Link>
               </div>
             </div>
             
             {/* User Info & Logout */}
             <div className="flex items-center gap-4">
-              {/* Pending Approvals Alert for Managers */}
-              {isManager && pendingApprovals > 0 && (
-                <div className="flex items-center gap-2 bg-orange-500 px-3 py-1 rounded-full animate-pulse">
-                  <Bell className="w-4 h-4" />
-                  <span className="text-sm font-medium">{pendingApprovals} pending approval{pendingApprovals > 1 ? 's' : ''}</span>
-                </div>
-              )}
-              
               <div className="flex items-center gap-2 text-sm">
                 {isManager ? (
                   <Shield className="w-4 h-4 text-yellow-400" />
@@ -120,7 +99,7 @@ function AppLayout() {
                 <span className="text-blue-300">({user?.role})</span>
               </div>
               <button
-                onClick={handleLogout}
+                onClick={handleLogoutClick}
                 className="flex items-center px-3 py-2 rounded hover:bg-blue-800 text-sm"
               >
                 <LogOut className="w-4 h-4 mr-1" />
@@ -135,18 +114,18 @@ function AppLayout() {
       <main className="max-w-7xl mx-auto px-4 py-6">
         <Routes>
           <Route path="/" element={
+            <ProtectedRoute>
+              {!isManager ? <Navigate to="/my-schedule" replace /> : <Navigate to="/manager" replace />}
+            </ProtectedRoute>
+          } />
+          <Route path="/my-schedule" element={
+            <ProtectedRoute>
+              <EmployeeScheduleView />
+            </ProtectedRoute>
+          } />
+          <Route path="/manager" element={
             <ProtectedRoute requireManager>
               <ScheduleManager />
-            </ProtectedRoute>
-          } />
-          <Route path="/availability" element={
-            <ProtectedRoute>
-              <AvailabilityInput />
-            </ProtectedRoute>
-          } />
-          <Route path="/floor-coverage" element={
-            <ProtectedRoute requireManager>
-              <FloorCoverage />
             </ProtectedRoute>
           } />
           <Route path="/employees" element={
@@ -172,6 +151,10 @@ function App() {
     setIsLoggedIn(true)
   }
   
+  const handleLogout = () => {
+    setIsLoggedIn(false)
+  }
+  
   return (
     <Router>
       <Routes>
@@ -191,7 +174,7 @@ function App() {
         <Route 
           path="/*" 
           element={
-            isLoggedIn ? <AppLayout /> : <Navigate to="/login" replace />
+            isLoggedIn ? <AppLayout onLogout={handleLogout} /> : <Navigate to="/login" replace />
           } 
         />
       </Routes>

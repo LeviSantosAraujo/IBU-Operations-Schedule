@@ -1,11 +1,12 @@
-# IBU Schedule System
+# IBU Operations team schedule
 
-A comprehensive automated scheduling system built with Python (FastAPI) and React. This system handles employee availability, weighted auto-scheduling, floor coverage tracking, and multi-week storage.
+A comprehensive automated scheduling system built with Python (FastAPI) and React. This system handles employee availability, weighted auto-scheduling, location-based staffing, event management, and multi-week storage.
 
 ## Deployment Notes
 - Uses Vercel for hosting
 - Python dependencies in root requirements.txt
 - Frontend built with Vite
+- Data stored in Excel files (portable, no database needed)
 
 ## Features
 
@@ -20,29 +21,47 @@ A comprehensive automated scheduling system built with Python (FastAPI) and Reac
   - After 12pm (EOD)
   - Before 12 & After 3:30
   - OFF
+- **Availability Requests**: Request specific availability changes with manager approval
+- **Schedule View**: View your own schedule with other employees' shifts dimmed if not assigned
 
 ### For Managers
-- **Auto-Schedule Generation**: Algorithm considers:
-  - Employee availability
-  - Job preferences with weights
-  - Maximum hours (interns: 15h, students: 24h, managers: unlimited)
-  - Floor requirements
+- **Auto-Schedule Generation**: Enhanced algorithm with 4 phases:
+  - Phase 0: Event staffing (exact number needed, no overstaffing)
+  - Phase 1-3: Regular location staffing (based on 4-week historical analysis)
+  - Phase 4: Fairness phase (ensures all employees reach max hours)
+  - Considers last 4 weeks of historical data to balance workload
+  - Prioritizes employees with fewer recent hours
+  - Respects hour limits, Day Off, availability, and preferences
+- **Event Management**: Create and manage events for the week
+  - Specify event name, date, time range, location, and people needed
+  - Events appear as dynamic filterable locations in sidebar
+  - Toast notification shows events for 5 seconds after create/delete
+  - Edit/delete event locations directly from sidebar
+  - Events take priority over regular location staffing
+  - System advises if no events exist before generating schedule
 - **Manual Schedule Editing**: Add/remove shifts easily
-- **Floor Coverage Queries**: Quick answers like "How many people on 6th floor next morning?"
+- **Clear Schedule**: Remove all timeshifts for a week while preserving events and locations
+  - Useful for starting fresh with the same events
+  - Only clears employee shifts, not event definitions
+- **Location Coverage Tracking**: View staffing across all locations
 - **Hours Tracking**: Visual indicators for employees approaching hour limits
 - **Multi-week Storage**: Access historical schedules
-- **Drag/Drop Interface**: Easily adjust shifts (future enhancement)
+- **Availability Request Management**: Approve/reject employee availability requests
 
-### Floors & Locations
-- Ground Floor
-- 2nd Floor  
-- 6th Floor
+### Locations
+- Call Center (CC)
+- 2nd Floor (2F)
+- Ground Floor (GR)
+- 6th Floor (6F)
+- Working From Home (WFH)
+- 80 Bloor
+- Events (special location for event staffing)
 
 ## Tech Stack
 
-- **Backend**: Python 3.9+, FastAPI, Pydantic
-- **Frontend**: React 18, TypeScript, Tailwind CSS, Vite
-- **Data Storage**: JSON files (simple, portable, no database needed)
+- **Backend**: Python 3.9+, FastAPI, Pydantic, openpyxl
+- **Frontend**: React 18, TypeScript, Tailwind CSS, Vite, react-datepicker
+- **Data Storage**: Excel files (portable, no database needed)
 
 ## Installation
 
@@ -99,24 +118,31 @@ The frontend will be available at `http://localhost:3000`
 ```
 Schedule Sheet IBU/
 ├── backend/
-│   ├── data/                  # JSON data storage (auto-created)
+│   ├── data/                  # Excel data storage (auto-created)
+│   ├── uploads/              # Excel file uploads
 │   ├── main.py               # FastAPI application entry point
-│   ├── models.py             # Pydantic data models
-│   ├── data_store.py         # JSON file operations
-│   ├── scheduler.py          # Scheduling algorithm
+│   ├── models.py             # Pydantic data models (Employee, Event, etc.)
+│   ├── excel_store.py        # Excel file operations
+│   ├── scheduler.py          # Enhanced scheduling algorithm
+│   ├── auth.py               # Authentication/authorization
+│   ├── blob_config.py        # Vercel Blob storage configuration
 │   └── requirements.txt      # Python dependencies
 ├── frontend/
 │   ├── src/
 │   │   ├── components/       # React components
 │   │   │   ├── AvailabilityInput.tsx
 │   │   │   ├── ScheduleManager.tsx
+│   │   │   ├── EmployeeScheduleView.tsx
 │   │   │   ├── EmployeeManagement.tsx
 │   │   │   └── FloorCoverage.tsx
 │   │   ├── api.ts            # API client
+│   │   ├── auth.ts           # Authentication utilities
 │   │   ├── App.tsx           # Main app component
 │   │   └── main.tsx          # Entry point
 │   ├── package.json          # Node dependencies
 │   └── vite.config.ts        # Vite configuration
+├── requirements.txt          # Root Python dependencies
+├── vercel.json              # Vercel deployment config
 └── README.md
 ```
 
@@ -139,12 +165,19 @@ Navigate to "My Availability" to:
 ### 3. Creating Schedules (Manager)
 Navigate to "Schedule" to:
 1. Select the week starting date
-2. Click **Auto-Generate** to create initial schedule
-3. Review and adjust:
+2. **Create Events** (optional but recommended):
+   - Click "Create Event" button
+   - Enter event name, date, time range, location, and people needed
+   - Events take priority over regular location staffing
+3. Click **Auto-Generate** to create initial schedule
+   - System will advise if no events exist (can proceed without events)
+   - Algorithm prioritizes: hour limits → Day Off → events → locations → availability → preferences
+4. Review and adjust:
    - Click **Add Shift** to manually add shifts
    - Click trash icon on any shift to remove it
-4. Click **Save** to save changes
-5. Click **Publish** when finalized
+   - Click **Clear Schedule** to remove all shifts while preserving events (useful for starting fresh)
+5. Click **Save** to save changes
+6. Click **Publish** when finalized
 
 ### 4. Floor Coverage
 Navigate to "Floor Coverage" to:
@@ -160,46 +193,67 @@ At the bottom of the Schedule page, see:
 
 ## Data Storage
 
-All data is stored in JSON files in `backend/data/`:
-- `employees.json` - Employee records
-- `availabilities.json` - Weekly availability submissions
-- `schedules.json` - Weekly schedules with shifts
-- `config.json` - System configuration
+All data is stored in Excel files in `backend/uploads/ibu_schedule.xlsx`:
+- Employees sheet - Employee records
+- Availability sheet - Weekly availability submissions
+- Weekly schedule tabs (e.g., "May 11-17") - Weekly schedules with shifts
+- Config sheet - System configuration
+- Events sheet - Event records for special staffing needs
+- Availability_Requests sheet - Employee availability change requests
+- Notifications sheet - System notifications
 
-This makes the system portable - just backup the `data` folder.
+This makes the system portable - just backup the Excel file.
 
 ## Scheduling Algorithm
 
-The auto-scheduler:
-1. Loads all employee availabilities for the week
-2. Scores employees for each shift based on:
-   - Job preferences (weighted 1-10)
-   - Availability fit
-   - Remaining hours capacity
-3. Assigns shifts prioritizing:
-   - Floor coverage requirements
-   - Employee preferences
-   - Fair distribution of hours
-4. Respects all hard constraints:
-   - Maximum hours per week
-   - Availability windows
-   - No overlapping shifts
+The enhanced auto-scheduler uses a priority-based approach with 4 phases:
+
+### Phase 0: Event Staffing
+- Assigns employees to manager-created events first
+- Staffs events with the exact number of people needed (no overstaffing for events)
+- Events take priority over all regular location staffing
+
+### Phase 1-3: Regular Location Staffing
+- Fills daily staffing targets based on 4-week historical analysis:
+  - Call Center: 4-5 employees/day
+  - 2nd Floor: 3-4 employees/day
+  - Ground Floor: 1-2 employees/day
+  - WFH/6th Floor/80 Bloor: 0-1 employees/day
+- Respects all constraints: hour limits, Day Off, availability requests, preferences
+
+### Phase 4: Fairness Phase (Maximization)
+- Ensures all employees reach their maximum hours capacity
+- Considers last 4 weeks of historical schedule data
+- Prioritizes employees who have worked fewer hours recently
+- Adds extra shifts to regular locations (can overstaff locations)
+- Does NOT add shifts to events (events stay at exact staffing)
+- Goal: Every employee works up to their max hours (interns: 15h, students: 24h, managers: 80h)
+
+### Priority Order (within each phase)
+1. **Employee Hour Limits** - Ensures no employee exceeds their max hours per week
+2. **Day Off Constraints** - Approved Day Off requests block all shifts for that day
+3. **Approved Availability Requests** - Respects approved availability changes
+4. **General Availability** - Fits shifts within employee availability windows
+5. **Employee Preferences** - Uses job preferences as tiebreaker
+
+### Event Handling
+- Events are created by managers with specific staffing needs
+- Events are staffed with the exact number needed (no overstaffing)
+- If no events exist, system advises manager but allows proceeding without events
+- Event shifts are marked with event name and location
+- Events appear as dynamic filterable locations in the sidebar
 
 ## Configuration
 
-You can modify scheduling weights and floor requirements via the API:
+The system uses location-based staffing targets derived from historical analysis. These are automatically calculated from the past 4 weeks of schedule data and can be viewed in the scheduler output.
 
-```bash
-curl -X PUT http://localhost:8000/api/config \
-  -H "Content-Type: application/json" \
-  -d '{
-    "floor_requirements": {
-      "ground": {"monday": 3, "tuesday": 3, ...},
-      "second": {"monday": 2, "tuesday": 2, ...},
-      "sixth": {"monday": 1, "tuesday": 1, ...}
-    }
-  }'
-```
+Location targets (based on 4-week average):
+- Call Center: ~23 employees/week (4-5/day)
+- 2nd Floor: ~17 employees/week (3-4/day)
+- Ground Floor: ~5 employees/week (1-2/day)
+- WFH: ~3 employees/week (0-1/day)
+- 6th Floor: ~1 employee/week (0-1/day)
+- 80 Bloor: ~1 employee/week (0-1/day)
 
 ## Future Enhancements
 

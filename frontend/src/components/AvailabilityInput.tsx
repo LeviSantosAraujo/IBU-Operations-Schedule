@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react'
 import DatePicker from 'react-datepicker'
 import 'react-datepicker/dist/react-datepicker.css'
-import { format, startOfWeek, addDays } from 'date-fns'
+import { format, addDays, startOfWeek } from 'date-fns'
 import { getEmployees, submitAvailability, getEmployeeAvailability } from '../api'
 import { auth } from '../auth'
-import { Save, Check } from 'lucide-react'
+import { Save, Check, Calendar } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
 
 const days = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']
 
@@ -19,10 +20,15 @@ const availabilityOptions = [
   { value: 'off', label: 'OFF / Not available', color: '#333333' },
 ]
 
-export default function AvailabilityInput() {
+interface AvailabilityInputProps {
+  initialDate?: Date | null
+}
+
+export default function AvailabilityInput({ initialDate }: AvailabilityInputProps) {
+  const navigate = useNavigate()
   const [employees, setEmployees] = useState<any[]>([])
   const [selectedEmployee, setSelectedEmployee] = useState('')
-  const [weekStart, setWeekStart] = useState<Date>(startOfWeek(new Date(), { weekStartsOn: 1 }))
+  const [weekStart, setWeekStart] = useState<Date>(initialDate || startOfWeek(new Date(), { weekStartsOn: 1 }))
   const [availability, setAvailability] = useState<any>({})
   const [loading, setLoading] = useState(false)
   const [saved, setSaved] = useState(false)
@@ -160,7 +166,7 @@ export default function AvailabilityInput() {
             <label className="block text-sm font-medium mb-2">Week Starting (Monday)</label>
             <DatePicker
               selected={weekStart}
-              onChange={(date: Date | null) => date && setWeekStart(startOfWeek(date, { weekStartsOn: 1 }))}
+              onChange={(date: Date | null) => date && setWeekStart(date)}
               filterDate={(date: Date) => date.getDay() === 1}
               className="w-full border rounded px-3 py-2"
               dateFormat="yyyy-MM-dd"
@@ -240,6 +246,16 @@ export default function AvailabilityInput() {
           >
             {loading ? 'Saving...' : <><Save className="w-4 h-4" /> Save Availability</>}
           </button>
+          
+          {saved && (
+            <button
+              onClick={() => navigate('/schedule')}
+              className="flex items-center gap-2 bg-green-600 text-white px-6 py-2 rounded hover:bg-green-700"
+            >
+              <Calendar className="w-4 h-4" />
+              View Schedule
+            </button>
+          )}
           
           {saved && (
             <div className="flex items-center gap-2 text-green-600">

@@ -33,7 +33,17 @@ body {
 .avail-before12after330 { background-color: #DDA0DD; }
 .avail-off { background-color: #333333; color: white; }
 
-/* Floor colors for shifts */
-.floor-ground { border-left-color: #10B981; background-color: #D1FAE5; }
-.floor-second { border-left-color: #3B82F6; background-color: #DBEAFE; }
-.floor-sixth { border-left-color: #8B5CF6; background-color: #EDE9FE; }
+/* Location colors for shifts */
+.loc-event { border-left-color: #F97316; background-color: #FFEDD5; }
+.loc-ground { border-left-color: #3B82F6; background-color: #DBEAFE; }
+.loc-second { border-left-color: #10B981; background-color: #D1FAE5; }
+.loc-sixth { border-left-color: #EAB308; background-color: #FEF9C3; }
+.loc-call-center { border-left-color: #6B7280; background-color: #E5E7EB; }
+.loc-80-bloor { border-left-color: #8B5CF6; background-color: #EDE9FE; }
+.loc-wfh { border-left-color: #EF4444; background-color: #FEE2E2; }
+.loc-day-off { border-left-color: #000000; background-color: #F3F4F6; }
+
+@keyframes shrink {
+  from { width: 100%; }
+  to { width: 0%; }
+}

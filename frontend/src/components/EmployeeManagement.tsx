@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react'
-import { getEmployees, createEmployee, updateEmployee, deleteEmployee } from '../api'
+import { getEmployees, createEmployee, updateEmployee, deleteEmployee, updateManagerPassword } from '../api'
 import { Plus, Edit, Trash2, Check, X } from 'lucide-react'
 
 const employeeTypes = [
-  { value: 'student_worker', label: 'Student Worker', maxHours: 24 },
+  { value: 'employee', label: 'Employee', maxHours: 24 },
   { value: 'intern', label: 'Intern', maxHours: 15 },
   { value: 'manager', label: 'Manager', maxHours: 80 }
 ]
@@ -16,9 +16,10 @@ export default function EmployeeManagement() {
   const [formData, setFormData] = useState({
     name: '',
     email: '',
-    employee_type: 'student_worker',
+    employee_type: 'employee',
     max_hours_per_week: 24,
-    active: true
+    active: true,
+    password: ''
   })
 
   useEffect(() => {
@@ -47,9 +48,10 @@ export default function EmployeeManagement() {
       setFormData({
         name: '',
         email: '',
-        employee_type: 'student_worker',
+        employee_type: 'employee',
         max_hours_per_week: 24,
-        active: true
+        active: true,
+        password: ''
       })
       loadEmployees()
     } catch (err) {
@@ -59,10 +61,30 @@ export default function EmployeeManagement() {
 
   const handleUpdate = async (id: string) => {
     try {
-      await updateEmployee(id, formData)
+      // Only send fields that should be updated - let backend preserve preferences, created_at, etc.
+      const updateData = {
+        name: formData.name,
+        email: formData.email,
+        employee_type: formData.employee_type,
+        max_hours_per_week: formData.max_hours_per_week,
+        active: formData.active
+      }
+      await updateEmployee(id, updateData)
+      
+      // If manager and password provided, update password
+      if (formData.employee_type === 'manager' && formData.password) {
+        try {
+          await updateManagerPassword(id, formData.password)
+        } catch (pwdErr) {
+          console.error('Password update error:', pwdErr)
+          alert('Employee updated but password update failed. You may need to update the password separately.')
+        }
+      }
+      
       setEditing(null)
       loadEmployees()
     } catch (err) {
+      console.error('Update error:', err)
       alert('Error updating employee')
     }
   }
@@ -84,7 +106,8 @@ export default function EmployeeManagement() {
       email: emp.email || '',
       employee_type: emp.employee_type,
       max_hours_per_week: emp.max_hours_per_week,
-      active: emp.active
+      active: emp.active,
+      password: ''
     })
   }
 
@@ -191,6 +214,7 @@ export default function EmployeeManagement() {
               <th className="p-3 text-left text-sm font-medium">Type</th>
               <th className="p-3 text-left text-sm font-medium">Email</th>
               <th className="p-3 text-left text-sm font-medium">Max Hours</th>
+              <th className="p-3 text-left text-sm font-medium">Password</th>
               <th className="p-3 text-left text-sm font-medium">Status</th>
               <th className="p-3 text-left text-sm font-medium">Actions</th>
             </tr>
@@ -234,6 +258,17 @@ export default function EmployeeManagement() {
                         onChange={(e) => setFormData({ ...formData, max_hours_per_week: parseInt(e.target.value) })}
                         className="w-20 border rounded px-2 py-1"
                       />
+                    </td>
+                    <td className="p-3">
+                      {formData.employee_type === 'manager' && (
+                        <input
+                          type="password"
+                          placeholder="New password (optional)"
+                          value={formData.password}
+                          onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                          className="w-full border rounded px-2 py-1 text-sm"
+                        />
+                      )}
                     </td>
                     <td className="p-3">
                       <select

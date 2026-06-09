@@ -1,4 +1,4 @@
-from typing import Optional, Dict
+from typing import Optional, Dict, Callable
 from datetime import datetime, timedelta
 from fastapi import HTTPException, Header
 import secrets
@@ -7,14 +7,16 @@ import secrets
 sessions: Dict[str, Dict] = {}
 
 class AuthManager:
-    SESSION_DURATION_HOURS = 8
+    SESSION_DURATION_HOURS = 1
     
     @staticmethod
-    def login(employee_id: str) -> str:
+    def login(employee_id: str, password: Optional[str] = None, get_employee_func: Optional[Callable] = None) -> str:
         """Create a session for an employee and return token"""
-        # Use Excel-based employee lookup instead of data_store
-        from main import get_employee_by_id
-        employee = get_employee_by_id(employee_id)
+        # Use Excel-based employee lookup for all users
+        if get_employee_func:
+            employee = get_employee_func(employee_id)
+        else:
+            raise HTTPException(status_code=500, detail="Employee lookup function not provided")
         
         if not employee:
             raise HTTPException(status_code=401, detail="Invalid employee")
@@ -67,9 +69,9 @@ class AuthManager:
     
     @staticmethod
     def require_manager(authorization: Optional[str] = Header(None)) -> Dict:
-        """Require manager role, raise 403 if not manager"""
+        """Require manager or admin role, raise 403 if not manager/admin"""
         user = AuthManager.require_auth(authorization)
-        if user["role"] != "manager":
+        if user["role"] not in ["manager", "admin"]:
             raise HTTPException(status_code=403, detail="Manager access required")
         return user
     
@@ -80,8 +82,8 @@ class AuthManager:
         if not user:
             return False
         
-        # Managers can edit anyone
-        if user["role"] == "manager":
+        # Managers and admins can edit anyone
+        if user["role"] in ["manager", "admin"]:
             return True
         
         # Employees can only edit themselves
@@ -99,6 +101,6 @@ def require_manager(auth: Optional[str] = Header(None, alias="Authorization")) -
 
 def require_self_or_manager(employee_id: str, auth: Optional[str] = Header(None, alias="Authorization")):
     user = require_auth(auth)
-    if user["role"] != "manager" and user["employee_id"] != employee_id:
+    if user["role"] not in ["manager", "admin"] and user["employee_id"] != employee_id:
         raise HTTPException(status_code=403, detail="Can only access your own data")
     return user

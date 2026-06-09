@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { getEmployees } from '../api'
-import { LogIn, User, Shield, Lock, Key, ArrowLeft } from 'lucide-react'
+import { LogIn, User, Shield, Lock, Key } from 'lucide-react'
 
 interface LoginProps {
   onLogin: () => void
@@ -81,24 +81,18 @@ export default function Login({ onLogin }: LoginProps) {
         password: isManager ? password : undefined
       }
       
-      console.log('Login attempt with data:', loginData)
-      
       const response = await fetch('/api/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(loginData)
       })
       
-      console.log('Response status:', response.status, response.ok)
-      
       if (!response.ok) {
         const errorData = await response.json()
-        console.error('Login failed:', errorData)
         throw new Error(errorData.detail || 'Login failed')
       }
       
       const data = await response.json()
-      console.log('Login successful:', data)
       
       // If manager needs password setup, show that first
       if (data.requires_password_setup) {
@@ -160,8 +154,14 @@ export default function Login({ onLogin }: LoginProps) {
     }
   }
 
-  const managers = employees.filter(e => e.employee_type === 'manager')
-  const staff = employees.filter(e => e.employee_type !== 'manager')
+  // Filter out 'Availabilities' and other non-employee entries
+  const validEmployees = employees.filter(e => 
+    e.name.toLowerCase() !== 'availabilities' && 
+    e.name.toLowerCase() !== 'availability'
+  )
+  
+  const managers = validEmployees.filter(e => e.employee_type === 'manager')
+  const staff = validEmployees.filter(e => e.employee_type !== 'manager')
 
   // Password setup screen for first-time manager login
   if (showPasswordSetup) {
@@ -221,25 +221,11 @@ export default function Login({ onLogin }: LoginProps) {
     )
   }
 
-  const handleGoBack = () => {
-    window.location.href = '/'
-  }
-
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-100">
       <div className="bg-white p-8 rounded-lg shadow-lg w-full max-w-md">
-        <div className="flex items-center justify-between mb-4">
-          <button
-            onClick={handleGoBack}
-            className="text-gray-500 hover:text-gray-700 flex items-center gap-1 text-sm"
-          >
-            <ArrowLeft className="w-4 h-4" />
-            Home
-          </button>
-        </div>
-        
         <div className="text-center mb-6">
-          <h1 className="text-2xl font-bold text-blue-900">IBU Schedule System</h1>
+          <h1 className="text-2xl font-bold text-blue-900">IBU Operations team schedule</h1>
           <p className="text-gray-600 mt-2">Please select your name to continue</p>
         </div>
 
@@ -283,7 +269,9 @@ export default function Login({ onLogin }: LoginProps) {
                   >
                     <Shield className="w-4 h-4 text-blue-600" />
                     <span className="font-medium">{emp.name}</span>
-                    <span className="text-xs text-gray-500 ml-auto">Full Access</span>
+                    <span className="text-xs text-gray-500 ml-auto">
+                      Full Access
+                    </span>
                   </button>
                 ))}
               </div>

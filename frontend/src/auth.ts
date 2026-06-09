@@ -5,7 +5,7 @@ const USER_KEY = 'ibu_schedule_user'
 export interface User {
   employee_id: string
   employee_name: string
-  role: 'manager' | 'student_worker' | 'intern'
+  role: 'admin' | 'manager' | 'employee' | 'intern' | 'student_worker'
 }
 
 export const auth = {
