@@ -1567,29 +1567,77 @@ def get_availability_requests() -> List[Dict]:
     wb = _get_workbook()
     if not wb:
         return []
-    
+
     try:
         if 'Availability_Requests' not in wb.sheetnames:
             wb.close()
             return []
-        
+
         sheet = wb['Availability_Requests']
         requests = []
-        
+
+        # Check if sheet has new schema (has 'request_type' column)
+        has_new_schema = sheet.cell(row=1, column=12).value == 'Request_Type'
+
         for row in range(2, sheet.max_row + 1):
-            request = {
-                'id': sheet.cell(row=row, column=1).value,
-                'employee_id': sheet.cell(row=row, column=2).value,
-                'day_of_week': sheet.cell(row=row, column=3).value,
-                'availability_type': sheet.cell(row=row, column=4).value,
-                'week_start_date': sheet.cell(row=row, column=5).value,
-                'status': sheet.cell(row=row, column=6).value,
-                'manager_comment': sheet.cell(row=row, column=7).value,
-                'description': sheet.cell(row=row, column=8).value,
-                'preferences': sheet.cell(row=row, column=9).value,
-                'created_at': sheet.cell(row=row, column=10).value,
-                'updated_at': sheet.cell(row=row, column=11).value
-            }
+            if has_new_schema:
+                # New schema
+                request = {
+                    'id': sheet.cell(row=row, column=1).value,
+                    'employee_id': sheet.cell(row=row, column=2).value,
+                    'request_type': sheet.cell(row=row, column=3).value,
+                    'start_date': sheet.cell(row=row, column=4).value,
+                    'end_date': sheet.cell(row=row, column=5).value,
+                    'days_of_week': sheet.cell(row=row, column=6).value,
+                    'start_time': sheet.cell(row=row, column=7).value,
+                    'end_time': sheet.cell(row=row, column=8).value,
+                    'status': sheet.cell(row=row, column=9).value,
+                    'manager_comment': sheet.cell(row=row, column=10).value,
+                    'employee_comment': sheet.cell(row=row, column=11).value,
+                    'preferences': sheet.cell(row=row, column=12).value,
+                    'created_at': sheet.cell(row=row, column=13).value,
+                    'updated_at': sheet.cell(row=row, column=14).value,
+                    'approved_by': sheet.cell(row=row, column=15).value,
+                    'approved_at': sheet.cell(row=row, column=16).value,
+                    # Legacy fields for backward compatibility
+                    'day_of_week': None,
+                    'availability_type': None,
+                    'week_start_date': None,
+                    'description': None,
+                }
+                # Parse days_of_week JSON if present
+                if request['days_of_week']:
+                    try:
+                        import json
+                        request['days_of_week'] = json.loads(request['days_of_week'])
+                    except:
+                        pass
+            else:
+                # Old schema for backward compatibility
+                request = {
+                    'id': sheet.cell(row=row, column=1).value,
+                    'employee_id': sheet.cell(row=row, column=2).value,
+                    'day_of_week': sheet.cell(row=row, column=3).value,
+                    'availability_type': sheet.cell(row=row, column=4).value,
+                    'week_start_date': sheet.cell(row=row, column=5).value,
+                    'status': sheet.cell(row=row, column=6).value,
+                    'manager_comment': sheet.cell(row=row, column=7).value,
+                    'description': sheet.cell(row=row, column=8).value,
+                    'preferences': sheet.cell(row=row, column=9).value,
+                    'created_at': sheet.cell(row=row, column=10).value,
+                    'updated_at': sheet.cell(row=row, column=11).value,
+                    # New fields for backward compatibility
+                    'request_type': 'availability',
+                    'start_date': None,
+                    'end_date': None,
+                    'days_of_week': None,
+                    'start_time': None,
+                    'end_time': None,
+                    'employee_comment': None,
+                    'approved_by': None,
+                    'approved_at': None,
+                }
+
             # Parse preferences JSON if present
             if request['preferences']:
                 try:
@@ -1610,42 +1658,103 @@ def save_availability_request(request: Dict) -> bool:
     wb = _get_workbook()
     if not wb:
         return False
-    
+
     try:
+        import json
+
         if 'Availability_Requests' not in wb.sheetnames:
             sheet = wb.create_sheet('Availability_Requests')
-            headers = ['ID', 'Employee_ID', 'Day_of_Week', 'Availability_Type', 'Week_Start_Date', 'Status', 'Manager_Comment', 'Description', 'Preferences', 'Created_At', 'Updated_At']
+            # New schema headers
+            headers = ['ID', 'Employee_ID', 'Request_Type', 'Start_Date', 'End_Date', 'Days_of_Week', 'Start_Time', 'End_Time', 'Status', 'Manager_Comment', 'Employee_Comment', 'Preferences', 'Created_At', 'Updated_At', 'Approved_By', 'Approved_At']
             for col, header in enumerate(headers, 1):
                 sheet.cell(row=1, column=col, value=header)
                 sheet.cell(row=1, column=col).font = Font(bold=True)
         else:
             sheet = wb['Availability_Requests']
-        
+            # Check if sheet has new schema (has 'Request_Type' column)
+            has_new_schema = sheet.cell(row=1, column=3).value == 'Request_Type'
+            if not has_new_schema:
+                # Migrate to new schema by recreating the sheet
+                old_data = []
+                for row in range(2, sheet.max_row + 1):
+                    old_data.append({
+                        'id': sheet.cell(row=row, column=1).value,
+                        'employee_id': sheet.cell(row=row, column=2).value,
+                        'day_of_week': sheet.cell(row=row, column=3).value,
+                        'availability_type': sheet.cell(row=row, column=4).value,
+                        'week_start_date': sheet.cell(row=row, column=5).value,
+                        'status': sheet.cell(row=row, column=6).value,
+                        'manager_comment': sheet.cell(row=row, column=7).value,
+                        'description': sheet.cell(row=row, column=8).value,
+                        'preferences': sheet.cell(row=row, column=9).value,
+                        'created_at': sheet.cell(row=row, column=10).value,
+                        'updated_at': sheet.cell(row=row, column=11).value,
+                    })
+                wb.remove(sheet)
+                sheet = wb.create_sheet('Availability_Requests')
+                headers = ['ID', 'Employee_ID', 'Request_Type', 'Start_Date', 'End_Date', 'Days_of_Week', 'Start_Time', 'End_Time', 'Status', 'Manager_Comment', 'Employee_Comment', 'Preferences', 'Created_At', 'Updated_At', 'Approved_By', 'Approved_At']
+                for col, header in enumerate(headers, 1):
+                    sheet.cell(row=1, column=col, value=header)
+                    sheet.cell(row=1, column=col).font = Font(bold=True)
+                # Migrate old data
+                for i, old in enumerate(old_data, 2):
+                    sheet.cell(row=i, column=1).value = old['id']
+                    sheet.cell(row=i, column=2).value = old['employee_id']
+                    sheet.cell(row=i, column=3).value = 'availability'  # Default to availability
+                    sheet.cell(row=i, column=4).value = old.get('week_start_date')
+                    sheet.cell(row=i, column=5).value = old.get('week_start_date')
+                    sheet.cell(row=i, column=6).value = json.dumps([old['day_of_week']]) if old['day_of_week'] else None
+                    sheet.cell(row=i, column=7).value = None  # No start_time in old schema
+                    sheet.cell(row=i, column=8).value = None  # No end_time in old schema
+                    sheet.cell(row=i, column=9).value = old['status']
+                    sheet.cell(row=i, column=10).value = old['manager_comment']
+                    sheet.cell(row=i, column=11).value = old['description']
+                    sheet.cell(row=i, column=12).value = old['preferences']
+                    sheet.cell(row=i, column=13).value = old['created_at']
+                    sheet.cell(row=i, column=14).value = old['updated_at']
+                    sheet.cell(row=i, column=15).value = None
+                    sheet.cell(row=i, column=16).value = None
+
         # Check if request already exists
         for row in range(2, sheet.max_row + 1):
             if sheet.cell(row=row, column=1).value == request['id']:
                 # Update existing
-                sheet.cell(row=row, column=6).value = request['status']
-                sheet.cell(row=row, column=7).value = request.get('manager_comment')
-                sheet.cell(row=row, column=8).value = request.get('description')
-                sheet.cell(row=row, column=9).value = str(request.get('preferences', {})) if request.get('preferences') else None
-                sheet.cell(row=row, column=11).value = request.get('updated_at')
+                sheet.cell(row=row, column=3).value = request.get('request_type')
+                sheet.cell(row=row, column=4).value = request.get('start_date')
+                sheet.cell(row=row, column=5).value = request.get('end_date')
+                sheet.cell(row=row, column=6).value = json.dumps(request.get('days_of_week')) if request.get('days_of_week') else None
+                sheet.cell(row=row, column=7).value = request.get('start_time')
+                sheet.cell(row=row, column=8).value = request.get('end_time')
+                sheet.cell(row=row, column=9).value = request['status']
+                sheet.cell(row=row, column=10).value = request.get('manager_comment')
+                sheet.cell(row=row, column=11).value = request.get('employee_comment')
+                sheet.cell(row=row, column=12).value = str(request.get('preferences', {})) if request.get('preferences') else None
+                sheet.cell(row=row, column=14).value = request.get('updated_at')
+                sheet.cell(row=row, column=15).value = request.get('approved_by')
+                sheet.cell(row=row, column=16).value = request.get('approved_at')
                 _save_workbook(wb)
                 wb.close()
                 return True
-        
+
         # Add new request
         row = sheet.max_row + 1
         sheet.cell(row=row, column=1).value = request['id']
         sheet.cell(row=row, column=2).value = request['employee_id']
-        sheet.cell(row=row, column=3).value = request['day_of_week']
-        sheet.cell(row=row, column=4).value = request['availability_type']
-        sheet.cell(row=row, column=5).value = request['week_start_date']
-        sheet.cell(row=row, column=6).value = request['status']
-        sheet.cell(row=row, column=7).value = request.get('manager_comment')
-        sheet.cell(row=row, column=8).value = request['created_at']
-        sheet.cell(row=row, column=9).value = request.get('updated_at')
-        
+        sheet.cell(row=row, column=3).value = request.get('request_type')
+        sheet.cell(row=row, column=4).value = request.get('start_date')
+        sheet.cell(row=row, column=5).value = request.get('end_date')
+        sheet.cell(row=row, column=6).value = json.dumps(request.get('days_of_week')) if request.get('days_of_week') else None
+        sheet.cell(row=row, column=7).value = request.get('start_time')
+        sheet.cell(row=row, column=8).value = request.get('end_time')
+        sheet.cell(row=row, column=9).value = request['status']
+        sheet.cell(row=row, column=10).value = request.get('manager_comment')
+        sheet.cell(row=row, column=11).value = request.get('employee_comment')
+        sheet.cell(row=row, column=12).value = str(request.get('preferences', {})) if request.get('preferences') else None
+        sheet.cell(row=row, column=13).value = request.get('created_at')
+        sheet.cell(row=row, column=14).value = request.get('updated_at')
+        sheet.cell(row=row, column=15).value = request.get('approved_by')
+        sheet.cell(row=row, column=16).value = request.get('approved_at')
+
         _save_workbook(wb)
         wb.close()
         return True
