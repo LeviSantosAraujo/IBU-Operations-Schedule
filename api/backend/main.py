@@ -94,10 +94,11 @@ async def excel_status():
     try:
         file_path = get_excel_file()
         exists = excel_file_exists()
+        has_data = get_excel_data() is not None
         return {
-            "configured": exists or file_path is not None,
-            "file_path": file_path or ("blob_storage" if exists else None),
-            "file_exists": exists
+            "configured": exists or has_data or file_path is not None,
+            "file_path": file_path or ("blob_storage" if exists or has_data else None),
+            "file_exists": exists or has_data
         }
     except Exception as e:
         return {

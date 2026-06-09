@@ -98,12 +98,15 @@ def _get_workbook() -> Optional[Workbook]:
 def _save_workbook(wb: Workbook) -> bool:
     """Save workbook to storage"""
     global _workbook_cache
-    # Always save to local file
-    local_path = Path(__file__).parent / "uploads" / "ibu_schedule.xlsx"
-    wb.save(local_path)
-    # Clear cache after saving so next load gets fresh data
+    saved = save_workbook(wb)
+    try:
+        local_path = Path(__file__).parent / "uploads" / "ibu_schedule.xlsx"
+        local_path.parent.mkdir(exist_ok=True)
+        wb.save(local_path)
+    except OSError:
+        pass
     _workbook_cache = None
-    return True
+    return saved
 
 def _invalidate_cache():
     """Clear the workbook cache"""
