@@ -49,14 +49,19 @@ class ExcelPathRequest(BaseModel):
 # Global state
 CURRENT_EXCEL_FILE: Optional[str] = None
 UPLOAD_DIR = Path(__file__).parent / "uploads"
-UPLOAD_DIR.mkdir(exist_ok=True)
+try:
+    UPLOAD_DIR.mkdir(exist_ok=True)
+except OSError:
+    # In Vercel serverless, the filesystem is read-only at /var/task
+    # We'll use Vercel Blob storage instead
+    pass
 
 app = FastAPI(title="IBU Operations team schedule", version="2.0.0")
 
 # Enable CORS for frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:5173", "http://localhost:3001"],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
