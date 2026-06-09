@@ -311,9 +311,19 @@ export default function EmployeeScheduleView() {
                         const isCurrentUser = user && emp.id === user.employee_id
                         // Get all requests for this day and sort by created_at descending (most recent first)
                         const dayRequests = isCurrentUser ? myAvailabilityRequests
-                          .filter((r: any) => r.day_of_week.toLowerCase() === day)
+                          .filter((r: any) => {
+                            // Handle new schema (days_of_week array)
+                            if (Array.isArray(r.days_of_week) && r.days_of_week.length > 0) {
+                              return r.days_of_week.some((d: string) => d.toLowerCase() === day)
+                            }
+                            // Handle old schema (day_of_week string)
+                            if (r.day_of_week) {
+                              return r.day_of_week.toLowerCase() === day
+                            }
+                            return false
+                          })
                           .sort((a: any, b: any) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime()) : []
-                        
+
                         // Only show request history if no shifts are set
                         const showRequestHistory = dayRequests.length > 0 && shifts.length === 0
                         

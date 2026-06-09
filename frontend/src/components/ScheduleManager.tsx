@@ -1126,9 +1126,20 @@ export default function ScheduleManager() {
                           const shifts = getShiftsForCell(emp.id, day)
                           // Get all availability requests for this employee and day
                           const empDayRequests = availabilityRequests
-                            .filter((r: any) => r.employee_id === emp.id && r.day_of_week.toLowerCase() === day)
+                            .filter((r: any) => {
+                              if (r.employee_id !== emp.id) return false
+                              // Handle new schema (days_of_week array)
+                              if (Array.isArray(r.days_of_week) && r.days_of_week.length > 0) {
+                                return r.days_of_week.some((d: string) => d.toLowerCase() === day)
+                              }
+                              // Handle old schema (day_of_week string)
+                              if (r.day_of_week) {
+                                return r.day_of_week.toLowerCase() === day
+                              }
+                              return false
+                            })
                             .sort((a: any, b: any) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime())
-                          
+
                           const hasShifts = shifts.length > 0
                           const showRequests = empDayRequests.length > 0 && !hasShifts
                           
