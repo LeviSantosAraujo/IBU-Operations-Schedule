@@ -400,8 +400,7 @@ export default function ScheduleManager() {
   const handleDeleteShift = (shiftId: string) => {
     if (!schedule) return
     const updatedShifts = schedule.shifts.filter((s: Shift) => s.id !== shiftId)
-    setSchedule({ ...schedule, shifts: updatedShifts })
-    recalculateHours(updatedShifts)
+    setSchedule({ ...schedule, shifts: updatedShifts, total_hours: recalculateHours(updatedShifts) })
   }
 
   const handleAddShift = () => {
@@ -428,8 +427,7 @@ export default function ScheduleManager() {
 
     saveToHistory()
     const updatedShifts = [...schedule.shifts, shift]
-    setSchedule({ ...schedule, shifts: updatedShifts })
-    recalculateHours(updatedShifts)
+    setSchedule({ ...schedule, shifts: updatedShifts, total_hours: recalculateHours(updatedShifts) })
     setShowAddShift(false)
   }
 
@@ -438,7 +436,7 @@ export default function ScheduleManager() {
     shifts.forEach(shift => {
       totals[shift.employee_id] = (totals[shift.employee_id] || 0) + shift.hours
     })
-    setSchedule((prev: any) => ({ ...prev, total_hours: totals }))
+    return totals
   }
 
   const getShiftColorClass = (shift: Shift) => {
@@ -510,8 +508,7 @@ export default function ScheduleManager() {
     // Update the schedule with the shift moved to new location
     const updatedShifts = [...shiftsWithoutOriginal, updatedShift]
     
-    setSchedule({ ...schedule, shifts: updatedShifts })
-    recalculateHours(updatedShifts)
+    setSchedule({ ...schedule, shifts: updatedShifts, total_hours: recalculateHours(updatedShifts) })
     setDraggedShift(null)
   }
 
@@ -626,8 +623,7 @@ export default function ScheduleManager() {
       updatedShifts = [...schedule.shifts, updatedShift]
     }
     
-    setSchedule({ ...schedule, shifts: updatedShifts })
-    recalculateHours(updatedShifts)
+    setSchedule({ ...schedule, shifts: updatedShifts, total_hours: recalculateHours(updatedShifts) })
     setShowEditModal(false)
     setEditingShift(null)
     setDraggedShift(null)
@@ -891,8 +887,8 @@ export default function ScheduleManager() {
               <Calendar className="w-4 h-4" />
               <DatePicker
                 selected={weekStart}
-                onChange={(date: Date | null) => date && setWeekStart(startOfWeek(date, { weekStartsOn: 0 }))}
-                filterDate={(date: Date) => date.getDay() === 0}
+                onChange={(date: Date | null) => date && setWeekStart(startOfWeek(date, { weekStartsOn: 1 }))}
+                filterDate={(date: Date) => date.getDay() === 1}
                 className="border rounded px-3 py-1"
                 dateFormat="yyyy-MM-dd"
               />
@@ -1126,7 +1122,8 @@ export default function ScheduleManager() {
                                   key={shift.id} 
                                   draggable
                                   onDragStart={() => handleDragStart(shift)}
-                                  onDoubleClick={() => handleCellDoubleClick(shift.id)}
+                                  onClick={(e) => e.stopPropagation()}
+                                  onDoubleClick={(e) => { e.stopPropagation(); handleCellDoubleClick(shift.id) }}
                                   className={`shift-card p-2 rounded mb-1 text-xs border relative group cursor-move ${getShiftColorClass(shift)} ${!isShiftHighlighted(shift) ? 'opacity-30' : ''}`}
                                 >
                                   <div className="flex justify-between items-start">
