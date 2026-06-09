@@ -806,11 +806,32 @@ export default function ScheduleManager() {
             <div className="space-y-2 max-h-96 overflow-y-auto">
               {availabilityRequests.filter((r: any) => r.status === 'pending' || r.status === 'AvailabilityRequestStatus.PENDING').map((request: any) => {
                 const emp = employees.find((e: any) => e.id === request.employee_id)
+
+                // Handle both new and old schema
+                const requestType = request.request_type || 'availability'
+                const daysDisplay = Array.isArray(request.days_of_week) && request.days_of_week.length > 0
+                  ? request.days_of_week.map((d: string) => d.charAt(0).toUpperCase() + d.slice(1)).join(', ')
+                  : request.day_of_week || 'N/A'
+
+                let description = ''
+                if (requestType === 'day_off') {
+                  description = `Day Off for ${daysDisplay}`
+                } else {
+                  const timeRange = request.start_time && request.end_time
+                    ? ` (${request.start_time} - ${request.end_time})`
+                    : ''
+                  description = `Available on ${daysDisplay}${timeRange}`
+                }
+
+                const dateRange = request.start_date && request.end_date
+                  ? `${request.start_date} to ${request.end_date}`
+                  : ''
+
                 return (
                   <div key={request.id} className="p-3 bg-gray-50 rounded border">
                     <div className="font-medium text-sm">{emp?.name || request.employee_id}</div>
-                    <div className="text-xs text-gray-600 capitalize">{request.day_of_week}</div>
-                    <div className="text-xs text-gray-500">{request.availability_type}</div>
+                    <div className="text-xs text-gray-600 capitalize">{description}</div>
+                    {dateRange && <div className="text-xs text-gray-500">{dateRange}</div>}
                     <div className="mt-2 flex gap-2">
                       <button
                         onClick={() => openApprovalModal(request)}
@@ -1404,14 +1425,48 @@ export default function ScheduleManager() {
                   {employees.find((e: any) => e.id === selectedRequest.employee_id)?.name || selectedRequest.employee_id}
                 </span>
               </div>
-              <div>
-                <span className="text-sm text-gray-600">Day:</span>
-                <span className="ml-2 font-medium capitalize">{selectedRequest.day_of_week}</span>
-              </div>
-              <div>
-                <span className="text-sm text-gray-600">Availability:</span>
-                <span className="ml-2 font-medium">{selectedRequest.availability_type}</span>
-              </div>
+              {/* Handle both new and old schema */}
+              {(() => {
+                const requestType = selectedRequest.request_type || 'availability'
+                const daysDisplay = Array.isArray(selectedRequest.days_of_week) && selectedRequest.days_of_week.length > 0
+                  ? selectedRequest.days_of_week.map((d: string) => d.charAt(0).toUpperCase() + d.slice(1)).join(', ')
+                  : selectedRequest.day_of_week || 'N/A'
+
+                let description = ''
+                if (requestType === 'day_off') {
+                  description = `Day Off for ${daysDisplay}`
+                } else {
+                  const timeRange = selectedRequest.start_time && selectedRequest.end_time
+                    ? ` (${selectedRequest.start_time} - ${selectedRequest.end_time})`
+                    : ''
+                  description = `Available on ${daysDisplay}${timeRange}`
+                }
+
+                const dateRange = selectedRequest.start_date && selectedRequest.end_date
+                  ? `${selectedRequest.start_date} to ${selectedRequest.end_date}`
+                  : ''
+
+                return (
+                  <>
+                    <div>
+                      <span className="text-sm text-gray-600">Request:</span>
+                      <span className="ml-2 font-medium">{description}</span>
+                    </div>
+                    {dateRange && (
+                      <div>
+                        <span className="text-sm text-gray-600">Date Range:</span>
+                        <span className="ml-2 font-medium">{dateRange}</span>
+                      </div>
+                    )}
+                    {selectedRequest.employee_comment && (
+                      <div>
+                        <span className="text-sm text-gray-600">Employee Comment:</span>
+                        <span className="ml-2 font-medium italic">"{selectedRequest.employee_comment}"</span>
+                      </div>
+                    )}
+                  </>
+                )
+              })()}
               <div>
                 <label className="block text-sm font-medium mb-1">Manager Comment (optional for approval, required for rejection)</label>
                 <textarea
