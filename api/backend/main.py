@@ -69,6 +69,14 @@ app.add_middleware(
 
 # ============ Health Check ============
 
+@app.get("/")
+async def root():
+    return {
+        "status": "running",
+        "message": "IBU Operations Schedule API is running",
+        "health": "/api/health",
+    }
+
 @app.get("/api/health")
 async def health_check():
     """Simple health check to verify API is working"""
