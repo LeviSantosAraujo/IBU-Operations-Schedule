@@ -155,18 +155,30 @@ class AvailabilityRequestStatus(str, Enum):
     APPROVED = "approved"
     REJECTED = "rejected"
 
+class AvailabilityRequestType(str, Enum):
+    AVAILABILITY = "availability"  # Time range availability
+    DAY_OFF = "day_off"  # Full day off request
+
 class AvailabilityRequest(BaseModel):
     id: str
     employee_id: str
-    day_of_week: str  # Monday, Tuesday, etc.
-    availability_type: AvailabilityType
-    week_start_date: date
+    request_type: AvailabilityRequestType = AvailabilityRequestType.AVAILABILITY
+    start_date: date  # Start of date range
+    end_date: date  # End of date range
+    days_of_week: List[str] = []  # e.g., ["monday", "wednesday", "friday"]
+    start_time: Optional[str] = None  # HH:MM format (for availability requests)
+    end_time: Optional[str] = None  # HH:MM format (for availability requests)
+    week_start_date: Optional[date] = None  # Legacy - for compatibility
+    day_of_week: Optional[str] = None  # Legacy - for compatibility
+    availability_type: Optional[AvailabilityType] = None  # Legacy - for compatibility
     status: AvailabilityRequestStatus = AvailabilityRequestStatus.PENDING
     manager_comment: Optional[str] = None
-    description: Optional[str] = None  # Employee's reason for availability
+    employee_comment: Optional[str] = None  # Employee's reason for the request
     preferences: Optional[Dict[str, int]] = None  # Job preferences (1-10)
     created_at: datetime = Field(default_factory=datetime.now)
     updated_at: Optional[datetime] = None
+    approved_by: Optional[str] = None  # Manager employee_id who approved
+    approved_at: Optional[datetime] = None
 
 class NotificationType(str, Enum):
     AVAILABILITY_APPROVED = "availability_approved"

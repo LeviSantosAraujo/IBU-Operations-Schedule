@@ -1099,23 +1099,24 @@ export default function ScheduleManager() {
                           const showRequests = empDayRequests.length > 0 && !hasShifts
                           
                           return (
-                            <td 
-                              key={`${emp.id}-${day}`} 
-                              className="p-1 schedule-cell align-top cursor-pointer"
+                            <td
+                              key={`${emp.id}-${day}`}
+                              className="p-1 schedule-cell align-top"
                               style={isLockedCell(emp.id, day) ? { background: 'repeating-linear-gradient(45deg, #f3f4f6, #f3f4f6 4px, #e5e7eb 4px, #e5e7eb 8px)' } : {}}
                               onDragOver={handleDragOver}
                               onDrop={() => handleDrop(emp.id, day)}
-                              onClick={() => handleCellClick(emp.id, day)}
                             >
                               {shifts.map((shift: Shift) => (
                                 shift.locked ? (
                                   <div
                                     key={shift.id}
-                                    className="p-2 rounded mb-1 text-xs border border-gray-400 bg-gray-200 text-gray-600"
-                                    title={`Approved availability: ${shift.locked_availability_type?.replace(/_/g, ' ')}`}
+                                    className={`p-2 rounded mb-1 text-xs border ${
+                                      shift.location === 'day off' ? 'border-black bg-black text-white' : 'border-gray-400 bg-gray-200 text-gray-600'
+                                    }`}
+                                    title={`Approved availability: ${shift.locked_availability_type}`}
                                   >
-                                    <div className="font-semibold text-gray-700">🔒 Not available</div>
-                                    <div className="italic">{shift.locked_availability_type?.replace(/_/g, ' ')}</div>
+                                    <div className="font-semibold">🔒 {shift.locked_availability_type}</div>
+                                    {shift.comment && <div className="italic text-xs mt-1">{shift.comment}</div>}
                                   </div>
                                 ) : (
                                 <div 

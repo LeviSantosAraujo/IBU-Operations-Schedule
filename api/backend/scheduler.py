@@ -276,45 +276,72 @@ class SchedulingEngine:
         # Load approved availability requests for this week
         approved_requests = {}
         employee_preferences = {}
+        day_map = {0: 'monday', 1: 'tuesday', 2: 'wednesday', 3: 'thursday', 4: 'friday', 5: 'saturday', 6: 'sunday'}
         try:
             all_requests = get_availability_requests()
-            week_str = week_start_date.isoformat()
-            
-            temp_requests = []
+            week_end_date = week_start_date + timedelta(days=6)
+
             for req in all_requests:
-                if (req.get('week_start_date') == week_str and 
-                    req.get('status') in ['approved', 'AvailabilityRequestStatus.APPROVED']):
-                    emp_id = req.get('employee_id')
+                if req.get('status') not in ['approved', 'AvailabilityRequestStatus.APPROVED']:
+                    continue
+
+                emp_id = req.get('employee_id')
+                if not emp_id:
+                    continue
+
+                # Handle new date range model
+                if req.get('start_date') and req.get('end_date'):
+                    try:
+                        req_start = date.fromisoformat(str(req['start_date'])[:10])
+                        req_end = date.fromisoformat(str(req['end_date'])[:10])
+                        req_days = req.get('days_of_week', [])
+                        request_type = req.get('request_type', 'availability')
+
+                        # Check if this request overlaps with the current week
+                        if req_end < week_start_date or req_start > week_end_date:
+                            continue
+
+                        # For each day in the week that matches the request's days_of_week
+                        current_date = week_start_date
+                        while current_date <= week_end_date:
+                            day_name = day_map[current_date.weekday()]
+                            if day_name in req_days and current_date >= req_start and current_date <= req_end:
+                                if emp_id not in approved_requests:
+                                    approved_requests[emp_id] = {}
+
+                                # Mark as unavailable for day-offs or specific time ranges
+                                if request_type == 'day_off':
+                                    approved_requests[emp_id][day_name] = AvailabilityType.OFF
+                                else:
+                                    # For time range availability, mark as OFF during that time
+                                    # The scheduler will check time ranges when assigning shifts
+                                    approved_requests[emp_id][day_name] = AvailabilityType.OFF
+
+                            current_date += timedelta(days=1)
+
+                    except Exception as e:
+                        print(f"Warning: could not parse date range request: {e}")
+                        continue
+
+                # Handle legacy model for backward compatibility
+                elif req.get('week_start_date'):
+                    week_str = week_start_date.isoformat()
+                    if req.get('week_start_date') != week_str:
+                        continue
+
                     day = req.get('day_of_week', '').lower()
                     avail_type_str = req.get('availability_type', 'blank')
                     if emp_id and day:
-                        temp_requests.append({
-                            'emp_id': emp_id,
-                            'day': day,
-                            'avail_type': avail_type_str,
-                            'created_at': req.get('created_at'),
-                            'preferences': req.get('preferences')
-                        })
-            
-            temp_requests.sort(key=lambda x: x['created_at'] or '', reverse=True)
-            
-            for req in temp_requests:
-                emp_id = req['emp_id']
-                day = req['day']
-                avail_type_str = req['avail_type']
-                
-                if emp_id not in approved_requests:
-                    approved_requests[emp_id] = {}
-                
-                if day not in approved_requests[emp_id]:
-                    try:
-                        approved_requests[emp_id][day] = AvailabilityType(avail_type_str)
-                    except:
-                        approved_requests[emp_id][day] = AvailabilityType.BLANK
-                
+                        if emp_id not in approved_requests:
+                            approved_requests[emp_id] = {}
+                        try:
+                            approved_requests[emp_id][day] = AvailabilityType(avail_type_str)
+                        except:
+                            approved_requests[emp_id][day] = AvailabilityType.BLANK
+
                 if emp_id not in employee_preferences and req.get('preferences'):
                     employee_preferences[emp_id] = req.get('preferences')
-                    
+
         except Exception as e:
             print(f"Warning: could not load approved availability requests: {e}")
         

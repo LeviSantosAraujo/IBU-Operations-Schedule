@@ -236,8 +236,20 @@ def set_manager_password(employee_id: str, employee_name: str, password: str):
     """Set password for a manager in the PWDs tab"""
     wb = _get_workbook()
     if not wb:
-        raise ValueError("No Excel file available")
-    
+        # Initialize a new workbook in memory if none exists
+        wb = Workbook()
+        if 'Sheet' in wb.sheetnames:
+            wb.remove(wb['Sheet'])
+        # Create PWDs sheet immediately so workbook has at least one sheet
+        sheet = wb.create_sheet('PWDs')
+        sheet.cell(row=1, column=1, value='Employee_ID')
+        sheet.cell(row=1, column=2, value='Employee_Name')
+        sheet.cell(row=1, column=3, value='Password_Hash')
+        sheet.cell(row=1, column=4, value='Role')
+        sheet.cell(row=1, column=5, value='Updated_At')
+        _save_workbook(wb)
+        wb = _get_workbook()
+
     if 'PWDs' not in wb.sheetnames:
         sheet = wb.create_sheet('PWDs')
         sheet.cell(row=1, column=1, value='Employee_ID')

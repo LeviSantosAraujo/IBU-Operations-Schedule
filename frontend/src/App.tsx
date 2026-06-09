@@ -1,6 +1,6 @@
 import { BrowserRouter as Router, Routes, Route, Link, useNavigate, Navigate } from 'react-router-dom'
 import { useState, useEffect } from 'react'
-import { Users, LayoutGrid, LogOut, Shield, User, FileSpreadsheet } from 'lucide-react'
+import { Users, LayoutGrid, LogOut, Shield, User, FileSpreadsheet, Calendar } from 'lucide-react'
 import { auth } from './auth'
 import Login from './components/Login'
 import ExcelSetup from './components/ExcelSetup'
@@ -8,6 +8,8 @@ import ScheduleManager from './components/ScheduleManager'
 import EmployeeManagement from './components/EmployeeManagement'
 import DatabaseManagement from './components/DatabaseManagement'
 import EmployeeScheduleView from './components/EmployeeScheduleView'
+import MyAvailability from './components/MyAvailability'
+import NotificationBell from './components/NotificationBell'
 
 // Protected Route Component
 function ProtectedRoute({ 
@@ -49,12 +51,18 @@ function AppLayout({ onLogout }: { onLogout: () => void }) {
             <div className="flex items-center">
               <div className="flex-shrink-0 font-bold text-xl">IBU Operations team schedule</div>
               <div className="ml-10 flex space-x-4">
-                {/* Employees see their schedule */}
+                {/* Employees see their schedule and availability */}
                 {!isManager && (
-                  <Link to="/my-schedule" className="flex items-center px-3 py-2 rounded hover:bg-blue-800">
-                    <LayoutGrid className="w-4 h-4 mr-2" />
-                    Schedule
-                  </Link>
+                  <>
+                    <Link to="/my-schedule" className="flex items-center px-3 py-2 rounded hover:bg-blue-800">
+                      <LayoutGrid className="w-4 h-4 mr-2" />
+                      Schedule
+                    </Link>
+                    <Link to="/my-availability" className="flex items-center px-3 py-2 rounded hover:bg-blue-800">
+                      <Calendar className="w-4 h-4 mr-2" />
+                      My Availability
+                    </Link>
+                  </>
                 )}
                 {/* Managers see full menu */}
                 {isManager && (
@@ -78,6 +86,7 @@ function AppLayout({ onLogout }: { onLogout: () => void }) {
             
             {/* User Info & Logout */}
             <div className="flex items-center gap-4">
+              <NotificationBell />
               <div className="flex items-center gap-2 text-sm">
                 {isManager ? (
                   <Shield className="w-4 h-4 text-yellow-400" />
@@ -110,6 +119,11 @@ function AppLayout({ onLogout }: { onLogout: () => void }) {
           <Route path="/my-schedule" element={
             <ProtectedRoute>
               <EmployeeScheduleView />
+            </ProtectedRoute>
+          } />
+          <Route path="/my-availability" element={
+            <ProtectedRoute>
+              <MyAvailability />
             </ProtectedRoute>
           } />
           <Route path="/manager" element={

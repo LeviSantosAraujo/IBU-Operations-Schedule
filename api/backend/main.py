@@ -995,81 +995,105 @@ async def approve_availability_request(request_id: str, body: Dict = {}, authori
     user = AuthManager.get_current_user(authorization)
     if not user or user.get('role') not in ['manager', 'admin']:
         raise HTTPException(status_code=403, detail="Manager access required")
-    
+
     requests = get_availability_requests()
     request_data = next((r for r in requests if r['id'] == request_id), None)
-    
+
     if not request_data:
         raise HTTPException(status_code=404, detail="Request not found")
-    
+
     request_data['status'] = AvailabilityRequestStatus.APPROVED
     request_data['manager_comment'] = body.get('comment')
     request_data['updated_at'] = datetime.now()
-    
+    request_data['approved_by'] = user.get('employee_id')
+    request_data['approved_at'] = datetime.now()
+
     if save_availability_request(request_data):
-        # Add a locked shift to the schedule for this week/day/employee
+        # Add locked shifts for each day in the date range
         try:
-            week_date = date.fromisoformat(str(request_data['week_start_date'])[:10])
-            schedule = get_schedule_by_week(week_date)
-            if not schedule:
-                schedule = WeeklySchedule(
-                    id=f"sched_{week_date.isoformat()}",
-                    week_start_date=week_date
-                )
-            
-            # Map availability type to time range for the locked shift
-            avail_type = request_data.get('availability_type', '')
-            avail_time_map = {
-                'off': ('00:00', '23:59'),
-                'until_12pm': ('00:00', '12:00'),
-                'until_3pm': ('00:00', '15:00'),
-                'after_330pm': ('15:30', '23:59'),
-                '12_3': ('12:00', '15:00'),
-                'after_12_eod': ('12:00', '23:59'),
-                'before_12_after_330': ('00:00', '23:59'),
-                'blank': ('00:00', '23:59'),
-            }
-            start_t, end_t = avail_time_map.get(avail_type, ('00:00', '23:59'))
-            
-            locked_shift = Shift(
-                id=f"locked_{request_data['id']}",
-                employee_id=request_data['employee_id'],
-                day_of_week=request_data['day_of_week'],
-                start_time=start_t,
-                end_time=end_t,
-                job_type=JobType.DESK,
-                hours=0,
-                locked=True,
-                locked_availability_type=avail_type,
-                color='#D1D5DB',
-                location='day off' if avail_type == 'off' else None
-            )
-            
-            # Remove any previous locked shift for same employee/day
-            schedule.shifts = [s for s in schedule.shifts if not (
-                getattr(s, 'locked', False) and
-                s.employee_id == request_data['employee_id'] and
-                s.day_of_week == request_data['day_of_week']
-            )]
-            schedule.shifts.append(locked_shift)
-            save_schedule(schedule)
+            from datetime import timedelta
+
+            # Support both old and new model
+            start_date = date.fromisoformat(str(request_data.get('start_date', request_data.get('week_start_date')))[:10])
+            end_date = date.fromisoformat(str(request_data.get('end_date', request_data.get('week_start_date')))[:10])
+            days_of_week = request_data.get('days_of_week', [request_data.get('day_of_week', '')])
+            request_type = request_data.get('request_type', 'availability')
+
+            # Determine time range
+            if request_type == 'day_off':
+                start_t, end_t = '00:00', '23:59'
+                avail_label = 'Day Off'
+                color = '#000000'  # Black for day-offs
+            else:
+                start_t = request_data.get('start_time', '00:00')
+                end_t = request_data.get('end_time', '23:59')
+                avail_label = f"{start_t} - {end_t}"
+                color = '#D1D5DB'
+
+            # Create locked shifts for each date in range that matches the days_of_week
+            current_date = start_date
+            day_map = {0: 'monday', 1: 'tuesday', 2: 'wednesday', 3: 'thursday', 4: 'friday', 5: 'saturday', 6: 'sunday'}
+
+            while current_date <= end_date:
+                day_name = day_map[current_date.weekday()]
+                if day_name in days_of_week:
+                    # Get or create schedule for this week
+                    week_start = current_date - timedelta(days=current_date.weekday())
+                    schedule = get_schedule_by_week(week_start)
+                    if not schedule:
+                        schedule = WeeklySchedule(
+                            id=f"sched_{week_start.isoformat()}",
+                            week_start_date=week_start
+                        )
+
+                    # Calculate hours
+                    start_h, start_m = map(int, start_t.split(':'))
+                    end_h, end_m = map(int, end_t.split(':'))
+                    hours = (end_h + end_m / 60) - (start_h + start_m / 60)
+                    if hours < 0:
+                        hours += 24
+
+                    locked_shift = Shift(
+                        id=f"locked_{request_data['id']}_{current_date.isoformat()}",
+                        employee_id=request_data['employee_id'],
+                        day_of_week=day_name,
+                        start_time=start_t,
+                        end_time=end_t,
+                        job_type=JobType.DESK,
+                        hours=hours,
+                        locked=True,
+                        locked_availability_type=avail_label,
+                        color=color,
+                        location='day off' if request_type == 'day_off' else None,
+                        comment=request_data.get('employee_comment', '')
+                    )
+
+                    # Remove any previous locked shift for same employee/day
+                    schedule.shifts = [s for s in schedule.shifts if not (
+                        getattr(s, 'locked', False) and
+                        s.employee_id == request_data['employee_id'] and
+                        s.day_of_week == day_name
+                    )]
+                    schedule.shifts.append(locked_shift)
+                    save_schedule(schedule)
+
+                current_date += timedelta(days=1)
         except Exception as e:
             print(f"Warning: could not add locked shift: {e}")
 
         # Send notification to employee
-        avail_label = request_data.get('availability_type', '').replace('_', ' ')
         comment_part = f" Manager note: {body.get('comment')}" if body.get('comment') else ""
         notification = {
             'id': str(uuid.uuid4()),
             'employee_id': request_data['employee_id'],
             'type': NotificationType.AVAILABILITY_APPROVED,
-            'message': f"Your availability request for {request_data['day_of_week']} ({avail_label}) has been approved.{comment_part}",
+            'message': f"Your {request_type} request ({start_date} to {end_date}) has been approved.{comment_part}",
             'created_at': datetime.now(),
             'read': False
         }
         save_notification(notification)
         return request_data
-    
+
     raise HTTPException(status_code=500, detail="Failed to approve request")
 
 @app.put("/api/availability-requests/{request_id}/reject")
@@ -1078,24 +1102,30 @@ async def reject_availability_request(request_id: str, body: Dict = {}, authoriz
     user = AuthManager.get_current_user(authorization)
     if not user or user.get('role') not in ['manager', 'admin']:
         raise HTTPException(status_code=403, detail="Manager access required")
-    
+
     requests = get_availability_requests()
     request_data = next((r for r in requests if r['id'] == request_id), None)
-    
+
     if not request_data:
         raise HTTPException(status_code=404, detail="Request not found")
-    
+
     request_data['status'] = AvailabilityRequestStatus.REJECTED
     request_data['manager_comment'] = body.get('comment', '')
     request_data['updated_at'] = datetime.now()
-    
+
     if save_availability_request(request_data):
+        # Support both old and new model for notification message
+        request_type = request_data.get('request_type', 'availability')
+        start_date = request_data.get('start_date', request_data.get('week_start_date', ''))
+        end_date = request_data.get('end_date', start_date)
+
         # Send notification to employee
+        comment_part = f" Reason: {body.get('comment')}" if body.get('comment') else ""
         notification = {
             'id': str(uuid.uuid4()),
             'employee_id': request_data['employee_id'],
             'type': NotificationType.AVAILABILITY_REJECTED,
-            'message': f"Your availability request for {request_data['day_of_week']} ({request_data.get('availability_type','').replace('_',' ')}) was not approved.{' Reason: ' + body.get('comment','') if body.get('comment') else ''}",
+            'message': f"Your {request_type} request ({start_date} to {end_date}) was not approved.{comment_part}",
             'created_at': datetime.now(),
             'read': False
         }

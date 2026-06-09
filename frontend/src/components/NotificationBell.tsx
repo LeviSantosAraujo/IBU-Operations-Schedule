@@ -1,0 +1,110 @@
+import { useState, useEffect } from 'react'
+import { Bell, X, Check, XCircle } from 'lucide-react'
+import { getNotifications, markNotificationAsRead } from '../api'
+
+export default function NotificationBell() {
+  const [notifications, setNotifications] = useState<any[]>([])
+  const [isOpen, setIsOpen] = useState(false)
+  const [unreadCount, setUnreadCount] = useState(0)
+
+  useEffect(() => {
+    loadNotifications()
+    // Poll for new notifications every 30 seconds
+    const interval = setInterval(loadNotifications, 30000)
+    return () => clearInterval(interval)
+  }, [])
+
+  const loadNotifications = async () => {
+    try {
+      const data = await getNotifications()
+      setNotifications(data || [])
+      setUnreadCount((data || []).filter((n: any) => !n.read).length)
+    } catch (err) {
+      console.error('Error loading notifications:', err)
+    }
+  }
+
+  const handleMarkAsRead = async (notificationId: string) => {
+    try {
+      await markNotificationAsRead(notificationId)
+      loadNotifications()
+    } catch (err) {
+      console.error('Error marking notification as read:', err)
+    }
+  }
+
+  const getNotificationIcon = (type: string) => {
+    switch (type) {
+      case 'availability_approved':
+        return <Check className="w-4 h-4 text-green-600" />
+      case 'availability_rejected':
+        return <XCircle className="w-4 h-4 text-red-600" />
+      default:
+        return <Bell className="w-4 h-4 text-blue-600" />
+    }
+  }
+
+  return (
+    <div className="relative">
+      <button
+        onClick={() => setIsOpen(!isOpen)}
+        className="relative p-2 rounded hover:bg-blue-800 transition-colors"
+      >
+        <Bell className="w-5 h-5" />
+        {unreadCount > 0 && (
+          <span className="absolute top-0 right-0 bg-red-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center">
+            {unreadCount}
+          </span>
+        )}
+      </button>
+
+      {isOpen && (
+        <>
+          <div
+            className="fixed inset-0 z-10"
+            onClick={() => setIsOpen(false)}
+          />
+          <div className="absolute right-0 top-12 w-80 bg-white rounded-lg shadow-xl border z-20 max-h-96 overflow-y-auto">
+            <div className="p-4 border-b flex justify-between items-center">
+              <h3 className="font-semibold">Notifications</h3>
+              <button
+                onClick={() => setIsOpen(false)}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            {notifications.length === 0 ? (
+              <div className="p-4 text-gray-500 text-sm">No notifications</div>
+            ) : (
+              <div className="divide-y">
+                {notifications.map((notification) => (
+                  <div
+                    key={notification.id}
+                    className={`p-4 hover:bg-gray-50 cursor-pointer ${!notification.read ? 'bg-blue-50' : ''}`}
+                    onClick={() => !notification.read && handleMarkAsRead(notification.id)}
+                  >
+                    <div className="flex items-start gap-3">
+                      <div className="mt-0.5">
+                        {getNotificationIcon(notification.type)}
+                      </div>
+                      <div className="flex-1">
+                        <p className="text-sm text-gray-800">{notification.message}</p>
+                        <p className="text-xs text-gray-500 mt-1">
+                          {new Date(notification.created_at).toLocaleString()}
+                        </p>
+                      </div>
+                      {!notification.read && (
+                        <div className="w-2 h-2 bg-blue-600 rounded-full mt-2" />
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
