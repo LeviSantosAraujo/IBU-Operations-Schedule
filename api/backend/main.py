@@ -1,6 +1,7 @@
 from fastapi import FastAPI, HTTPException, Query, Header, Depends, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
+from contextlib import asynccontextmanager
 from typing import List, Optional, Dict
 from datetime import date, datetime
 import uuid
@@ -28,11 +29,13 @@ from excel_store import (
     get_coverage_requirements, save_coverage_requirement,
     get_availability_requests, save_availability_request,
     get_notifications, save_notification, mark_notification_read,
-    get_events, save_event, delete_event
+    get_events, save_event, delete_event,
+    _clear_workbook_cache
 )
 from storage import store_excel_data, excel_file_exists, get_excel_data
 from scheduler import SchedulingEngine, generate_schedule
 from auth import AuthManager, require_auth, require_manager, require_self_or_manager
+from openpyxl import load_workbook
 
 # Pydantic models for requests
 class LoginRequest(BaseModel):
@@ -42,6 +45,27 @@ class LoginRequest(BaseModel):
 class SetPasswordRequest(BaseModel):
     employee_id: str
     password: str
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Load local Excel file into memory on startup"""
+    # Load local Excel file into memory storage
+    local_path = Path(__file__).parent / "uploads" / "ibu_schedule.xlsx"
+    if local_path.exists():
+        try:
+            wb = load_workbook(local_path)
+            import io
+            buffer = io.BytesIO()
+            wb.save(buffer)
+            buffer.seek(0)
+            store_excel_data(buffer.getvalue())
+            wb.close()
+            print(f"Loaded local Excel file into memory storage")
+        except Exception as e:
+            print(f"Failed to load local Excel file: {e}")
+    yield
+    # Cleanup on shutdown
+    _clear_workbook_cache()
 
 class ExcelPathRequest(BaseModel):
     file_path: str
@@ -56,7 +80,7 @@ except OSError:
     # We'll use Vercel Blob storage instead
     pass
 
-app = FastAPI(title="IBU Operations team schedule", version="2.0.0")
+app = FastAPI(title="IBU Operations team schedule", version="2.0.0", lifespan=lifespan)
 
 # Enable CORS for frontend
 app.add_middleware(
