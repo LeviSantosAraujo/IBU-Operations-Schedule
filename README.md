@@ -22,6 +22,11 @@ A comprehensive automated scheduling system built with Python (FastAPI) and Reac
   - Before 12 & After 3:30
   - OFF
 - **Availability Requests**: Request specific availability changes with manager approval
+  - Set date ranges for each weekday
+  - Choose request type: "Available" or "Day Off"
+  - Specify time ranges for availability
+  - Set job preferences (e.g., prefer Call Center, 2nd Floor)
+  - View request history with status (Pending/Approved/Rejected)
 - **Schedule View**: View your own schedule with other employees' shifts dimmed if not assigned
 
 ### For Managers
@@ -47,6 +52,11 @@ A comprehensive automated scheduling system built with Python (FastAPI) and Reac
 - **Hours Tracking**: Visual indicators for employees approaching hour limits
 - **Multi-week Storage**: Access historical schedules
 - **Availability Request Management**: Approve/reject employee availability requests
+  - View pending requests with detailed descriptions (e.g., "Day Off for Monday")
+  - See date ranges and employee comments
+  - Approve once for entire date range (creates locked shifts for all matching dates)
+  - Employee preferences are stored in locked shifts and used by scheduler
+  - Optional manager comments for approvals (required for rejections)
 
 ### Locations
 - Call Center (CC)
@@ -157,9 +167,13 @@ Navigate to "Employees" to:
 ### 2. Submitting Availability
 Navigate to "My Availability" to:
 - Select your name from the dropdown
-- Choose the week (Monday-Sunday)
-- Click on each day to cycle through availability options
-- Colors match your original Excel sheet
+- For each weekday, set:
+  - Date range (start and end dates)
+  - Request type: "Available" or "Day Off"
+  - Time range (for availability requests)
+  - Job preferences (e.g., Call Center: 8, 2nd Floor: 5)
+- Click "Submit Availability Request" to send to manager
+- View your request history with status (Pending/Approved/Rejected)
 - Submit before Thursday for next week's schedule
 
 ### 3. Creating Schedules (Manager)
@@ -185,7 +199,16 @@ Navigate to "Floor Coverage" to:
 - Click any cell (showing employee count) to see who's scheduled
 - Red = no coverage, Yellow = 1 person, Green = 2+ people
 
-### 5. Hours Summary
+### 5. Managing Availability Requests (Manager)
+Navigate to "Schedule" and check the "Pending Requests" panel:
+- View all pending availability requests from employees
+- Each request shows: employee name, request type, days, date range, and comments
+- Click "Review" to open the approval modal
+- Approve or reject with optional manager comment
+- Approval creates locked shifts for the entire date range
+- Employee preferences are stored and used by the auto-scheduler
+
+### 6. Hours Summary
 At the bottom of the Schedule page, see:
 - Hours scheduled per employee
 - Remaining hours before hitting limits
