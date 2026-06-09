@@ -1,14 +1,13 @@
 import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
 import { API_BASE_URL, getEmployees } from '../api'
 import { LogIn, User, Shield, Lock, Key } from 'lucide-react'
+import ExcelSetup from './ExcelSetup'
 
 interface LoginProps {
   onLogin: () => void
 }
 
 export default function Login({ onLogin }: LoginProps) {
-  const navigate = useNavigate()
   const [employees, setEmployees] = useState<any[]>([])
   const [selectedEmployee, setSelectedEmployee] = useState('')
   const [password, setPassword] = useState('')
@@ -20,6 +19,7 @@ export default function Login({ onLogin }: LoginProps) {
   const [newPassword, setNewPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [dbConfigured, setDbConfigured] = useState<boolean | null>(null)
+  const [showDatabaseSetup, setShowDatabaseSetup] = useState(false)
 
   useEffect(() => {
     checkDatabaseStatus()
@@ -50,9 +50,11 @@ export default function Login({ onLogin }: LoginProps) {
   const loadEmployees = async () => {
     try {
       const data = await getEmployees(true)
-      setEmployees(data)
+      const employeeList = Array.isArray(data) ? data : Array.isArray(data?.employees) ? data.employees : []
+      setEmployees(employeeList)
     } catch (err) {
       setError('Failed to load employees')
+      setEmployees([])
     }
   }
 
@@ -165,6 +167,14 @@ export default function Login({ onLogin }: LoginProps) {
   const managers = validEmployees.filter(e => e.employee_type === 'manager')
   const staff = validEmployees.filter(e => e.employee_type !== 'manager')
 
+  if (showDatabaseSetup) {
+    return <ExcelSetup onSetupComplete={() => {
+      setShowDatabaseSetup(false)
+      checkDatabaseStatus()
+      loadEmployees()
+    }} />
+  }
+
   // Password setup screen for first-time manager login
   if (showPasswordSetup) {
     return (
@@ -236,7 +246,7 @@ export default function Login({ onLogin }: LoginProps) {
             <p className="font-medium">No database configured</p>
             <p className="text-sm mt-1">Please set up the Excel database first.</p>
             <button
-              onClick={() => navigate('/setup')}
+              onClick={() => setShowDatabaseSetup(true)}
               className="mt-2 text-sm underline hover:text-yellow-800"
             >
               Go to Database Setup
