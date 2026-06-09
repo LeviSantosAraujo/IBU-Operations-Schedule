@@ -16,6 +16,14 @@ const daysOfWeek = [
   { value: 'sunday', label: 'Sunday' },
 ]
 
+const jobTypes = [
+  { id: 'ground_floor', name: 'Ground Floor' },
+  { id: 'second_floor', name: '2nd Floor' },
+  { id: 'sixth_floor', name: '6th Floor' },
+  { id: 'call_center', name: 'Call Center' },
+  { id: 'event', name: 'Event' },
+]
+
 interface DayAvailability {
   enabled: boolean
   startTime: string
@@ -23,7 +31,8 @@ interface DayAvailability {
 }
 
 export default function MyAvailability() {
-  const [weekStart, setWeekStart] = useState<Date>(startOfWeek(new Date(), { weekStartsOn: 1 }))
+  const [startDate, setStartDate] = useState<Date | null>(null)
+  const [endDate, setEndDate] = useState<Date | null>(null)
   const [dayAvailabilities, setDayAvailabilities] = useState<Record<string, DayAvailability>>(() => {
     const initial: Record<string, DayAvailability> = {}
     daysOfWeek.forEach(day => {
@@ -32,6 +41,7 @@ export default function MyAvailability() {
     return initial
   })
   const [comment, setComment] = useState('')
+  const [jobPreferences, setJobPreferences] = useState<Record<string, number>>({})
   const [myRequests, setMyRequests] = useState<any[]>([])
   const [loading, setLoading] = useState(false)
   const [saved, setSaved] = useState(false)
@@ -72,20 +82,24 @@ export default function MyAvailability() {
       alert('Please select at least one day')
       return
     }
+    if (!startDate || !endDate) {
+      alert('Please select start and end dates')
+      return
+    }
 
     setLoading(true)
     try {
       // Submit one request per enabled day
-      const weekEnd = addDays(weekStart, 6)
       for (const [day, avail] of enabledDays) {
         await createAvailabilityRequest({
           request_type: 'availability',
-          start_date: format(weekStart, 'yyyy-MM-dd'),
-          end_date: format(weekEnd, 'yyyy-MM-dd'),
+          start_date: format(startDate, 'yyyy-MM-dd'),
+          end_date: format(endDate, 'yyyy-MM-dd'),
           days_of_week: [day],
           start_time: avail.startTime,
           end_time: avail.endTime,
           employee_comment: comment,
+          preferences: jobPreferences,
         })
       }
       setSaved(true)
@@ -97,6 +111,9 @@ export default function MyAvailability() {
       })
       setDayAvailabilities(resetAvail)
       setComment('')
+      setJobPreferences({})
+      setStartDate(null)
+      setEndDate(null)
       loadMyRequests()
     } catch (err) {
       alert('Error submitting request. Please try again.')
@@ -142,28 +159,40 @@ export default function MyAvailability() {
     }
   }
 
-  const weekDates = daysOfWeek.map((_, i) => addDays(weekStart, i))
-
   return (
     <div className="max-w-4xl mx-auto">
       <h1 className="text-2xl font-bold mb-6">My Availability</h1>
 
-      {/* Week Selector */}
+      {/* Availability Form */}
       <div className="bg-white rounded-lg shadow p-6 mb-6">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold">Week of {format(weekStart, 'MMMM d, yyyy')}</h2>
-          <DatePicker
-            selected={weekStart}
-            onChange={(date: Date | null) => date && setWeekStart(startOfWeek(date, { weekStartsOn: 1 }))}
-            filterDate={(date: Date) => date.getDay() === 1}
-            className="border rounded px-3 py-2"
-            dateFormat="yyyy-MM-dd"
-          />
+        <h2 className="text-lg font-semibold mb-4">Set Availability</h2>
+
+        {/* Date Range */}
+        <div className="grid grid-cols-2 gap-4 mb-4">
+          <div>
+            <label className="block text-sm font-medium mb-2">Start Date</label>
+            <DatePicker
+              selected={startDate}
+              onChange={setStartDate}
+              className="w-full border rounded px-3 py-2"
+              dateFormat="yyyy-MM-dd"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium mb-2">End Date</label>
+            <DatePicker
+              selected={endDate}
+              onChange={setEndDate}
+              minDate={startDate || undefined}
+              className="w-full border rounded px-3 py-2"
+              dateFormat="yyyy-MM-dd"
+            />
+          </div>
         </div>
 
         {/* Day Availability Grid */}
         <div className="space-y-3 mb-6">
-          {daysOfWeek.map((day, i) => (
+          {daysOfWeek.map((day) => (
             <div key={day.value} className="flex items-center gap-4 p-3 border rounded">
               <div className="flex-1">
                 <div className="flex items-center gap-2 mb-2">
@@ -174,7 +203,6 @@ export default function MyAvailability() {
                     className="w-4 h-4"
                   />
                   <span className="font-medium">{day.label}</span>
-                  <span className="text-sm text-gray-500">{format(weekDates[i], 'M/d')}</span>
                 </div>
                 {dayAvailabilities[day.value].enabled && (
                   <div className="flex items-center gap-2 ml-6">
@@ -197,6 +225,32 @@ export default function MyAvailability() {
               </div>
             </div>
           ))}
+        </div>
+
+        {/* Job Preferences */}
+        <div className="mb-4">
+          <label className="block text-sm font-medium mb-2">Job Preferences (1-10, higher = prefer)</label>
+          <p className="text-xs text-gray-500 mb-2 italic">We value your input! Your preferences help us create a schedule that works for everyone. While business needs come first, we'll do our best to accommodate your preferences when possible.</p>
+          <div className="space-y-2">
+            {jobTypes.map(job => (
+              <div key={job.id} className="flex items-center gap-3">
+                <span className="flex-1 text-sm">{job.name}</span>
+                <div className="flex items-center gap-1">
+                  {[1,2,3,4,5,6,7,8,9,10].map(num => (
+                    <button
+                      key={num}
+                      onClick={() => setJobPreferences(prev => ({ ...prev, [job.id]: num }))}
+                      className={`w-6 h-6 rounded text-xs font-medium ${
+                        jobPreferences[job.id] === num ? 'bg-blue-600 text-white' : 'bg-gray-200 hover:bg-gray-300'
+                      }`}
+                    >
+                      {num}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
 
         {/* Comment */}
