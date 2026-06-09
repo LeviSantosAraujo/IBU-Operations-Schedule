@@ -22,6 +22,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Vercel Python serverless function - export the app directly
-# Vercel's Python runtime will handle the ASGI app
-handler = app
+# Vercel serverless function handler
+from mangum import Mangum
+handler = Mangum(app)
