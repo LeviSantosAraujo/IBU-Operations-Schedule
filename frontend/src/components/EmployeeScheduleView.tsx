@@ -103,9 +103,10 @@ export default function EmployeeScheduleView() {
 
   const loadEmployees = async () => {
     const data = await getEmployees(true)
+    const employeeList = Array.isArray(data) ? data : Array.isArray(data?.employees) ? data.employees : []
     // Filter out 'Availabilities' entry
-    const filtered = data.filter((emp: any) => 
-      emp.name.toLowerCase() !== 'availabilities' && 
+    const filtered = employeeList.filter((emp: any) =>
+      emp.name.toLowerCase() !== 'availabilities' &&
       emp.name.toLowerCase() !== 'availability'
     )
     setEmployees(filtered)

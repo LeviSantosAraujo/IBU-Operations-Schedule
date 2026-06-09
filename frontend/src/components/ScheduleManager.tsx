@@ -151,7 +151,8 @@ export default function ScheduleManager() {
 
   const loadEmployees = async () => {
     const data = await getEmployees(true)
-    setEmployees(data)
+    const employeeList = Array.isArray(data) ? data : Array.isArray(data?.employees) ? data.employees : []
+    setEmployees(employeeList)
   }
 
   const loadAvailabilityRequests = async () => {
