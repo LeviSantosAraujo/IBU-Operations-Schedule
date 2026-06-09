@@ -170,13 +170,13 @@
     "created_at": "2026-06-08 15:13:53.873968"
   },
   {
-    "id": "emp_1781043065177",
-    "name": "Normal worker Test",
+    "id": "emp_1781047684821",
+    "name": "Test New Worker",
     "email": "",
     "employee_type": "employee",
     "max_hours_per_week": 24,
     "preferences": {},
     "active": true,
-    "created_at": "2026-06-09 18:11:05.182889"
+    "created_at": "2026-06-09 19:28:04.828391"
   }
 ]

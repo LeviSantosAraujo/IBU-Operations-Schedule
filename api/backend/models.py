@@ -117,6 +117,7 @@ class Shift(BaseModel):
     break_provided: bool = False  # Whether a break was provided
     locked: bool = False  # Locked availability - manager cannot schedule over this
     locked_availability_type: Optional[str] = None  # The approved availability type
+    preferences: Optional[Dict[str, int]] = None  # Employee job preferences (e.g., {"call_center": 8, "second_floor": 5})
 
 class WeeklySchedule(BaseModel):
     id: str

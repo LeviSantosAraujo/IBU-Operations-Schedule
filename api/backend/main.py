@@ -1091,7 +1091,8 @@ async def approve_availability_request(request_id: str, body: Dict = {}, authori
                         locked_availability_type=avail_label,
                         color=color,
                         location='day off' if request_type == 'day_off' else None,
-                        comment=request_data.get('employee_comment', '')
+                        comment=request_data.get('employee_comment', ''),
+                        preferences=request_data.get('preferences')
                     )
 
                     # Remove any previous locked shift for same employee/day

@@ -344,7 +344,14 @@ class SchedulingEngine:
 
         except Exception as e:
             print(f"Warning: could not load approved availability requests: {e}")
-        
+
+        # Load existing schedule to get preferences from locked shifts
+        existing_schedule = get_schedule_by_week(week_start_date)
+        if existing_schedule:
+            for shift in existing_schedule.shifts:
+                if shift.locked and shift.preferences and shift.employee_id not in employee_preferences:
+                    employee_preferences[shift.employee_id] = shift.preferences
+
         # Load events for this week
         events = get_events(week_start_date)
         
