@@ -9,6 +9,10 @@
       "PYTHON_VERSION": "3.12"
     }
   },
+  "installCommand": "cd frontend && npm install",
+  "caching": {
+    "type": "none"
+  },
   "rewrites": [
     {
       "source": "/api/:path*",
