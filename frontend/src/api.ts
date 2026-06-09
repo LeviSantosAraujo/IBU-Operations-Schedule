@@ -44,6 +44,9 @@ export const createEmployee = (data: any) =>
 export const updateEmployee = (id: string, data: any) => 
   api.put(`/employees/${id}`, data).then(r => r.data)
 
+export const updateManagerPassword = (employeeId: string, password: string) =>
+  api.put('/managers/update-password', { employee_id: employeeId, password }).then(r => r.data)
+
 export const deleteEmployee = (id: string) => 
   api.delete(`/employees/${id}`).then(r => r.data)
 
@@ -86,6 +89,10 @@ export const publishSchedule = (weekStartDate: string) =>
 export const deleteSchedule = (weekStartDate: string) => 
   api.delete(`/schedules/${weekStartDate}`).then(r => r.data)
 
+export function clearSchedule(weekStartDate: string) {
+  return api.post(`/schedules/${weekStartDate}/clear`).then(r => r.data)
+}
+
 // Floor Coverage
 export const getFloorCoverage = (floor: string, dayOfWeek: string, timeSlot: string, weekStartDate: string) => 
   api.get(`/floor-coverage/${floor}/${dayOfWeek}/${timeSlot}?week_start_date=${weekStartDate}`).then(r => r.data)
@@ -103,5 +110,50 @@ export const getConfig = () =>
 
 export const updateConfig = (data: any) => 
   api.put('/config', data).then(r => r.data)
+
+// Availability Requests
+export function getAvailabilityRequests() {
+  return api.get('/availability-requests').then(r => r.data)
+}
+
+export function getMyAvailabilityRequests() {
+  return api.get('/availability-requests/my').then(r => r.data)
+}
+
+export function createAvailabilityRequest(data: any) {
+  return api.post('/availability-requests', data).then(r => r.data)
+}
+
+export function approveAvailabilityRequest(requestId: string, comment?: string) {
+  return api.put(`/availability-requests/${requestId}/approve`, { comment }).then(r => r.data)
+}
+
+export function rejectAvailabilityRequest(requestId: string, comment: string) {
+  return api.put(`/availability-requests/${requestId}/reject`, { comment }).then(r => r.data)
+}
+
+// Notifications
+export const getNotifications = () => 
+  api.get('/notifications').then(r => r.data)
+
+export const markNotificationAsRead = (notificationId: string) => 
+  api.put(`/notifications/${notificationId}/read`).then(r => r.data)
+
+// Events
+export function getEvents() {
+  return api.get('/events/list').then(r => r.data)
+}
+
+export function createEvent(data: any) {
+  return api.post('/events', data).then(r => r.data)
+}
+
+export function updateEvent(eventId: string, data: any) {
+  return api.put(`/events/${eventId}`, data).then(r => r.data)
+}
+
+export function deleteEvent(eventId: string) {
+  return api.delete(`/events/${eventId}`).then(r => r.data)
+}
 
 export default api
