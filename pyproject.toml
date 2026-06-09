@@ -1,5 +1,6 @@
 [project]
 name = "ibu-operations-schedule"
+version = "1.0.0"
 dependencies = [
     "fastapi==0.104.1",
     "uvicorn==0.24.0",
