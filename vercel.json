@@ -10,11 +10,12 @@
     }
   },
   "installCommand": "cd frontend && npm install",
+  "functions": {
+    "api/index.py": {
+      "runtime": "python3.12"
+    }
+  },
   "rewrites": [
-    {
-      "source": "/api/(.*)",
-      "destination": "/api/index.py"
-    },
     {
       "source": "/(.*)",
       "destination": "/frontend/dist/index.html"
