@@ -26,7 +26,9 @@ api.interceptors.response.use(
   (error) => {
     if (error.response?.status === 401) {
       auth.logout()
-      window.location.href = '/login'
+      if (window.location.pathname !== '/login') {
+        window.location.replace('/login')
+      }
     }
     return Promise.reject(error)
   }
