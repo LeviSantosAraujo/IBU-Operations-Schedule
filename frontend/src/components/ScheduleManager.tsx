@@ -509,13 +509,26 @@ export default function ScheduleManager() {
   const handleDrop = (targetEmployeeId: string, targetDay: string) => {
     if (!draggedShift || !schedule) return
     if (draggedShift.locked) return
-    
+
+    // Allow managers to override locked shifts by removing them first
+    const lockedShiftsToRemove = schedule.shifts.filter((s: Shift) =>
+      s.locked && s.employee_id === targetEmployeeId && s.day_of_week === targetDay
+    )
+
     // Save current state to history before making changes
     saveToHistory()
-    
+
+    // Remove locked shifts for this cell (manager override)
+    let shiftsWithoutLocked = schedule.shifts
+    if (lockedShiftsToRemove.length > 0) {
+      shiftsWithoutLocked = schedule.shifts.filter((s: Shift) =>
+        !(s.locked && s.employee_id === targetEmployeeId && s.day_of_week === targetDay)
+      )
+    }
+
     // Remove the original shift from the schedule (this is a move operation)
-    const shiftsWithoutOriginal = schedule.shifts.filter((s: Shift) => s.id !== draggedShift.id)
-    
+    const shiftsWithoutOriginal = shiftsWithoutLocked.filter((s: Shift) => s.id !== draggedShift.id)
+
     // Create a new shift with the target employee and day, preserving all other data
     const updatedShift = {
       ...draggedShift,
@@ -523,10 +536,10 @@ export default function ScheduleManager() {
       day_of_week: targetDay,
       id: `${targetEmployeeId}-${targetDay}-${Date.now()}` // Generate new ID for the moved shift
     }
-    
+
     // Update the schedule with the shift moved to new location
     const updatedShifts = [...shiftsWithoutOriginal, updatedShift]
-    
+
     setSchedule({ ...schedule, shifts: updatedShifts, total_hours: recalculateHours(updatedShifts) })
     setDraggedShift(null)
   }
@@ -1161,13 +1174,20 @@ export default function ScheduleManager() {
                                 shift.locked ? (
                                   <div
                                     key={shift.id}
-                                    className={`p-2 rounded mb-1 text-xs border ${
+                                    className={`p-2 rounded mb-1 text-xs border relative group ${
                                       shift.location === 'day off' ? 'border-black bg-black text-white' : 'border-gray-400 bg-gray-200 text-gray-600'
                                     }`}
-                                    title={`Approved availability: ${shift.locked_availability_type}`}
+                                    title={`Approved availability: ${shift.locked_availability_type} (click trash to override)`}
                                   >
                                     <div className="font-semibold">🔒 {shift.locked_availability_type}</div>
                                     {shift.comment && <div className="italic text-xs mt-1">{shift.comment}</div>}
+                                    <button
+                                      onClick={(e) => { e.stopPropagation(); handleDeleteShift(shift.id) }}
+                                      className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 text-red-500 hover:text-red-700 bg-white rounded-full p-1"
+                                      title="Remove locked shift (manager override)"
+                                    >
+                                      <Trash2 className="w-3 h-3" />
+                                    </button>
                                   </div>
                                 ) : (
                                 <div 
