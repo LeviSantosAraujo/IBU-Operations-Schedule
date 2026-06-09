@@ -12,5 +12,10 @@
       "source": "/(.*)",
       "destination": "/frontend/dist/index.html"
     }
-  ]
+  ],
+  "functions": {
+    "api.py": {
+      "includeFiles": ["backend/**"]
+    }
+  }
 }
