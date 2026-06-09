@@ -1,0 +1,192 @@
+[
+  {
+    "id": "emp_001",
+    "name": "Fran",
+    "email": "",
+    "employee_type": "manager",
+    "max_hours_per_week": 40,
+    "preferences": {},
+    "active": true,
+    "created_at": "2026-06-06 09:45:48.044925"
+  },
+  {
+    "id": "emp_002",
+    "name": "Aashima",
+    "email": null,
+    "employee_type": "manager",
+    "max_hours_per_week": 40,
+    "preferences": {},
+    "active": true,
+    "created_at": "2026-06-06T09:45:48.044939"
+  },
+  {
+    "id": "emp_004",
+    "name": "Pablo",
+    "email": null,
+    "employee_type": "employee",
+    "max_hours_per_week": 24,
+    "preferences": {},
+    "active": true,
+    "created_at": "2026-06-06T09:45:48.044955"
+  },
+  {
+    "id": "emp_005",
+    "name": "Kavya C",
+    "email": null,
+    "employee_type": "employee",
+    "max_hours_per_week": 24,
+    "preferences": {},
+    "active": true,
+    "created_at": "2026-06-06T09:45:48.044963"
+  },
+  {
+    "id": "emp_006",
+    "name": "Mickaela  C",
+    "email": null,
+    "employee_type": "employee",
+    "max_hours_per_week": 24,
+    "preferences": {},
+    "active": true,
+    "created_at": "2026-06-06T09:45:48.044970"
+  },
+  {
+    "id": "emp_007",
+    "name": "Viviana",
+    "email": null,
+    "employee_type": "employee",
+    "max_hours_per_week": 24,
+    "preferences": {},
+    "active": true,
+    "created_at": "2026-06-06T09:45:48.044977"
+  },
+  {
+    "id": "emp_008",
+    "name": "Anastasia",
+    "email": null,
+    "employee_type": "employee",
+    "max_hours_per_week": 24,
+    "preferences": {},
+    "active": true,
+    "created_at": "2026-06-06T09:45:48.044983"
+  },
+  {
+    "id": "emp_009",
+    "name": "Meg",
+    "email": null,
+    "employee_type": "employee",
+    "max_hours_per_week": 24,
+    "preferences": {},
+    "active": true,
+    "created_at": "2026-06-06T09:45:48.044990"
+  },
+  {
+    "id": "emp_010",
+    "name": "Achal",
+    "email": null,
+    "employee_type": "employee",
+    "max_hours_per_week": 24,
+    "preferences": {},
+    "active": true,
+    "created_at": "2026-06-06T09:45:48.044998"
+  },
+  {
+    "id": "emp_011",
+    "name": "Priyanka",
+    "email": null,
+    "employee_type": "employee",
+    "max_hours_per_week": 24,
+    "preferences": {},
+    "active": true,
+    "created_at": "2026-06-06T09:45:48.045005"
+  },
+  {
+    "id": "emp_012",
+    "name": "Arfa C",
+    "email": null,
+    "employee_type": "employee",
+    "max_hours_per_week": 24,
+    "preferences": {},
+    "active": true,
+    "created_at": "2026-06-06T09:45:48.045015"
+  },
+  {
+    "id": "emp_013",
+    "name": "Taran C",
+    "email": null,
+    "employee_type": "employee",
+    "max_hours_per_week": 24,
+    "preferences": {},
+    "active": true,
+    "created_at": "2026-06-06T09:45:48.045024"
+  },
+  {
+    "id": "emp_014",
+    "name": "Sagar C",
+    "email": null,
+    "employee_type": "employee",
+    "max_hours_per_week": 24,
+    "preferences": {},
+    "active": true,
+    "created_at": "2026-06-06T09:45:48.045034"
+  },
+  {
+    "id": "emp_015",
+    "name": "Itohan",
+    "email": null,
+    "employee_type": "employee",
+    "max_hours_per_week": 24,
+    "preferences": {},
+    "active": true,
+    "created_at": "2026-06-06T09:45:48.045042"
+  },
+  {
+    "id": "emp_016",
+    "name": "Arnob",
+    "email": null,
+    "employee_type": "employee",
+    "max_hours_per_week": 24,
+    "preferences": {},
+    "active": true,
+    "created_at": "2026-06-06T09:45:48.045050"
+  },
+  {
+    "id": "emp_018",
+    "name": "Intern - Himanshu",
+    "email": null,
+    "employee_type": "intern",
+    "max_hours_per_week": 15,
+    "preferences": {},
+    "active": true,
+    "created_at": "2026-06-06T09:45:48.045065"
+  },
+  {
+    "id": "emp_003",
+    "name": "Nahim",
+    "email": "",
+    "employee_type": "employee",
+    "max_hours_per_week": 30,
+    "preferences": {},
+    "active": true,
+    "created_at": "2026-06-06 09:45:48.044947"
+  },
+  {
+    "id": "emp_017",
+    "name": "Intern- Levi",
+    "email": "",
+    "employee_type": "intern",
+    "max_hours_per_week": 13,
+    "preferences": {},
+    "active": true,
+    "created_at": "2026-06-06 09:45:48.045058"
+  },
+  {
+    "id": "emp_1780946033840",
+    "name": "Test new employee",
+    "email": "new@myibu.ca",
+    "employee_type": "manager",
+    "max_hours_per_week": 80,
+    "preferences": {},
+    "active": true,
+    "created_at": "2026-06-08 15:13:53.873968"
+  }
+]
