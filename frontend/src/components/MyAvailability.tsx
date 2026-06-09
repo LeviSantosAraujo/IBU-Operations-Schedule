@@ -28,15 +28,15 @@ interface DayAvailability {
   enabled: boolean
   startTime: string
   endTime: string
+  startDate: Date | null
+  endDate: Date | null
 }
 
 export default function MyAvailability() {
-  const [startDate, setStartDate] = useState<Date | null>(null)
-  const [endDate, setEndDate] = useState<Date | null>(null)
   const [dayAvailabilities, setDayAvailabilities] = useState<Record<string, DayAvailability>>(() => {
     const initial: Record<string, DayAvailability> = {}
     daysOfWeek.forEach(day => {
-      initial[day.value] = { enabled: false, startTime: '09:00', endTime: '17:00' }
+      initial[day.value] = { enabled: false, startTime: '09:00', endTime: '17:00', startDate: null, endDate: null }
     })
     return initial
   })
@@ -76,15 +76,26 @@ export default function MyAvailability() {
     }))
   }
 
+  const updateDate = (day: string, field: 'startDate' | 'endDate', value: Date | null) => {
+    setDayAvailabilities(prev => ({
+      ...prev,
+      [day]: { ...prev[day], [field]: value }
+    }))
+  }
+
   const handleSubmitAvailability = async () => {
     const enabledDays = Object.entries(dayAvailabilities).filter(([_, avail]) => avail.enabled)
     if (enabledDays.length === 0) {
       alert('Please select at least one day')
       return
     }
-    if (!startDate || !endDate) {
-      alert('Please select start and end dates')
-      return
+
+    // Validate each enabled day has date range
+    for (const [day, avail] of enabledDays) {
+      if (!avail.startDate || !avail.endDate) {
+        alert(`Please select start and end dates for ${day}`)
+        return
+      }
     }
 
     setLoading(true)
@@ -93,8 +104,8 @@ export default function MyAvailability() {
       for (const [day, avail] of enabledDays) {
         await createAvailabilityRequest({
           request_type: 'availability',
-          start_date: format(startDate, 'yyyy-MM-dd'),
-          end_date: format(endDate, 'yyyy-MM-dd'),
+          start_date: format(avail.startDate, 'yyyy-MM-dd'),
+          end_date: format(avail.endDate, 'yyyy-MM-dd'),
           days_of_week: [day],
           start_time: avail.startTime,
           end_time: avail.endTime,
@@ -107,13 +118,11 @@ export default function MyAvailability() {
       // Reset form
       const resetAvail: Record<string, DayAvailability> = {}
       daysOfWeek.forEach(day => {
-        resetAvail[day.value] = { enabled: false, startTime: '09:00', endTime: '17:00' }
+        resetAvail[day.value] = { enabled: false, startTime: '09:00', endTime: '17:00', startDate: null, endDate: null }
       })
       setDayAvailabilities(resetAvail)
       setComment('')
       setJobPreferences({})
-      setStartDate(null)
-      setEndDate(null)
       loadMyRequests()
     } catch (err) {
       alert('Error submitting request. Please try again.')
@@ -167,45 +176,45 @@ export default function MyAvailability() {
       <div className="bg-white rounded-lg shadow p-6 mb-6">
         <h2 className="text-lg font-semibold mb-4">Set Availability</h2>
 
-        {/* Date Range */}
-        <div className="grid grid-cols-2 gap-4 mb-4">
-          <div>
-            <label className="block text-sm font-medium mb-2">Start Date</label>
-            <DatePicker
-              selected={startDate}
-              onChange={setStartDate}
-              className="w-full border rounded px-3 py-2"
-              dateFormat="yyyy-MM-dd"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium mb-2">End Date</label>
-            <DatePicker
-              selected={endDate}
-              onChange={setEndDate}
-              minDate={startDate || undefined}
-              className="w-full border rounded px-3 py-2"
-              dateFormat="yyyy-MM-dd"
-            />
-          </div>
-        </div>
-
         {/* Day Availability Grid */}
-        <div className="space-y-3 mb-6">
+        <div className="space-y-4 mb-6">
           {daysOfWeek.map((day) => (
-            <div key={day.value} className="flex items-center gap-4 p-3 border rounded">
-              <div className="flex-1">
-                <div className="flex items-center gap-2 mb-2">
-                  <input
-                    type="checkbox"
-                    checked={dayAvailabilities[day.value].enabled}
-                    onChange={() => toggleDay(day.value)}
-                    className="w-4 h-4"
-                  />
-                  <span className="font-medium">{day.label}</span>
-                </div>
-                {dayAvailabilities[day.value].enabled && (
-                  <div className="flex items-center gap-2 ml-6">
+            <div key={day.value} className="p-4 border rounded">
+              <div className="flex items-center gap-2 mb-3">
+                <input
+                  type="checkbox"
+                  checked={dayAvailabilities[day.value].enabled}
+                  onChange={() => toggleDay(day.value)}
+                  className="w-4 h-4"
+                />
+                <span className="font-medium">{day.label}</span>
+              </div>
+              {dayAvailabilities[day.value].enabled && (
+                <div className="ml-6 space-y-3">
+                  {/* Date Range */}
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-sm font-medium mb-1">Start Date</label>
+                      <DatePicker
+                        selected={dayAvailabilities[day.value].startDate}
+                        onChange={(date) => updateDate(day.value, 'startDate', date)}
+                        className="w-full border rounded px-2 py-1 text-sm"
+                        dateFormat="yyyy-MM-dd"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium mb-1">End Date</label>
+                      <DatePicker
+                        selected={dayAvailabilities[day.value].endDate}
+                        onChange={(date) => updateDate(day.value, 'endDate', date)}
+                        minDate={dayAvailabilities[day.value].startDate || undefined}
+                        className="w-full border rounded px-2 py-1 text-sm"
+                        dateFormat="yyyy-MM-dd"
+                      />
+                    </div>
+                  </div>
+                  {/* Time Range */}
+                  <div className="flex items-center gap-2">
                     <Clock className="w-4 h-4 text-gray-400" />
                     <input
                       type="time"
@@ -221,8 +230,8 @@ export default function MyAvailability() {
                       className="border rounded px-2 py-1 text-sm"
                     />
                   </div>
-                )}
-              </div>
+                </div>
+              )}
             </div>
           ))}
         </div>
