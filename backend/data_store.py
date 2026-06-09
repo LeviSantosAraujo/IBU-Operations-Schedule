@@ -38,8 +38,13 @@ def get_employee_by_id(employee_id: str) -> Optional[Employee]:
 
 def save_employee(employee: Employee) -> Employee:
     employees = _load_json("employees.json")
-    # Remove existing if updating
-    employees = [e for e in employees if e.get("id") != employee.id]
+    # Update in place to preserve original position
+    for i, e in enumerate(employees):
+        if e.get("id") == employee.id:
+            employees[i] = employee.model_dump()
+            _save_json("employees.json", employees)
+            return employee
+    # If not found, append as new
     employees.append(employee.model_dump())
     _save_json("employees.json", employees)
     return employee
@@ -172,19 +177,19 @@ def initialize_sample_data():
         sample_employees = [
             Employee(id="emp1", name="Fran", employee_type="manager", max_hours_per_week=80),
             Employee(id="emp2", name="Aashima", employee_type="manager", max_hours_per_week=80),
-            Employee(id="emp3", name="Mickaela C", employee_type="student_worker", max_hours_per_week=24),
-            Employee(id="emp4", name="Kavya C", employee_type="student_worker", max_hours_per_week=24),
-            Employee(id="emp5", name="Pablo 2", employee_type="student_worker", max_hours_per_week=24),
-            Employee(id="emp6", name="Viviana 3", employee_type="student_worker", max_hours_per_week=24),
-            Employee(id="emp7", name="Anastasia 3", employee_type="student_worker", max_hours_per_week=24),
-            Employee(id="emp8", name="MEG 3", employee_type="student_worker", max_hours_per_week=24),
-            Employee(id="emp9", name="Achal 2", employee_type="student_worker", max_hours_per_week=24),
-            Employee(id="emp10", name="PRIYANKA 2", employee_type="student_worker", max_hours_per_week=24),
-            Employee(id="emp11", name="Arta C", employee_type="student_worker", max_hours_per_week=24),
-            Employee(id="emp12", name="Taran C", employee_type="student_worker", max_hours_per_week=24),
-            Employee(id="emp13", name="Sagar C", employee_type="student_worker", max_hours_per_week=24),
-            Employee(id="emp14", name="Itshan 3", employee_type="student_worker", max_hours_per_week=24),
-            Employee(id="emp15", name="Arnob 2", employee_type="student_worker", max_hours_per_week=24),
+            Employee(id="emp3", name="Mickaela C", employee_type="employee", max_hours_per_week=24),
+            Employee(id="emp4", name="Kavya C", employee_type="employee", max_hours_per_week=24),
+            Employee(id="emp5", name="Pablo 2", employee_type="employee", max_hours_per_week=24),
+            Employee(id="emp6", name="Viviana 3", employee_type="employee", max_hours_per_week=24),
+            Employee(id="emp7", name="Anastasia 3", employee_type="employee", max_hours_per_week=24),
+            Employee(id="emp8", name="MEG 3", employee_type="employee", max_hours_per_week=24),
+            Employee(id="emp9", name="Achal 2", employee_type="employee", max_hours_per_week=24),
+            Employee(id="emp10", name="PRIYANKA 2", employee_type="employee", max_hours_per_week=24),
+            Employee(id="emp11", name="Arta C", employee_type="employee", max_hours_per_week=24),
+            Employee(id="emp12", name="Taran C", employee_type="employee", max_hours_per_week=24),
+            Employee(id="emp13", name="Sagar C", employee_type="employee", max_hours_per_week=24),
+            Employee(id="emp14", name="Itshan 3", employee_type="employee", max_hours_per_week=24),
+            Employee(id="emp15", name="Arnob 2", employee_type="employee", max_hours_per_week=24),
             Employee(id="emp16", name="Intern-Levi 7", employee_type="intern", max_hours_per_week=15),
             Employee(id="emp17", name="Intern-Himanshu 7", employee_type="intern", max_hours_per_week=15),
         ]

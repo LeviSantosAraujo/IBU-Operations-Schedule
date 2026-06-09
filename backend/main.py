@@ -11,9 +11,10 @@ from pathlib import Path
 from pydantic import BaseModel
 
 from models import (
-    Employee, Availability, WeeklySchedule, Shift, JobType, Floor,
+    Employee, EmployeeUpdate, Availability, WeeklySchedule, Shift, JobType, Floor,
     AvailabilityType, EmployeeType, FloorCoverageQuery, FloorCoverageResponse,
-    AVAILABILITY_COLORS
+    AVAILABILITY_COLORS, HourlyCoverageRequirement,
+    AvailabilityRequest, AvailabilityRequestStatus, Notification, NotificationType, Event
 )
 from excel_store import (
     get_all_employees, get_employee_by_id, save_employee, delete_employee,
@@ -23,9 +24,13 @@ from excel_store import (
     set_excel_file, get_excel_file, ensure_excel_structure,
     set_manager_password, verify_manager_password, manager_has_password,
     initialize_from_excel, get_all_week_schedule_dates,
-    initialize_sample_employees, set_blob_key
+    initialize_sample_employees, set_blob_key,
+    get_coverage_requirements, save_coverage_requirement,
+    get_availability_requests, save_availability_request,
+    get_notifications, save_notification, mark_notification_read,
+    get_events, save_event, delete_event
 )
-from storage import store_excel_data, excel_file_exists
+from storage import store_excel_data, excel_file_exists, get_excel_data
 from scheduler import SchedulingEngine, generate_schedule
 from auth import AuthManager, require_auth, require_manager, require_self_or_manager
 
@@ -46,12 +51,12 @@ CURRENT_EXCEL_FILE: Optional[str] = None
 UPLOAD_DIR = Path(__file__).parent / "uploads"
 UPLOAD_DIR.mkdir(exist_ok=True)
 
-app = FastAPI(title="IBU Schedule System", version="2.0.0")
+app = FastAPI(title="IBU Operations team schedule", version="2.0.0")
 
 # Enable CORS for frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:5173"],
+    allow_origins=["http://localhost:3000", "http://localhost:5173", "http://localhost:3001"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -82,8 +87,6 @@ async def excel_status():
             "file_exists": exists
         }
     except Exception as e:
-        # Return safe default if there's any error
-        print(f"Error checking Excel status: {e}")
         return {
             "configured": False,
             "file_path": None,
@@ -108,16 +111,13 @@ def extract_employees_from_schedule(wb) -> List[Dict]:
     employees = []
     seen_normalized = set()
     manager_names = ['fran', 'aashima']  # Known managers (removed Francisco)
-    skip_names = ['events', 'total', 'grand total', 'total pt daily hours', '']
+    skip_names = ['events', 'total', 'grand total', 'total pt daily hours', 'availabilities', 'availability', '']
     skip_phrases = ['shifts', 'availability', 'blank', 'until', 'after', 'before', '12-3p', '12-3 pm', 'eod', 'anytime', 'all day', 'interns', 'ibu ops']
-    
-    print(f"Workbook sheets: {wb.sheetnames}")
     
     # Only use the first sheet (most recent week)
     if wb.sheetnames:
         sheet_name = wb.sheetnames[0]
         sheet = wb[sheet_name]
-        print(f"Scanning first sheet (most recent): {sheet_name}, max_row: {sheet.max_row}")
         
         # Look for "EVENTS" header to identify schedule sheets
         events_row = None
@@ -125,7 +125,6 @@ def extract_employees_from_schedule(wb) -> List[Dict]:
             cell_value = sheet.cell(row=row, column=1).value
             if cell_value and isinstance(cell_value, str) and 'events' in cell_value.lower():
                 events_row = row
-                print(f"Found EVENTS header at row {row}")
                 break
         
         # If no EVENTS header, try scanning all rows for names
@@ -171,9 +170,8 @@ def extract_employees_from_schedule(wb) -> List[Dict]:
                                 'name': clean_name,
                                 'type': emp_type
                             })
-                            print(f"Found employee: {clean_name} ({emp_type}) from '{name}'")
+                            seen_normalized.add(normalized)
     
-    print(f"Total employees found: {len(employees)}")
     return employees
 
 @app.post("/api/excel/upload")
@@ -184,10 +182,9 @@ async def upload_excel(
     """Upload an Excel file to use as database - managers only, or anyone if no database exists"""
     # Allow upload if no database exists (initial setup)
     if not excel_file_exists():
-        print(f"Initial setup upload by unauthenticated user. Filename: {file.filename}")
+        pass  # Initial setup
     else:
         user = require_manager(authorization)
-        print(f"Upload request by manager: {user['employee_name']}. Filename: {file.filename}, Content-Type: {file.content_type}")
     
     if not file.filename:
         raise HTTPException(status_code=400, detail="No filename provided")
@@ -199,16 +196,62 @@ async def upload_excel(
     try:
         # Read the file
         file_content = await file.read()
-        print(f"File read successfully. Size: {len(file_content)} bytes")
         
         # Parse as Excel
         from openpyxl import load_workbook
         wb = load_workbook(io.BytesIO(file_content))
-        print("Excel file loaded successfully")
+        
+        # Preserve PWDs tab from current file if it exists
+        pwd_data = None
+        try:
+            from excel_store import _get_workbook
+            current_wb = _get_workbook()
+            if current_wb and 'PWDs' in current_wb.sheetnames:
+                pwd_sheet = current_wb['PWDs']
+                pwd_data = []
+                for row in range(1, pwd_sheet.max_row + 1):
+                    row_data = [pwd_sheet.cell(row=row, column=c).value for c in range(1, pwd_sheet.max_column + 1)]
+                    pwd_data.append(row_data)
+                current_wb.close()
+        except Exception as e:
+            print(f"Failed to preserve PWDs tab: {e}")
+        
+        # Clear all system-generated data before importing
+        sheets_to_delete = []
+        for sheet_name in wb.sheetnames:
+            # Delete system-generated schedule tabs
+            if sheet_name.startswith('Schedule_'):
+                sheets_to_delete.append(sheet_name)
+            # Clear system sheets (keep structure, clear data)
+            elif sheet_name == 'Events':
+                sheet = wb[sheet_name]
+                if sheet.max_row > 1:
+                    sheet.delete_rows(2, sheet.max_row - 1)
+            elif sheet_name == 'Availability_Requests':
+                sheet = wb[sheet_name]
+                if sheet.max_row > 1:
+                    sheet.delete_rows(2, sheet.max_row - 1)
+            elif sheet_name == 'Notifications':
+                sheet = wb[sheet_name]
+                if sheet.max_row > 1:
+                    sheet.delete_rows(2, sheet.max_row - 1)
+        
+        # Delete system-generated schedule tabs
+        for sheet_name in sheets_to_delete:
+            wb.remove(wb[sheet_name])
+        
+        # Restore PWDs tab if it was preserved
+        if pwd_data:
+            if 'PWDs' not in wb.sheetnames:
+                wb.create_sheet('PWDs')
+            pwd_sheet = wb['PWDs']
+            pwd_sheet.delete_rows(1, pwd_sheet.max_row)
+            for row_idx, row_data in enumerate(pwd_data, 1):
+                for col_idx, cell_value in enumerate(row_data, 1):
+                    pwd_sheet.cell(row=row_idx, column=col_idx, value=cell_value)
         
         # Extract employees from schedule
         employees = extract_employees_from_schedule(wb)
-        print(f"Extracted {len(employees)} employees from schedule")
         
         # Create or update Employees sheet
         if 'Employees' not in wb.sheetnames:
@@ -227,8 +270,8 @@ async def upload_excel(
             emp_sheet.cell(row=idx, column=1, value=emp['id'])
             emp_sheet.cell(row=idx, column=2, value=emp['name'])
             emp_sheet.cell(row=idx, column=3, value='')  # Email
-            emp_sheet.cell(row=idx, column=4, value='manager' if emp['type'] == 'manager' else 'student_worker')
-            emp_sheet.cell(row=idx, column=5, value=40 if emp['type'] == 'manager' else 20)
+            emp_sheet.cell(row=idx, column=4, value='manager' if emp['type'] == 'manager' else 'employee')
+            emp_sheet.cell(row=idx, column=5, value=40 if emp['type'] == 'manager' else 24)
             emp_sheet.cell(row=idx, column=6, value='{}')  # Preferences JSON
             emp_sheet.cell(row=idx, column=7, value='Yes')
             emp_sheet.cell(row=idx, column=8, value=datetime.now().isoformat())
@@ -239,18 +282,28 @@ async def upload_excel(
         buffer.seek(0)
         updated_content = buffer.read()
         
-        # Store in storage
+        # Store in storage - always as ibu_schedule.xlsx so _get_workbook finds it
         try:
             from storage import store_excel_data
-            store_excel_data(updated_content, file.filename)
-            print("File stored successfully with employees")
+            store_excel_data(updated_content, "ibu_schedule.xlsx")
+            
+            # Also write directly to the uploads folder for _get_workbook local path check
+            import pathlib
+            upload_path = pathlib.Path(__file__).parent / "uploads" / "ibu_schedule.xlsx"
+            upload_path.parent.mkdir(exist_ok=True)
+            with open(upload_path, "wb") as f:
+                f.write(updated_content)
+            
+            # Clear workbook cache so next request reads the new file
+            from excel_store import _clear_workbook_cache
+            _clear_workbook_cache()
         except Exception as e:
             print(f"Storage failed: {e}")
         
         wb.close()
         
         return {
-            "message": f"Excel file uploaded successfully with {len(employees)} employees",
+            "message": f"Excel file uploaded successfully with {len(employees)} employees. System data cleared.",
             "filename": file.filename,
             "employees_added": len(employees)
         }
@@ -303,10 +356,9 @@ async def create_new_excel(authorization: Optional[str] = Header(None)):
     """Create a new Excel database with sample employees - managers only, or anyone if no database exists"""
     # Allow creation if no database exists (initial setup)
     if not excel_file_exists():
-        print(f"Initial setup create-new by unauthenticated user")
+        pass  # Initial setup
     else:
         user = require_manager(authorization)
-        print(f"Create new Excel request by manager: {user['employee_name']}")
     import io
     from openpyxl import Workbook
     
@@ -358,11 +410,30 @@ async def set_manager_password_endpoint(request: SetPasswordRequest):
     
     # Check if password already exists
     if manager_has_password(request.employee_id):
-        raise HTTPException(status_code=400, detail="Password already set. Contact admin to reset.")
+        raise HTTPException(status_code=400, detail="Password already set. Use update-password to change it.")
     
     set_manager_password(request.employee_id, employee.name, request.password)
     
     return {"message": "Password set successfully"}
+
+@app.put("/api/managers/update-password")
+async def update_manager_password_endpoint(request: SetPasswordRequest, authorization: Optional[str] = Header(None, alias="Authorization")):
+    """Update password for a manager (managers can update their own, or managers can update others)"""
+    # Auth check
+    user = require_auth(authorization)
+    if user["role"] not in ["manager", "admin"] and user["employee_id"] != request.employee_id:
+        raise HTTPException(status_code=403, detail="Can only update your own password")
+    
+    employee = get_employee_by_id(request.employee_id)
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    if employee.employee_type != EmployeeType.MANAGER:
+        raise HTTPException(status_code=403, detail="Only managers can have passwords")
+    
+    set_manager_password(request.employee_id, employee.name, request.password)
+    
+    return {"message": "Password updated successfully"}
 
 @app.post("/api/managers/verify-password")
 async def verify_password_endpoint(request: SetPasswordRequest):
@@ -387,7 +458,6 @@ async def check_has_password(employee_id: str):
 @app.post("/api/login")
 async def login(request: LoginRequest):
     """Login as an employee with optional password for managers"""
-    print(f"Login attempt for employee_id: {request.employee_id}")
     
     # Check if Excel file is configured (in storage or local)
     from storage import excel_file_exists
@@ -395,12 +465,8 @@ async def login(request: LoginRequest):
         raise HTTPException(status_code=400, detail="No Excel database configured. Please upload or select an Excel file first.")
     
     employee = get_employee_by_id(request.employee_id)
-    print(f"Employee lookup result: {employee}")
     
     if not employee:
-        # Log all available employees for debugging
-        all_employees = get_all_employees()
-        print(f"Available employees: {[(e.id, e.name) for e in all_employees]}")
         raise HTTPException(status_code=404, detail="Employee not found")
     
     # Managers need password verification
@@ -412,19 +478,14 @@ async def login(request: LoginRequest):
                 raise HTTPException(status_code=401, detail="Invalid password")
         # If no password set yet, allow login (first time setup)
     
-    print(f"Generating token for employee_id: {request.employee_id}")
-    token = AuthManager.login(request.employee_id)
-    print(f"Token generated successfully: {token[:20] if token else 'None'}...")
+    token = AuthManager.login(request.employee_id, request.password, get_employee_by_id)
     
-    response_data = {
+    return {
         "token": token,
         "employee": employee,
         "role": employee.employee_type,
         "requires_password_setup": employee.employee_type == EmployeeType.MANAGER and not manager_has_password(request.employee_id)
     }
-    print(f"Preparing response: {response_data}")
-    
-    return response_data
 
 @app.post("/api/logout")
 async def logout(authorization: Optional[str] = Header(None)):
@@ -447,13 +508,10 @@ async def get_me(authorization: Optional[str] = Header(None)):
 @app.get("/api/employees", response_model=List[Employee])
 async def list_employees(active_only: bool = False):
     """List all employees"""
-    print(f"Employees request: active_only={active_only}")
     try:
         employees = get_all_employees()
-        print(f"Found {len(employees)} employees")
         if active_only:
             employees = [e for e in employees if e.active]
-            print(f"Filtered to {len(employees)} active employees")
         return employees
     except Exception as e:
         print(f"Error loading employees: {e}")
@@ -480,15 +538,30 @@ async def create_employee(
 @app.put("/api/employees/{employee_id}", response_model=Employee)
 async def update_employee(
     employee_id: str,
-    employee: Employee,
-    user: Dict = Depends(require_manager)
+    employee_update: EmployeeUpdate,
+    user: Dict = Depends(require_self_or_manager)
 ):
-    """Update an employee (managers only)"""
+    """Update an employee (managers can edit anyone, employees can edit themselves)"""
     existing = get_employee_by_id(employee_id)
     if not existing:
         raise HTTPException(status_code=404, detail="Employee not found")
-    employee.id = employee_id
-    return save_employee(employee)
+    
+    # Build updated employee by merging existing with new values
+    update_data = employee_update.model_dump(exclude_unset=True)
+    
+    # Create updated employee object
+    updated_employee = Employee(
+        id=employee_id,
+        name=update_data.get("name", existing.name),
+        email=update_data.get("email", existing.email),
+        employee_type=update_data.get("employee_type", existing.employee_type),
+        max_hours_per_week=update_data.get("max_hours_per_week", existing.max_hours_per_week),
+        preferences=update_data.get("preferences", existing.preferences),
+        active=update_data.get("active", existing.active),
+        created_at=existing.created_at
+    )
+    
+    return save_employee(updated_employee)
 
 @app.delete("/api/employees/{employee_id}")
 async def remove_employee(
@@ -543,14 +616,11 @@ async def submit_availability(
     authorization: Optional[str] = Header(None)
 ):
     """Submit or update availability - employees can only submit their own"""
-    print(f"Authorization header: {authorization}")
-    print(f"Availability submission: {availability}")
     user = require_auth(authorization)
     
     # Auto-generate ID if not provided
     if not availability.id:
         availability.id = f"avail_{availability.employee_id}_{availability.week_start_date}"
-        print(f"Auto-generated ID: {availability.id}")
     
     # Employees can only submit their own availability
     if user["role"] != "manager" and availability.employee_id != user["employee_id"]:
@@ -635,6 +705,30 @@ async def get_pending_availabilities(user: Dict = Depends(require_manager)):
     pending = [avail for avail in all_availabilities if not avail.approved]
     return pending
 
+# ============ Hourly Coverage Requirements Endpoints ============
+
+@app.get("/api/coverage-requirements/{week_start_date}")
+async def get_coverage_requirements(
+    week_start_date: date,
+    authorization: Optional[str] = Header(None)
+):
+    """Get hourly coverage requirements for a week (managers only)"""
+    user = require_manager(authorization)
+    requirements = get_coverage_requirements(week_start_date)
+    return {"week_start_date": week_start_date, "requirements": requirements}
+
+@app.post("/api/coverage-requirements")
+async def set_coverage_requirements(
+    requirements: List[HourlyCoverageRequirement],
+    authorization: Optional[str] = Header(None)
+):
+    """Set hourly coverage requirements for a week (managers only)"""
+    user = require_manager(authorization)
+    for req in requirements:
+        req.created_by = user["employee_id"]
+        save_coverage_requirement(req)
+    return {"message": f"Saved {len(requirements)} coverage requirements"}
+
 # ============ Schedule Endpoints ============
 
 @app.get("/api/schedules", response_model=List[WeeklySchedule])
@@ -698,6 +792,27 @@ async def update_schedule_shifts(
     
     return save_schedule(schedule)
 
+@app.put("/api/schedules/{week_start_date}/shifts/{shift_id}/break")
+async def mark_break_provided(
+    week_start_date: date,
+    shift_id: str,
+    break_provided: bool = True,
+    user: Dict = Depends(require_manager)
+):
+    """Mark a shift's break as provided (managers only)"""
+    schedule = get_schedule_by_week(week_start_date)
+    if not schedule:
+        raise HTTPException(status_code=404, detail="Schedule not found")
+    
+    shift = next((s for s in schedule.shifts if s.id == shift_id), None)
+    if not shift:
+        raise HTTPException(status_code=404, detail="Shift not found")
+    
+    shift.break_provided = break_provided
+    schedule.updated_at = datetime.now()
+    
+    return save_schedule(schedule)
+
 @app.post("/api/schedules/{week_start_date}/publish")
 async def publish_schedule(
     week_start_date: date,
@@ -729,6 +844,22 @@ async def get_available_weeks(user: Dict = Depends(require_manager)):
         "weeks": [w.isoformat() for w in weeks],
         "count": len(weeks)
     }
+
+@app.post("/api/schedules/{week_start_date}/clear")
+async def clear_schedule_shifts(
+    week_start_date: date,
+    user: Dict = Depends(require_manager)
+):
+    """Clear all shifts from a schedule while preserving events (managers only)"""
+    schedule = get_schedule_by_week(week_start_date)
+    if not schedule:
+        raise HTTPException(status_code=404, detail="Schedule not found")
+    
+    # Clear all shifts and reset total hours
+    schedule.shifts = []
+    schedule.total_hours = {}
+    save_schedule(schedule)
+    return {"message": "Schedule cleared"}
 
 # ============ Floor Coverage & Queries ============
 
@@ -803,6 +934,265 @@ async def get_config():
 async def update_config(config: Dict):
     """Update system configuration"""
     return save_system_config(config)
+
+# ============ Availability Requests ============
+
+@app.get("/api/availability-requests")
+async def get_all_availability_requests(authorization: str = Header(None)):
+    """Get all availability requests (managers only)"""
+    user = AuthManager.get_current_user(authorization)
+    if not user or user.get('role') not in ['manager', 'admin']:
+        raise HTTPException(status_code=403, detail="Manager access required")
+    
+    return get_availability_requests()
+
+@app.get("/api/availability-requests/my")
+async def get_my_availability_requests(authorization: str = Header(None)):
+    """Get current user's availability requests"""
+    user = AuthManager.get_current_user(authorization)
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    
+    all_requests = get_availability_requests()
+    my_requests = [r for r in all_requests if r.get('employee_id') == user.get('employee_id')]
+    return my_requests
+
+@app.post("/api/availability-requests")
+async def create_availability_request(request: Dict, authorization: str = Header(None)):
+    """Create an availability request"""
+    user = AuthManager.get_current_user(authorization)
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    
+    request['id'] = str(uuid.uuid4())
+    request['employee_id'] = user['employee_id']
+    request['status'] = AvailabilityRequestStatus.PENDING
+    request['created_at'] = datetime.now()
+    
+    if save_availability_request(request):
+        return request
+    raise HTTPException(status_code=500, detail="Failed to save request")
+
+@app.put("/api/availability-requests/{request_id}/approve")
+async def approve_availability_request(request_id: str, body: Dict = {}, authorization: str = Header(None)):
+    """Approve an availability request"""
+    user = AuthManager.get_current_user(authorization)
+    if not user or user.get('role') not in ['manager', 'admin']:
+        raise HTTPException(status_code=403, detail="Manager access required")
+    
+    requests = get_availability_requests()
+    request_data = next((r for r in requests if r['id'] == request_id), None)
+    
+    if not request_data:
+        raise HTTPException(status_code=404, detail="Request not found")
+    
+    request_data['status'] = AvailabilityRequestStatus.APPROVED
+    request_data['manager_comment'] = body.get('comment')
+    request_data['updated_at'] = datetime.now()
+    
+    if save_availability_request(request_data):
+        # Add a locked shift to the schedule for this week/day/employee
+        try:
+            week_date = date.fromisoformat(str(request_data['week_start_date'])[:10])
+            schedule = get_schedule_by_week(week_date)
+            if not schedule:
+                schedule = WeeklySchedule(
+                    id=f"sched_{week_date.isoformat()}",
+                    week_start_date=week_date
+                )
+            
+            # Map availability type to time range for the locked shift
+            avail_type = request_data.get('availability_type', '')
+            avail_time_map = {
+                'off': ('00:00', '23:59'),
+                'until_12pm': ('00:00', '12:00'),
+                'until_3pm': ('00:00', '15:00'),
+                'after_330pm': ('15:30', '23:59'),
+                '12_3': ('12:00', '15:00'),
+                'after_12_eod': ('12:00', '23:59'),
+                'before_12_after_330': ('00:00', '23:59'),
+                'blank': ('00:00', '23:59'),
+            }
+            start_t, end_t = avail_time_map.get(avail_type, ('00:00', '23:59'))
+            
+            locked_shift = Shift(
+                id=f"locked_{request_data['id']}",
+                employee_id=request_data['employee_id'],
+                day_of_week=request_data['day_of_week'],
+                start_time=start_t,
+                end_time=end_t,
+                job_type=JobType.DESK,
+                hours=0,
+                locked=True,
+                locked_availability_type=avail_type,
+                color='#D1D5DB',
+                location='day off' if avail_type == 'off' else None
+            )
+            
+            # Remove any previous locked shift for same employee/day
+            schedule.shifts = [s for s in schedule.shifts if not (
+                getattr(s, 'locked', False) and
+                s.employee_id == request_data['employee_id'] and
+                s.day_of_week == request_data['day_of_week']
+            )]
+            schedule.shifts.append(locked_shift)
+            save_schedule(schedule)
+        except Exception as e:
+            print(f"Warning: could not add locked shift: {e}")
+
+        # Send notification to employee
+        avail_label = request_data.get('availability_type', '').replace('_', ' ')
+        comment_part = f" Manager note: {body.get('comment')}" if body.get('comment') else ""
+        notification = {
+            'id': str(uuid.uuid4()),
+            'employee_id': request_data['employee_id'],
+            'type': NotificationType.AVAILABILITY_APPROVED,
+            'message': f"Your availability request for {request_data['day_of_week']} ({avail_label}) has been approved.{comment_part}",
+            'created_at': datetime.now(),
+            'read': False
+        }
+        save_notification(notification)
+        return request_data
+    
+    raise HTTPException(status_code=500, detail="Failed to approve request")
+
+@app.put("/api/availability-requests/{request_id}/reject")
+async def reject_availability_request(request_id: str, body: Dict = {}, authorization: str = Header(None)):
+    """Reject an availability request"""
+    user = AuthManager.get_current_user(authorization)
+    if not user or user.get('role') not in ['manager', 'admin']:
+        raise HTTPException(status_code=403, detail="Manager access required")
+    
+    requests = get_availability_requests()
+    request_data = next((r for r in requests if r['id'] == request_id), None)
+    
+    if not request_data:
+        raise HTTPException(status_code=404, detail="Request not found")
+    
+    request_data['status'] = AvailabilityRequestStatus.REJECTED
+    request_data['manager_comment'] = body.get('comment', '')
+    request_data['updated_at'] = datetime.now()
+    
+    if save_availability_request(request_data):
+        # Send notification to employee
+        notification = {
+            'id': str(uuid.uuid4()),
+            'employee_id': request_data['employee_id'],
+            'type': NotificationType.AVAILABILITY_REJECTED,
+            'message': f"Your availability request for {request_data['day_of_week']} ({request_data.get('availability_type','').replace('_',' ')}) was not approved.{' Reason: ' + body.get('comment','') if body.get('comment') else ''}",
+            'created_at': datetime.now(),
+            'read': False
+        }
+        save_notification(notification)
+        return request_data
+    
+    raise HTTPException(status_code=500, detail="Failed to reject request")
+
+# ============ Notifications ============
+
+@app.get("/api/notifications")
+async def get_employee_notifications(authorization: str = Header(None)):
+    """Get notifications for the current user"""
+    user = AuthManager.get_current_user(authorization)
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    
+    return get_notifications(user['employee_id'])
+
+@app.put("/api/notifications/{notification_id}/read")
+async def mark_notification_as_read(notification_id: str, authorization: str = Header(None)):
+    """Mark a notification as read"""
+    user = AuthManager.get_current_user(authorization)
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    
+    if mark_notification_read(notification_id):
+        return {"success": True}
+    
+    raise HTTPException(status_code=500, detail="Failed to mark notification as read")
+
+# ============ Events ============
+
+@app.get("/api/events/list")
+async def get_week_events():
+    """Get all events"""
+    try:
+        events = get_events()
+        # Convert to dict with string dates
+        return [
+            {
+                "id": e.id,
+                "name": e.name,
+                "week_start_date": e.week_start_date.isoformat() if isinstance(e.week_start_date, date) else str(e.week_start_date),
+                "date": e.date.isoformat() if isinstance(e.date, date) else str(e.date),
+                "start_time": e.start_time,
+                "end_time": e.end_time,
+                "location": e.location,
+                "people_needed": e.people_needed,
+                "description": e.description,
+                "created_by": e.created_by,
+                "created_at": e.created_at.isoformat() if isinstance(e.created_at, datetime) else str(e.created_at),
+                "updated_at": e.updated_at.isoformat() if e.updated_at and isinstance(e.updated_at, datetime) else str(e.updated_at) if e.updated_at else None
+            }
+            for e in events
+        ]
+    except Exception as e:
+        print(f"Error in get_week_events: {e}")
+        return []
+
+@app.post("/api/events")
+async def create_event(event_data: dict, authorization: str = Header(None)):
+    """Create a new event"""
+    user = require_manager(authorization)
+    
+    # Auto-generate ID if not provided
+    if not event_data.get('id'):
+        event_data['id'] = f"event_{uuid.uuid4().hex[:8]}"
+    
+    # Set created_by and created_at if not provided
+    if not event_data.get('created_by'):
+        event_data['created_by'] = user['employee_id']
+    if not event_data.get('created_at'):
+        event_data['created_at'] = datetime.now()
+    
+    # Convert string dates to date/datetime objects
+    if isinstance(event_data.get('week_start_date'), str):
+        event_data['week_start_date'] = date.fromisoformat(event_data['week_start_date'])
+    if isinstance(event_data.get('date'), str):
+        event_data['date'] = date.fromisoformat(event_data['date'])
+    
+    # Create Event object
+    event = Event(**event_data)
+    
+    return save_event(event)
+
+@app.put("/api/events/{event_id}")
+async def update_event(event_id: str, event_data: dict, authorization: str = Header(None)):
+    """Update an existing event"""
+    user = require_manager(authorization)
+    
+    # Ensure the event ID matches
+    event_data['id'] = event_id
+    event_data['updated_at'] = datetime.now()
+    
+    # Convert string dates to date objects
+    if isinstance(event_data.get('week_start_date'), str):
+        event_data['week_start_date'] = date.fromisoformat(event_data['week_start_date'])
+    if isinstance(event_data.get('date'), str):
+        event_data['date'] = date.fromisoformat(event_data['date'])
+    
+    event = Event(**event_data)
+    return save_event(event)
+
+@app.delete("/api/events/{event_id}")
+async def remove_event(event_id: str, authorization: str = Header(None)):
+    """Delete an event"""
+    user = require_manager(authorization)
+    
+    if delete_event(event_id):
+        return {"success": True}
+    
+    raise HTTPException(status_code=404, detail="Event not found")
 
 # ============ Health Check ============
 
