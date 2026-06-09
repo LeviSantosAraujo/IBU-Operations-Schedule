@@ -78,21 +78,26 @@ def _clear_workbook_cache():
 def _get_workbook() -> Optional[Workbook]:
     """Get workbook from any available storage"""
     global _workbook_cache
-    
+
     # Return cached workbook if available
     if _workbook_cache:
         return _workbook_cache
-    
+
     # Always check local file first
     local_path = Path(__file__).parent / "uploads" / "ibu_schedule.xlsx"
     if local_path.exists():
-        _workbook_cache = load_workbook(local_path)
-        return _workbook_cache
-    
+        try:
+            _workbook_cache = load_workbook(local_path)
+            print(f"Loaded workbook from local file: {local_path}")
+            return _workbook_cache
+        except Exception as e:
+            print(f"Error loading local file: {e}")
+
     # Try storage module (blob, local, memory)
     wb = get_workbook()
     if wb:
         _workbook_cache = wb
+        print("Loaded workbook from storage module")
     return wb
 
 def _save_workbook(wb: Workbook) -> bool:
@@ -1564,6 +1569,8 @@ def get_all_week_schedule_dates() -> List[date]:
 
 def get_availability_requests() -> List[Dict]:
     """Get all availability requests from Excel"""
+    # Clear cache to ensure we get fresh data
+    _clear_workbook_cache()
     wb = _get_workbook()
     if not wb:
         return []
@@ -1576,8 +1583,8 @@ def get_availability_requests() -> List[Dict]:
         sheet = wb['Availability_Requests']
         requests = []
 
-        # Check if sheet has new schema (has 'request_type' column)
-        has_new_schema = sheet.cell(row=1, column=12).value == 'Request_Type'
+        # Check if sheet has new schema (has 'Request_Type' column at position 3)
+        has_new_schema = sheet.cell(row=1, column=3).value == 'Request_Type'
 
         for row in range(2, sheet.max_row + 1):
             if has_new_schema:

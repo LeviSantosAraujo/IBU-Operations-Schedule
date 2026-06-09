@@ -49,6 +49,8 @@ class SetPasswordRequest(BaseModel):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Load local Excel file into memory on startup"""
+    # Clear any cached workbook to force reload
+    _clear_workbook_cache()
     # Load local Excel file into memory storage
     local_path = Path(__file__).parent / "uploads" / "ibu_schedule.xlsx"
     if local_path.exists():
