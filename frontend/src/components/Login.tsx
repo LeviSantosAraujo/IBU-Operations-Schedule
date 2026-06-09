@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { API_BASE_URL, getEmployees } from '../api'
 import { LogIn, User, Shield, Lock, Key } from 'lucide-react'
 
@@ -7,6 +8,7 @@ interface LoginProps {
 }
 
 export default function Login({ onLogin }: LoginProps) {
+  const navigate = useNavigate()
   const [employees, setEmployees] = useState<any[]>([])
   const [selectedEmployee, setSelectedEmployee] = useState('')
   const [password, setPassword] = useState('')
@@ -234,7 +236,7 @@ export default function Login({ onLogin }: LoginProps) {
             <p className="font-medium">No database configured</p>
             <p className="text-sm mt-1">Please set up the Excel database first.</p>
             <button
-              onClick={() => window.location.href = '/setup'}
+              onClick={() => navigate('/setup')}
               className="mt-2 text-sm underline hover:text-yellow-800"
             >
               Go to Database Setup
