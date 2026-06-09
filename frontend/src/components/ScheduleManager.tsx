@@ -1165,10 +1165,22 @@ export default function ScheduleManager() {
                           return (
                             <td
                               key={`${emp.id}-${day}`}
-                              className="p-1 schedule-cell align-top"
+                              className="p-1 schedule-cell align-top cursor-pointer"
                               style={isLockedCell(emp.id, day) ? { background: 'repeating-linear-gradient(45deg, #f3f4f6, #f3f4f6 4px, #e5e7eb 4px, #e5e7eb 8px)' } : {}}
                               onDragOver={handleDragOver}
                               onDrop={() => handleDrop(emp.id, day)}
+                              onDoubleClick={() => {
+                                setNewShift({
+                                  employee_id: emp.id,
+                                  day_of_week: day,
+                                  start_time: '09:00',
+                                  end_time: '17:00',
+                                  job_type: 'ground_floor',
+                                  location: 'Ground Floor',
+                                  description: ''
+                                })
+                                setShowAddShift(true)
+                              }}
                             >
                               {shifts.map((shift: Shift) => (
                                 shift.locked ? (
