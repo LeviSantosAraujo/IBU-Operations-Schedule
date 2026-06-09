@@ -53,7 +53,6 @@ export default function ExcelSetup({ onSetupComplete }: ExcelSetupProps) {
       
       const data = await response.json()
       setStatus({ configured: true, file_path: data.file_path, file_exists: true })
-      onSetupComplete()
     } catch (err) {
       setError('Failed to create new Excel database')
     } finally {
@@ -92,7 +91,6 @@ export default function ExcelSetup({ onSetupComplete }: ExcelSetupProps) {
 
       const data = await response.json()
       setStatus({ configured: true, file_path: data.file_path, file_exists: true })
-      onSetupComplete()
     } catch (err) {
       setError('Failed to upload Excel file')
     } finally {
