@@ -8,15 +8,5 @@
       "PYTHON_VERSION": "3.12"
     }
   },
-  "installCommand": "cd frontend && npm install",
-  "routes": [
-    {
-      "src": "/api/(.*)",
-      "dest": "/api/index.py"
-    },
-    {
-      "src": "/(.*)",
-      "dest": "/frontend/dist/$1"
-    }
-  ]
+  "installCommand": "cd frontend && npm install"
 }
