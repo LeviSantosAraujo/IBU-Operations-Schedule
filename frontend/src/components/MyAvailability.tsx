@@ -393,14 +393,22 @@ export default function MyAvailability() {
         ) : (
           <div className="space-y-3">
             {myRequests.map((request) => {
-              // Get days display
-              const daysDisplay = Array.isArray(request.days_of_week)
-                ? request.days_of_week.map((d: string) => d.charAt(0).toUpperCase() + d.slice(1)).join(', ')
-                : request.day_of_week || 'N/A'
+              // Get days display - filter out invalid values like "day_off"
+              let daysDisplay = 'N/A'
+              if (Array.isArray(request.days_of_week) && request.days_of_week.length > 0) {
+                const validDays = request.days_of_week.filter((d: string) => d && d !== 'day_off' && d !== 'off')
+                if (validDays.length > 0) {
+                  daysDisplay = validDays.map((d: string) => d.charAt(0).toUpperCase() + d.slice(1)).join(', ')
+                }
+              } else if (request.day_of_week && request.day_of_week !== 'day_off' && request.day_of_week !== 'off') {
+                daysDisplay = request.day_of_week.charAt(0).toUpperCase() + request.day_of_week.slice(1)
+              }
 
               // Get request type description
               let requestDescription = ''
-              if (request.request_type === 'day_off') {
+              const requestType = request.request_type || 'availability'
+
+              if (requestType === 'day_off') {
                 requestDescription = `Day Off for ${daysDisplay}`
               } else {
                 const timeRange = request.start_time && request.end_time
@@ -410,10 +418,10 @@ export default function MyAvailability() {
               }
 
               // Format dates
-              const startDate = request.start_date && request.start_date !== '1969-12-31'
+              const startDate = request.start_date && request.start_date !== '1969-12-31' && request.start_date !== null
                 ? new Date(request.start_date).toLocaleDateString()
                 : 'Not set'
-              const endDate = request.end_date && request.end_date !== '1969-12-31'
+              const endDate = request.end_date && request.end_date !== '1969-12-31' && request.end_date !== null
                 ? new Date(request.end_date).toLocaleDateString()
                 : 'Not set'
 

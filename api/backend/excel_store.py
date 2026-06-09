@@ -1700,10 +1700,20 @@ def save_availability_request(request: Dict) -> bool:
                 for i, old in enumerate(old_data, 2):
                     sheet.cell(row=i, column=1).value = old['id']
                     sheet.cell(row=i, column=2).value = old['employee_id']
-                    sheet.cell(row=i, column=3).value = 'availability'  # Default to availability
+                    # Determine request_type based on availability_type
+                    avail_type = old.get('availability_type', '').lower()
+                    if avail_type in ['day_off', 'off']:
+                        sheet.cell(row=i, column=3).value = 'day_off'
+                    else:
+                        sheet.cell(row=i, column=3).value = 'availability'
                     sheet.cell(row=i, column=4).value = old.get('week_start_date')
                     sheet.cell(row=i, column=5).value = old.get('week_start_date')
-                    sheet.cell(row=i, column=6).value = json.dumps([old['day_of_week']]) if old['day_of_week'] else None
+                    # Only set days_of_week if it's a valid day name (not an availability type)
+                    day_of_week = old.get('day_of_week', '').lower()
+                    if day_of_week in ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']:
+                        sheet.cell(row=i, column=6).value = json.dumps([day_of_week])
+                    else:
+                        sheet.cell(row=i, column=6).value = None
                     sheet.cell(row=i, column=7).value = None  # No start_time in old schema
                     sheet.cell(row=i, column=8).value = None  # No end_time in old schema
                     sheet.cell(row=i, column=9).value = old['status']
