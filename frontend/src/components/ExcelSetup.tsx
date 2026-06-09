@@ -99,7 +99,7 @@ export default function ExcelSetup({ onSetupComplete }: ExcelSetupProps) {
   }
 
   const handleGoToLogin = () => {
-    // Navigate back to login if database is already configured
+    onSetupComplete()
     navigate('/login')
   }
 
