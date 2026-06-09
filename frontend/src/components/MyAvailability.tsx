@@ -1,10 +1,10 @@
 import { useState, useEffect } from 'react'
 import DatePicker from 'react-datepicker'
 import 'react-datepicker/dist/react-datepicker.css'
-import { format } from 'date-fns'
+import { format, addDays, startOfWeek } from 'date-fns'
 import { createAvailabilityRequest, getMyAvailabilityRequests } from '../api'
 import { auth } from '../auth'
-import { Save, Plus, Trash2, Calendar, Clock } from 'lucide-react'
+import { Plus, Calendar, Clock, X } from 'lucide-react'
 
 const daysOfWeek = [
   { value: 'monday', label: 'Monday' },
@@ -16,17 +16,28 @@ const daysOfWeek = [
   { value: 'sunday', label: 'Sunday' },
 ]
 
+interface DayAvailability {
+  enabled: boolean
+  startTime: string
+  endTime: string
+}
+
 export default function MyAvailability() {
-  const [requestType, setRequestType] = useState<'availability' | 'day_off'>('availability')
-  const [startDate, setStartDate] = useState<Date | null>(null)
-  const [endDate, setEndDate] = useState<Date | null>(null)
-  const [selectedDays, setSelectedDays] = useState<string[]>([])
-  const [startTime, setStartTime] = useState('09:00')
-  const [endTime, setEndTime] = useState('17:00')
+  const [weekStart, setWeekStart] = useState<Date>(startOfWeek(new Date(), { weekStartsOn: 1 }))
+  const [dayAvailabilities, setDayAvailabilities] = useState<Record<string, DayAvailability>>(() => {
+    const initial: Record<string, DayAvailability> = {}
+    daysOfWeek.forEach(day => {
+      initial[day.value] = { enabled: false, startTime: '09:00', endTime: '17:00' }
+    })
+    return initial
+  })
   const [comment, setComment] = useState('')
   const [myRequests, setMyRequests] = useState<any[]>([])
   const [loading, setLoading] = useState(false)
   const [saved, setSaved] = useState(false)
+  const [showDayOffModal, setShowDayOffModal] = useState(false)
+  const [dayOffDate, setDayOffDate] = useState<Date | null>(null)
+  const [dayOffComment, setDayOffComment] = useState('')
 
   useEffect(() => {
     loadMyRequests()
@@ -42,43 +53,82 @@ export default function MyAvailability() {
   }
 
   const toggleDay = (day: string) => {
-    setSelectedDays(prev =>
-      prev.includes(day) ? prev.filter(d => d !== day) : [...prev, day]
-    )
+    setDayAvailabilities(prev => ({
+      ...prev,
+      [day]: { ...prev[day], enabled: !prev[day].enabled }
+    }))
   }
 
-  const handleSubmit = async () => {
-    if (!startDate || !endDate || selectedDays.length === 0) {
-      alert('Please select date range and at least one day')
-      return
-    }
+  const updateTime = (day: string, field: 'startTime' | 'endTime', value: string) => {
+    setDayAvailabilities(prev => ({
+      ...prev,
+      [day]: { ...prev[day], [field]: value }
+    }))
+  }
 
-    if (requestType === 'availability' && (!startTime || !endTime)) {
-      alert('Please select time range for availability request')
+  const handleSubmitAvailability = async () => {
+    const enabledDays = Object.entries(dayAvailabilities).filter(([_, avail]) => avail.enabled)
+    if (enabledDays.length === 0) {
+      alert('Please select at least one day')
       return
     }
 
     setLoading(true)
     try {
-      await createAvailabilityRequest({
-        request_type: requestType,
-        start_date: format(startDate, 'yyyy-MM-dd'),
-        end_date: format(endDate, 'yyyy-MM-dd'),
-        days_of_week: selectedDays,
-        start_time: requestType === 'availability' ? startTime : null,
-        end_time: requestType === 'availability' ? endTime : null,
-        employee_comment: comment,
-      })
+      // Submit one request per enabled day
+      const weekEnd = addDays(weekStart, 6)
+      for (const [day, avail] of enabledDays) {
+        await createAvailabilityRequest({
+          request_type: 'availability',
+          start_date: format(weekStart, 'yyyy-MM-dd'),
+          end_date: format(weekEnd, 'yyyy-MM-dd'),
+          days_of_week: [day],
+          start_time: avail.startTime,
+          end_time: avail.endTime,
+          employee_comment: comment,
+        })
+      }
       setSaved(true)
       setTimeout(() => setSaved(false), 3000)
       // Reset form
-      setStartDate(null)
-      setEndDate(null)
-      setSelectedDays([])
+      const resetAvail: Record<string, DayAvailability> = {}
+      daysOfWeek.forEach(day => {
+        resetAvail[day.value] = { enabled: false, startTime: '09:00', endTime: '17:00' }
+      })
+      setDayAvailabilities(resetAvail)
       setComment('')
       loadMyRequests()
     } catch (err) {
       alert('Error submitting request. Please try again.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleSubmitDayOff = async () => {
+    if (!dayOffDate) {
+      alert('Please select a date for your day off')
+      return
+    }
+
+    setLoading(true)
+    try {
+      const dayName = daysOfWeek[dayOffDate.getDay()].value
+      await createAvailabilityRequest({
+        request_type: 'day_off',
+        start_date: format(dayOffDate, 'yyyy-MM-dd'),
+        end_date: format(dayOffDate, 'yyyy-MM-dd'),
+        days_of_week: [dayName],
+        employee_comment: dayOffComment,
+      })
+      setSaved(true)
+      setTimeout(() => setSaved(false), 3000)
+      setShowDayOffModal(false)
+      setDayOffDate(null)
+      setDayOffComment('')
+      loadMyRequests()
+    } catch (err) {
+      alert('Error submitting day off request. Please try again.')
     } finally {
       setLoading(false)
     }
@@ -92,107 +142,62 @@ export default function MyAvailability() {
     }
   }
 
+  const weekDates = daysOfWeek.map((_, i) => addDays(weekStart, i))
+
   return (
     <div className="max-w-4xl mx-auto">
       <h1 className="text-2xl font-bold mb-6">My Availability</h1>
 
-      {/* Request Form */}
+      {/* Week Selector */}
       <div className="bg-white rounded-lg shadow p-6 mb-6">
-        <h2 className="text-lg font-semibold mb-4">Submit New Request</h2>
-
-        {/* Request Type */}
-        <div className="mb-4">
-          <label className="block text-sm font-medium mb-2">Request Type</label>
-          <div className="flex gap-4">
-            <label className="flex items-center gap-2">
-              <input
-                type="radio"
-                value="availability"
-                checked={requestType === 'availability'}
-                onChange={(e) => setRequestType(e.target.value as any)}
-                className="w-4 h-4"
-              />
-              <span>Time Range Availability</span>
-            </label>
-            <label className="flex items-center gap-2">
-              <input
-                type="radio"
-                value="day_off"
-                checked={requestType === 'day_off'}
-                onChange={(e) => setRequestType(e.target.value as any)}
-                className="w-4 h-4"
-              />
-              <span>Day Off</span>
-            </label>
-          </div>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-semibold">Week of {format(weekStart, 'MMMM d, yyyy')}</h2>
+          <DatePicker
+            selected={weekStart}
+            onChange={(date: Date | null) => date && setWeekStart(startOfWeek(date, { weekStartsOn: 1 }))}
+            filterDate={(date: Date) => date.getDay() === 1}
+            className="border rounded px-3 py-2"
+            dateFormat="yyyy-MM-dd"
+          />
         </div>
 
-        {/* Date Range */}
-        <div className="grid grid-cols-2 gap-4 mb-4">
-          <div>
-            <label className="block text-sm font-medium mb-2">Start Date</label>
-            <DatePicker
-              selected={startDate}
-              onChange={setStartDate}
-              className="w-full border rounded px-3 py-2"
-              dateFormat="yyyy-MM-dd"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium mb-2">End Date</label>
-            <DatePicker
-              selected={endDate}
-              onChange={setEndDate}
-              minDate={startDate || undefined}
-              className="w-full border rounded px-3 py-2"
-              dateFormat="yyyy-MM-dd"
-            />
-          </div>
-        </div>
-
-        {/* Days of Week */}
-        <div className="mb-4">
-          <label className="block text-sm font-medium mb-2">Days of Week</label>
-          <div className="flex flex-wrap gap-2">
-            {daysOfWeek.map(day => (
-              <button
-                key={day.value}
-                onClick={() => toggleDay(day.value)}
-                className={`px-3 py-2 rounded border ${
-                  selectedDays.includes(day.value)
-                    ? 'bg-blue-600 text-white border-blue-600'
-                    : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
-                }`}
-              >
-                {day.label}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Time Range (for availability requests only) */}
-        {requestType === 'availability' && (
-          <div className="grid grid-cols-2 gap-4 mb-4">
-            <div>
-              <label className="block text-sm font-medium mb-2">Start Time</label>
-              <input
-                type="time"
-                value={startTime}
-                onChange={(e) => setStartTime(e.target.value)}
-                className="w-full border rounded px-3 py-2"
-              />
+        {/* Day Availability Grid */}
+        <div className="space-y-3 mb-6">
+          {daysOfWeek.map((day, i) => (
+            <div key={day.value} className="flex items-center gap-4 p-3 border rounded">
+              <div className="flex-1">
+                <div className="flex items-center gap-2 mb-2">
+                  <input
+                    type="checkbox"
+                    checked={dayAvailabilities[day.value].enabled}
+                    onChange={() => toggleDay(day.value)}
+                    className="w-4 h-4"
+                  />
+                  <span className="font-medium">{day.label}</span>
+                  <span className="text-sm text-gray-500">{format(weekDates[i], 'M/d')}</span>
+                </div>
+                {dayAvailabilities[day.value].enabled && (
+                  <div className="flex items-center gap-2 ml-6">
+                    <Clock className="w-4 h-4 text-gray-400" />
+                    <input
+                      type="time"
+                      value={dayAvailabilities[day.value].startTime}
+                      onChange={(e) => updateTime(day.value, 'startTime', e.target.value)}
+                      className="border rounded px-2 py-1 text-sm"
+                    />
+                    <span>to</span>
+                    <input
+                      type="time"
+                      value={dayAvailabilities[day.value].endTime}
+                      onChange={(e) => updateTime(day.value, 'endTime', e.target.value)}
+                      className="border rounded px-2 py-1 text-sm"
+                    />
+                  </div>
+                )}
+              </div>
             </div>
-            <div>
-              <label className="block text-sm font-medium mb-2">End Time</label>
-              <input
-                type="time"
-                value={endTime}
-                onChange={(e) => setEndTime(e.target.value)}
-                className="w-full border rounded px-3 py-2"
-              />
-            </div>
-          </div>
-        )}
+          ))}
+        </div>
 
         {/* Comment */}
         <div className="mb-4">
@@ -201,17 +206,17 @@ export default function MyAvailability() {
             value={comment}
             onChange={(e) => setComment(e.target.value)}
             className="w-full border rounded px-3 py-2 h-20"
-            placeholder="Reason for this request..."
+            placeholder="Any special requests or notes..."
           />
         </div>
 
         {/* Submit Button */}
         <button
-          onClick={handleSubmit}
+          onClick={handleSubmitAvailability}
           disabled={loading}
           className="flex items-center gap-2 bg-blue-600 text-white px-6 py-2 rounded hover:bg-blue-700 disabled:opacity-50"
         >
-          {loading ? 'Submitting...' : <><Plus className="w-4 h-4" /> Submit Request</>}
+          {loading ? 'Submitting...' : <><Plus className="w-4 h-4" /> Submit Availability</>}
         </button>
 
         {saved && (
@@ -220,6 +225,58 @@ export default function MyAvailability() {
           </div>
         )}
       </div>
+
+      {/* Request Day Off Button */}
+      <div className="bg-white rounded-lg shadow p-6 mb-6">
+        <button
+          onClick={() => setShowDayOffModal(true)}
+          className="flex items-center gap-2 bg-purple-600 text-white px-6 py-2 rounded hover:bg-purple-700"
+        >
+          <Calendar className="w-4 h-4" />
+          Request a Day Off
+        </button>
+      </div>
+
+      {/* Day Off Modal */}
+      {showDayOffModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 w-96">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-bold">Request Day Off</h3>
+              <button onClick={() => setShowDayOffModal(false)} className="text-gray-500 hover:text-gray-700">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium mb-2">Date</label>
+                <DatePicker
+                  selected={dayOffDate}
+                  onChange={setDayOffDate}
+                  className="w-full border rounded px-3 py-2"
+                  dateFormat="yyyy-MM-dd"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-2">Reason (optional)</label>
+                <textarea
+                  value={dayOffComment}
+                  onChange={(e) => setDayOffComment(e.target.value)}
+                  className="w-full border rounded px-3 py-2 h-20"
+                  placeholder="Reason for day off..."
+                />
+              </div>
+              <button
+                onClick={handleSubmitDayOff}
+                disabled={loading}
+                className="w-full flex items-center justify-center gap-2 bg-purple-600 text-white px-6 py-2 rounded hover:bg-purple-700 disabled:opacity-50"
+              >
+                {loading ? 'Submitting...' : 'Submit Day Off Request'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* My Requests */}
       <div className="bg-white rounded-lg shadow p-6">

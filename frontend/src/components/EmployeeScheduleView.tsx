@@ -2,31 +2,11 @@ import { useState, useEffect } from 'react'
 import DatePicker from 'react-datepicker'
 import 'react-datepicker/dist/react-datepicker.css'
 import { format, addDays, startOfWeek } from 'date-fns'
-import { getSchedule, getEmployees, createAvailabilityRequest, getMyAvailabilityRequests } from '../api'
-import { Calendar, ChevronLeft, ChevronRight, Clock, MapPin, X } from 'lucide-react'
+import { getSchedule, getEmployees, getMyAvailabilityRequests } from '../api'
+import { Calendar, ChevronLeft, ChevronRight, Clock, MapPin } from 'lucide-react'
 import { auth } from '../auth'
 
 const days = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']
-
-const availabilityTypes = [
-  { id: 'blank', name: 'Anytime/All Day', color: '#FFFFFF' },
-  { id: 'until_12pm', name: 'Until 12pm', color: '#90EE90' },
-  { id: 'until_3pm', name: 'Until 3pm', color: '#87CEEB' },
-  { id: 'after_330pm', name: 'After 3:30pm', color: '#FFB6C1' },
-  { id: '12_3', name: '12-3pm', color: '#ADD8E6' },
-  { id: 'after_12_eod', name: 'After 12pm - EOD', color: '#FFDAB9' },
-  { id: 'before_12_after_330', name: 'Before 12pm & After 3:30pm', color: '#DDA0DD' },
-  { id: 'off', name: 'Off', color: '#000000' },
-  { id: 'day_off', name: 'Day Off', color: '#000000' },
-]
-
-const jobTypes = [
-  { id: 'ground_floor', name: 'Ground Floor' },
-  { id: 'second_floor', name: '2nd Floor' },
-  { id: 'sixth_floor', name: '6th Floor' },
-  { id: 'call_center', name: 'Call Center' },
-  { id: 'event', name: 'Event' },
-]
 const locationColors: any = {
   'event': 'loc-event',
   'ground': 'loc-ground',
@@ -86,11 +66,6 @@ export default function EmployeeScheduleView() {
   const [schedule, setSchedule] = useState<any>(null)
   const [employees, setEmployees] = useState<any[]>([])
   const [selectedLocation, setSelectedLocation] = useState<string>('all')
-  const [showAvailabilityModal, setShowAvailabilityModal] = useState(false)
-  const [selectedDay, setSelectedDay] = useState<string>('')
-  const [selectedAvailability, setSelectedAvailability] = useState<string>('')
-  const [availabilityDescription, setAvailabilityDescription] = useState<string>('')
-  const [jobPreferences, setJobPreferences] = useState<Record<string, number>>({})
   const [myAvailabilityRequests, setMyAvailabilityRequests] = useState<any[]>([])
 
   const user = auth.getUser()
@@ -174,36 +149,6 @@ export default function EmployeeScheduleView() {
     // Match if ANY of the comma-separated locations matches the selected one
     const shiftLocs = shift.location.split(',').map(l => l.toLowerCase().trim())
     return shiftLocs.includes(selectedLocation.toLowerCase())
-  }
-
-  const handleCellClick = (day: string) => {
-    if (!user) return
-    setSelectedDay(day)
-    setSelectedAvailability('blank')
-    setShowAvailabilityModal(true)
-  }
-
-  const handleAvailabilitySubmit = async () => {
-    if (!user || !selectedDay || !selectedAvailability) return
-    
-    try {
-      const formattedDate = format(weekStart, 'yyyy-MM-dd')
-      await createAvailabilityRequest({
-        day_of_week: selectedDay,
-        availability_type: selectedAvailability,
-        week_start_date: formattedDate,
-        description: availabilityDescription,
-        preferences: jobPreferences
-      })
-      setShowAvailabilityModal(false)
-      setAvailabilityDescription('')
-      setJobPreferences({})
-      loadMyAvailabilityRequests()
-      alert('Availability request submitted for manager approval')
-    } catch (err: any) {
-      console.error('Failed to submit availability request:', err)
-      alert(`Failed to submit availability request: ${err.response?.data?.detail || err.message}`)
-    }
   }
 
   const weekDates = getWeekDates()
@@ -376,11 +321,10 @@ export default function EmployeeScheduleView() {
                         const shouldDim = !isCurrentUser && shifts.length === 0
                         
                         return (
-                          <td 
-                            key={`${emp.id}-${day}`} 
-                            className={`p-1 schedule-cell align-top ${isCurrentUser ? 'cursor-pointer hover:bg-gray-100' : 'cursor-default'} ${showRequestHistory ? 'bg-gray-50' : ''}`}
+                          <td
+                            key={`${emp.id}-${day}`}
+                            className={`p-1 schedule-cell align-top cursor-default ${showRequestHistory ? 'bg-gray-50' : ''}`}
                             style={shouldDim ? { backgroundColor: '#E5E7EB' } : {}}
-                            onClick={() => isCurrentUser && handleCellClick(day)}
                           >
                             {shifts.map((shift: Shift) => (
                               <div 
@@ -437,98 +381,6 @@ export default function EmployeeScheduleView() {
         )}
       </div>
       </div>
-
-      {/* Availability Modal */}
-      {showAvailabilityModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-md max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-bold">Set Availability for {selectedDay}</h3>
-              <button 
-                onClick={() => setShowAvailabilityModal(false)}
-                className="p-1 hover:bg-gray-100 rounded"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            
-            {/* Availability Type Selection */}
-            <div className="mb-4">
-              <label className="block text-sm font-medium mb-2">Availability Type</label>
-              <div className="space-y-2">
-                {availabilityTypes.map(type => (
-                  <button
-                    key={type.id}
-                    onClick={() => setSelectedAvailability(type.id)}
-                    className={`w-full p-3 rounded border-2 text-left flex items-center gap-3 ${
-                      selectedAvailability === type.id ? 'border-blue-500 bg-blue-50' : 'border-gray-200 hover:border-gray-300'
-                    }`}
-                  >
-                    <div 
-                      className="w-6 h-6 rounded border border-gray-300"
-                      style={{ backgroundColor: type.color }}
-                    />
-                    <span className="font-medium">{type.name}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-            
-            {/* Description Field */}
-            <div className="mb-4">
-              <label className="block text-sm font-medium mb-2">Reason (optional)</label>
-              <textarea
-                value={availabilityDescription}
-                onChange={(e) => setAvailabilityDescription(e.target.value)}
-                placeholder="Let the manager know why you need this availability..."
-                className="w-full p-2 border rounded text-sm"
-                rows={3}
-              />
-            </div>
-            
-            {/* Job Preferences */}
-            <div className="mb-4">
-              <label className="block text-sm font-medium mb-2">Job Preferences (1-10, higher = prefer)</label>
-              <p className="text-xs text-gray-500 mb-2 italic">We value your input! Your preferences help us create a schedule that works for everyone. While business needs come first, we'll do our best to accommodate your preferences when possible.</p>
-              <div className="space-y-2">
-                {jobTypes.map(job => (
-                  <div key={job.id} className="flex items-center gap-3">
-                    <span className="flex-1 text-sm">{job.name}</span>
-                    <div className="flex items-center gap-1">
-                      {[1,2,3,4,5,6,7,8,9,10].map(num => (
-                        <button
-                          key={num}
-                          onClick={() => setJobPreferences(prev => ({ ...prev, [job.id]: num }))}
-                          className={`w-6 h-6 rounded text-xs font-medium ${
-                            jobPreferences[job.id] === num ? 'bg-blue-600 text-white' : 'bg-gray-200 hover:bg-gray-300'
-                          }`}
-                        >
-                          {num}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-            
-            <div className="mt-6 flex gap-3">
-              <button
-                onClick={handleAvailabilitySubmit}
-                className="flex-1 bg-blue-600 text-white py-2 rounded hover:bg-blue-700"
-              >
-                Submit Request
-              </button>
-              <button
-                onClick={() => setShowAvailabilityModal(false)}
-                className="flex-1 border border-gray-300 py-2 rounded hover:bg-gray-100"
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   )
 }
