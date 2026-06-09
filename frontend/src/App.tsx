@@ -22,7 +22,7 @@ function ProtectedRoute({
   }
   
   if (requireManager && !auth.isManager()) {
-    return <Navigate to="/availability" replace />
+    return <Navigate to="/my-schedule" replace />
   }
   
   return <>{children}</>
@@ -33,17 +33,6 @@ function AppLayout({ onLogout }: { onLogout: () => void }) {
   const navigate = useNavigate()
   const user = auth.getUser()
   const isManager = auth.isManager()
-  
-  useEffect(() => {
-    // Redirect managers to Schedule Manager, employees to Schedule
-    if (window.location.pathname === '/' || window.location.pathname === '') {
-      if (isManager) {
-        navigate('/manager', { replace: true })
-      } else {
-        navigate('/my-schedule', { replace: true })
-      }
-    }
-  }, [navigate, isManager])
 
   const handleLogoutClick = async () => {
     await auth.logout()

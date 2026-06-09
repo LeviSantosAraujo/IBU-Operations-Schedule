@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { FileSpreadsheet, Upload, Plus, Check, AlertCircle, Home, Shield } from 'lucide-react'
 import { auth } from '../auth'
 import { API_BASE_URL } from '../api'
@@ -8,6 +9,7 @@ interface ExcelSetupProps {
 }
 
 export default function ExcelSetup({ onSetupComplete }: ExcelSetupProps) {
+  const navigate = useNavigate()
   const [status, setStatus] = useState<{ configured: boolean; file_path?: string; file_exists?: boolean } | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -100,7 +102,7 @@ export default function ExcelSetup({ onSetupComplete }: ExcelSetupProps) {
 
   const handleGoToLogin = () => {
     // Navigate back to login if database is already configured
-    window.location.href = '/'
+    navigate('/login')
   }
 
   // Show configured state if Excel is already set up
