@@ -41,7 +41,7 @@ export default function Login({ onLogin }: LoginProps) {
     try {
       const response = await fetch(`${API_BASE_URL}/excel/status`)
       const data = await response.json()
-      setDbConfigured(data.configured && data.file_exists)
+      setDbConfigured(data.configured)
     } catch (err) {
       setDbConfigured(false)
     }
