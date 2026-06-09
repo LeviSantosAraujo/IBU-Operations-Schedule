@@ -26,6 +26,7 @@ const jobTypes = [
 
 interface DayAvailability {
   enabled: boolean
+  type: 'available' | 'not_available'
   startTime: string
   endTime: string
   startDate: Date | null
@@ -36,7 +37,7 @@ export default function MyAvailability() {
   const [dayAvailabilities, setDayAvailabilities] = useState<Record<string, DayAvailability>>(() => {
     const initial: Record<string, DayAvailability> = {}
     daysOfWeek.forEach(day => {
-      initial[day.value] = { enabled: false, startTime: '09:00', endTime: '17:00', startDate: null, endDate: null }
+      initial[day.value] = { enabled: false, type: 'available', startTime: '09:00', endTime: '17:00', startDate: null, endDate: null }
     })
     return initial
   })
@@ -102,23 +103,35 @@ export default function MyAvailability() {
     try {
       // Submit one request per enabled day
       for (const [day, avail] of enabledDays) {
-        await createAvailabilityRequest({
-          request_type: 'availability',
-          start_date: format(avail.startDate, 'yyyy-MM-dd'),
-          end_date: format(avail.endDate, 'yyyy-MM-dd'),
-          days_of_week: [day],
-          start_time: avail.startTime,
-          end_time: avail.endTime,
-          employee_comment: comment,
-          preferences: jobPreferences,
-        })
+        if (avail.type === 'not_available') {
+          // Submit as day-off request
+          await createAvailabilityRequest({
+            request_type: 'day_off',
+            start_date: format(avail.startDate, 'yyyy-MM-dd'),
+            end_date: format(avail.endDate, 'yyyy-MM-dd'),
+            days_of_week: [day],
+            employee_comment: comment,
+          })
+        } else {
+          // Submit as availability request
+          await createAvailabilityRequest({
+            request_type: 'availability',
+            start_date: format(avail.startDate, 'yyyy-MM-dd'),
+            end_date: format(avail.endDate, 'yyyy-MM-dd'),
+            days_of_week: [day],
+            start_time: avail.startTime,
+            end_time: avail.endTime,
+            employee_comment: comment,
+            preferences: jobPreferences,
+          })
+        }
       }
       setSaved(true)
       setTimeout(() => setSaved(false), 3000)
       // Reset form
       const resetAvail: Record<string, DayAvailability> = {}
       daysOfWeek.forEach(day => {
-        resetAvail[day.value] = { enabled: false, startTime: '09:00', endTime: '17:00', startDate: null, endDate: null }
+        resetAvail[day.value] = { enabled: false, type: 'available', startTime: '09:00', endTime: '17:00', startDate: null, endDate: null }
       })
       setDayAvailabilities(resetAvail)
       setComment('')
@@ -191,6 +204,35 @@ export default function MyAvailability() {
               </div>
               {dayAvailabilities[day.value].enabled && (
                 <div className="ml-6 space-y-3">
+                  {/* Type Selector */}
+                  <div className="flex gap-4">
+                    <label className="flex items-center gap-2">
+                      <input
+                        type="radio"
+                        name={`type-${day.value}`}
+                        checked={dayAvailabilities[day.value].type === 'available'}
+                        onChange={() => setDayAvailabilities(prev => ({
+                          ...prev,
+                          [day.value]: { ...prev[day.value], type: 'available' }
+                        }))}
+                        className="w-4 h-4"
+                      />
+                      <span className="text-sm">Available (with time range)</span>
+                    </label>
+                    <label className="flex items-center gap-2">
+                      <input
+                        type="radio"
+                        name={`type-${day.value}`}
+                        checked={dayAvailabilities[day.value].type === 'not_available'}
+                        onChange={() => setDayAvailabilities(prev => ({
+                          ...prev,
+                          [day.value]: { ...prev[day.value], type: 'not_available' }
+                        }))}
+                        className="w-4 h-4"
+                      />
+                      <span className="text-sm">Not Available</span>
+                    </label>
+                  </div>
                   {/* Date Range */}
                   <div className="grid grid-cols-2 gap-3">
                     <div>
@@ -213,23 +255,25 @@ export default function MyAvailability() {
                       />
                     </div>
                   </div>
-                  {/* Time Range */}
-                  <div className="flex items-center gap-2">
-                    <Clock className="w-4 h-4 text-gray-400" />
-                    <input
-                      type="time"
-                      value={dayAvailabilities[day.value].startTime}
-                      onChange={(e) => updateTime(day.value, 'startTime', e.target.value)}
-                      className="border rounded px-2 py-1 text-sm"
-                    />
-                    <span>to</span>
-                    <input
-                      type="time"
-                      value={dayAvailabilities[day.value].endTime}
-                      onChange={(e) => updateTime(day.value, 'endTime', e.target.value)}
-                      className="border rounded px-2 py-1 text-sm"
-                    />
-                  </div>
+                  {/* Time Range (only for available type) */}
+                  {dayAvailabilities[day.value].type === 'available' && (
+                    <div className="flex items-center gap-2">
+                      <Clock className="w-4 h-4 text-gray-400" />
+                      <input
+                        type="time"
+                        value={dayAvailabilities[day.value].startTime}
+                        onChange={(e) => updateTime(day.value, 'startTime', e.target.value)}
+                        className="border rounded px-2 py-1 text-sm"
+                      />
+                      <span>to</span>
+                      <input
+                        type="time"
+                        value={dayAvailabilities[day.value].endTime}
+                        onChange={(e) => updateTime(day.value, 'endTime', e.target.value)}
+                        className="border rounded px-2 py-1 text-sm"
+                      />
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -296,7 +340,7 @@ export default function MyAvailability() {
           className="flex items-center gap-2 bg-purple-600 text-white px-6 py-2 rounded hover:bg-purple-700"
         >
           <Calendar className="w-4 h-4" />
-          Request a Day Off
+          Request a Day Off for a Specific Working Day
         </button>
       </div>
 
