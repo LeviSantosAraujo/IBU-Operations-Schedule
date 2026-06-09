@@ -22,5 +22,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Export for Vercel serverless function
-# FastAPI app is automatically handled by Vercel Python runtime
+# Vercel serverless function handler
+def handler(event, context):
+    from mangum import Mangum
+    asgi_handler = Mangum(app)
+    return asgi_handler(event, context)
