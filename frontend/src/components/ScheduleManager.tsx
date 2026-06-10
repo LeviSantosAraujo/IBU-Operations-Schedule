@@ -301,10 +301,11 @@ export default function ScheduleManager() {
 
   const handleGenerate = async () => {
     if (!weekStart) return
-    
-    // Check if events exist for this week - show advisory but allow generation
+
+    // Check if events exist for this week - block generation if not
     if (events.length === 0) {
       setShowEventAdvisory(true)
+      return
     }
 
     setGenerating(true)

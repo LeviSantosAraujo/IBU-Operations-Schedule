@@ -209,13 +209,16 @@ class SchedulingEngine:
                     req_start = day_request.get('start', '00:00')
                     req_end = day_request.get('end', '23:59')
                     if not (shift.start_time >= req_start and shift.end_time <= req_end):
+                        print(f"[SCHEDULER] REJECTED: Employee {employee.id} shift {shift.start_time}-{shift.end_time} outside approved range {req_start}-{req_end} on {shift.day_of_week}")
                         return False, f"Shift {shift.start_time}-{shift.end_time} outside approved range {req_start}-{req_end}"
                 elif not self.is_time_within_availability(shift.start_time, shift.end_time, day_request):
+                    print(f"[SCHEDULER] REJECTED: Employee {employee.id} not available on {shift.day_of_week} (approved availability type: {day_request})")
                     return False, f"Not available on {shift.day_of_week} (approved availability)"
-        
+
         # Priority 4: Fall back to general availability
         day_avail = getattr(availability, shift.day_of_week, AvailabilityType.OFF)
         if not self.is_time_within_availability(shift.start_time, shift.end_time, day_avail):
+            print(f"[SCHEDULER] REJECTED: Employee {employee.id} shift {shift.start_time}-{shift.end_time} outside general availability {day_avail} on {shift.day_of_week}")
             return False, f"Not available on {shift.day_of_week}"
         
         # Check for overlapping shifts
@@ -318,14 +321,17 @@ class SchedulingEngine:
                                 # Mark as unavailable for day-offs or specific time ranges
                                 if request_type == 'day_off':
                                     approved_requests[emp_id][day_name] = AvailabilityType.OFF
+                                    print(f"[SCHEDULER] Loaded approved day-off for {emp_id} on {day_name}")
                                 else:
                                     # For time range availability, store the time range
                                     # Format: {"type": "time_range", "start": "09:00", "end": "17:00"}
-                                    approved_requests[emp_id][day_name] = {
+                                    time_range = {
                                         "type": "time_range",
                                         "start": req.get('start_time', '00:00'),
                                         "end": req.get('end_time', '23:59')
                                     }
+                                    approved_requests[emp_id][day_name] = time_range
+                                    print(f"[SCHEDULER] Loaded approved time range for {emp_id} on {day_name}: {time_range['start']}-{time_range['end']}")
 
                             current_date += timedelta(days=1)
 
