@@ -117,9 +117,10 @@ export default function ScheduleManager() {
   const [generationStatus, setGenerationStatus] = useState<string>('')
   const [progressPercent, setProgressPercent] = useState<number>(0)
   const [generationTime, setGenerationTime] = useState<number | null>(null)
-  const [activeTab, setActiveTab] = useState<'schedule' | 'preferences'>('schedule')
+  const [activeTab, setActiveTab] = useState<'schedule' | 'preferences' | 'availability'>('schedule')
   const [employeePreferences, setEmployeePreferences] = useState<Record<string, Record<string, number>>>({})
   const [approvedRequests, setApprovedRequests] = useState<any[]>([])
+  const [allRequests, setAllRequests] = useState<any[]>([])
 
   // Dynamic locations - base locations + event locations
   const locations = [
@@ -192,6 +193,7 @@ export default function ScheduleManager() {
         r.status === 'approved' || r.status === 'AvailabilityRequestStatus.APPROVED'
       )
       setApprovedRequests(approved)
+      setAllRequests(data)
     } catch (err) {
       console.error('Error loading approved requests:', err)
     }
@@ -1102,6 +1104,12 @@ export default function ScheduleManager() {
             >
               Employee Preferences
             </button>
+            <button
+              onClick={() => setActiveTab('availability')}
+              className={`pb-2 px-4 font-medium ${activeTab === 'availability' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500'}`}
+            >
+              Availability History
+            </button>
           </div>
 
           {activeTab === 'schedule' && (
@@ -1351,67 +1359,94 @@ export default function ScheduleManager() {
           {activeTab === 'preferences' && (
             <>
               <h3 className="font-medium mb-4">
-                Employee Preferences & Approved Availability
+                Employee Preferences (Manager Set)
+              </h3>
+              <div className="space-y-4">
+                {employees.filter((e: any) => e.employee_type !== 'manager').map((emp: any) => (
+                  <div key={emp.id} className="border rounded-lg p-4">
+                    <h4 className="font-semibold mb-3">{emp.name}</h4>
+
+                    {/* Job Preferences */}
+                    <div>
+                      <h5 className="text-sm font-medium mb-2 text-gray-600">Job Preferences (Manager Set)</h5>
+                      <div className="space-y-2">
+                        {['ground_floor', 'second_floor', 'sixth_floor', 'call_center', '80_bloor', 'working_from_home', 'event'].map(jobType => (
+                          <div key={jobType} className="flex items-center gap-3">
+                            <span className="flex-1 text-sm capitalize">{jobType.replace('_', ' ')}</span>
+                            <div className="flex items-center gap-1">
+                              {[1,2,3,4,5,6,7,8,9,10].map(num => (
+                                <button
+                                  key={num}
+                                  onClick={() => {
+                                    const newPrefs = { ...(employeePreferences[emp.id] || {}), [jobType]: num }
+                                    handleSaveEmployeePreferences(emp.id, newPrefs)
+                                  }}
+                                  className={`w-6 h-6 rounded text-xs font-medium ${
+                                    (employeePreferences[emp.id] || {})[jobType] === num ? 'bg-blue-600 text-white' : 'bg-gray-200 hover:bg-gray-300'
+                                  }`}
+                                >
+                                  {num}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+
+          {activeTab === 'availability' && (
+            <>
+              <h3 className="font-medium mb-4">
+                Availability Request History
               </h3>
               <div className="space-y-4">
                 {employees.filter((e: any) => e.employee_type !== 'manager').map((emp: any) => {
-                  const empApprovedRequests = approvedRequests.filter((r: any) => r.employee_id === emp.id)
+                  const empRequests = allRequests.filter((r: any) => r.employee_id === emp.id)
                   return (
                     <div key={emp.id} className="border rounded-lg p-4">
                       <h4 className="font-semibold mb-3">{emp.name}</h4>
-
-                      {/* Job Preferences */}
-                      <div className="mb-4">
-                        <h5 className="text-sm font-medium mb-2 text-gray-600">Job Preferences (Manager Set)</h5>
+                      {empRequests.length === 0 ? (
+                        <p className="text-sm text-gray-500">No availability requests</p>
+                      ) : (
                         <div className="space-y-2">
-                          {['ground_floor', 'second_floor', 'sixth_floor', 'call_center'].map(jobType => (
-                            <div key={jobType} className="flex items-center gap-3">
-                              <span className="flex-1 text-sm capitalize">{jobType.replace('_', ' ')}</span>
-                              <div className="flex items-center gap-1">
-                                {[1,2,3,4,5,6,7,8,9,10].map(num => (
-                                  <button
-                                    key={num}
-                                    onClick={() => {
-                                      const newPrefs = { ...(employeePreferences[emp.id] || {}), [jobType]: num }
-                                      handleSaveEmployeePreferences(emp.id, newPrefs)
-                                    }}
-                                    className={`w-6 h-6 rounded text-xs font-medium ${
-                                      (employeePreferences[emp.id] || {})[jobType] === num ? 'bg-blue-600 text-white' : 'bg-gray-200 hover:bg-gray-300'
-                                    }`}
-                                  >
-                                    {num}
-                                  </button>
-                                ))}
+                          {empRequests.map((req: any) => (
+                            <div key={req.id} className={`border rounded p-3 text-sm ${
+                              req.status === 'approved' || req.status === 'AvailabilityRequestStatus.APPROVED' ? 'bg-green-50 border-green-200' :
+                              req.status === 'rejected' || req.status === 'AvailabilityRequestStatus.REJECTED' ? 'bg-red-50 border-red-200' :
+                              'bg-yellow-50 border-yellow-200'
+                            }`}>
+                              <div className="flex items-center justify-between mb-2">
+                                <span className={`font-medium ${
+                                  req.status === 'approved' || req.status === 'AvailabilityRequestStatus.APPROVED' ? 'text-green-800' :
+                                  req.status === 'rejected' || req.status === 'AvailabilityRequestStatus.REJECTED' ? 'text-red-800' :
+                                  'text-yellow-800'
+                                }`}>
+                                  {req.request_type === 'day_off' ? 'Day Off' : 'Available'} - {req.status}
+                                </span>
+                                <span className="text-xs text-gray-500">
+                                  {req.start_date} - {req.end_date}
+                                </span>
                               </div>
+                              <div className="text-gray-600">
+                                Days: {Array.isArray(req.days_of_week) ? req.days_of_week.join(', ') : req.day_of_week}
+                              </div>
+                              {req.start_time && req.end_time && (
+                                <div className="text-gray-600">
+                                  Time: {req.start_time} - {req.end_time}
+                                </div>
+                              )}
+                              {req.employee_comment && (
+                                <div className="text-gray-500 text-xs mt-1 italic">
+                                  Comment: {req.employee_comment}
+                                </div>
+                              )}
                             </div>
                           ))}
-                        </div>
-                      </div>
-
-                      {/* Approved Availability Requests */}
-                      {empApprovedRequests.length > 0 && (
-                        <div>
-                          <h5 className="text-sm font-medium mb-2 text-gray-600">Approved Availability Requests</h5>
-                          <div className="space-y-2">
-                            {empApprovedRequests.map((req: any) => (
-                              <div key={req.id} className="bg-green-50 border border-green-200 rounded p-2 text-sm">
-                                <div className="font-medium text-green-800">
-                                  {req.request_type === 'day_off' ? 'Day Off' : 'Available'}
-                                </div>
-                                <div className="text-gray-600">
-                                  {Array.isArray(req.days_of_week) ? req.days_of_week.join(', ') : req.day_of_week}
-                                </div>
-                                <div className="text-gray-500 text-xs">
-                                  {req.start_date} - {req.end_date}
-                                </div>
-                                {req.start_time && req.end_time && (
-                                  <div className="text-gray-500 text-xs">
-                                    {req.start_time} - {req.end_time}
-                                  </div>
-                                )}
-                              </div>
-                            ))}
-                          </div>
                         </div>
                       )}
                     </div>
