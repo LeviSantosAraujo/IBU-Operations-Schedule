@@ -37,13 +37,25 @@ A comprehensive automated scheduling system built with Python (FastAPI) and Reac
   - Considers last 4 weeks of historical data to balance workload
   - Prioritizes employees with fewer recent hours
   - Respects hour limits, Day Off, availability, and preferences
+  - Manager-set preferences have highest priority over employee-set preferences
+- **Employee Preferences Management**: Set job preferences for each employee
+  - Access via "Employee Preferences" tab in Schedule view
+  - Set 1-10 preference for all locations: Ground Floor, 2nd Floor, 6th Floor, Call Center, 80 Bloor, Working from Home, Event
+  - Event preference determines priority for event staffing
+  - Manager-set preferences override employee-set preferences in auto-generation
+  - Changes are saved immediately
+- **Availability History**: View approved availability requests
+  - Access via "Availability History" tab in Schedule view
+  - Shows all approved availability requests for each employee
+  - Displays request type, days, date range, time range, and comments
+  - Filtered to show only manager-approved requests
 - **Event Management**: Create and manage events for the week
   - Specify event name, date, time range, location, and people needed
   - Events appear as dynamic filterable locations in sidebar
   - Toast notification shows events for 5 seconds after create/delete
   - Edit/delete event locations directly from sidebar
   - Events take priority over regular location staffing
-  - System advises if no events exist before generating schedule
+  - System blocks auto-generate if no events exist (manager must create events first)
 - **Manual Schedule Editing**: Add/remove shifts easily
 - **Clear Schedule**: Remove all timeshifts for a week while preserving events and locations
   - Useful for starting fresh with the same events
@@ -179,19 +191,24 @@ Navigate to "My Availability" to:
 ### 3. Creating Schedules (Manager)
 Navigate to "Schedule" to:
 1. Select the week starting date
-2. **Create Events** (optional but recommended):
+2. **Create Events** (required):
    - Click "Create Event" button
    - Enter event name, date, time range, location, and people needed
    - Events take priority over regular location staffing
-3. Click **Auto-Generate** to create initial schedule
-   - System will advise if no events exist (can proceed without events)
-   - Algorithm prioritizes: hour limits → Day Off → events → locations → availability → preferences
-4. Review and adjust:
+   - System blocks auto-generate if no events exist
+3. **Set Employee Preferences** (optional but recommended):
+   - Click "Employee Preferences" tab
+   - Set 1-10 preference for each location for each employee
+   - Event preference determines priority for event staffing
+   - Manager-set preferences override employee-set preferences
+4. Click **Auto-Generate** to create initial schedule
+   - Algorithm prioritizes: hour limits → Day Off → events → locations → availability → manager preferences → employee preferences
+5. Review and adjust:
    - Click **Add Shift** to manually add shifts
    - Click trash icon on any shift to remove it
    - Click **Clear Schedule** to remove all shifts while preserving events (useful for starting fresh)
-5. Click **Save** to save changes
-6. Click **Publish** when finalized
+6. Click **Save** to save changes
+7. Click **Publish** when finalized
 
 ### 4. Floor Coverage
 Navigate to "Floor Coverage" to:

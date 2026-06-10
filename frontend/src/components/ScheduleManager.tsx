@@ -1402,31 +1402,23 @@ export default function ScheduleManager() {
           {activeTab === 'availability' && (
             <>
               <h3 className="font-medium mb-4">
-                Availability Request History
+                Approved Availability History
               </h3>
               <div className="space-y-4">
                 {employees.filter((e: any) => e.employee_type !== 'manager').map((emp: any) => {
-                  const empRequests = allRequests.filter((r: any) => r.employee_id === emp.id)
+                  const empRequests = approvedRequests.filter((r: any) => r.employee_id === emp.id)
                   return (
                     <div key={emp.id} className="border rounded-lg p-4">
                       <h4 className="font-semibold mb-3">{emp.name}</h4>
                       {empRequests.length === 0 ? (
-                        <p className="text-sm text-gray-500">No availability requests</p>
+                        <p className="text-sm text-gray-500">No approved availability requests</p>
                       ) : (
                         <div className="space-y-2">
                           {empRequests.map((req: any) => (
-                            <div key={req.id} className={`border rounded p-3 text-sm ${
-                              req.status === 'approved' || req.status === 'AvailabilityRequestStatus.APPROVED' ? 'bg-green-50 border-green-200' :
-                              req.status === 'rejected' || req.status === 'AvailabilityRequestStatus.REJECTED' ? 'bg-red-50 border-red-200' :
-                              'bg-yellow-50 border-yellow-200'
-                            }`}>
+                            <div key={req.id} className="bg-green-50 border border-green-200 rounded p-3 text-sm">
                               <div className="flex items-center justify-between mb-2">
-                                <span className={`font-medium ${
-                                  req.status === 'approved' || req.status === 'AvailabilityRequestStatus.APPROVED' ? 'text-green-800' :
-                                  req.status === 'rejected' || req.status === 'AvailabilityRequestStatus.REJECTED' ? 'text-red-800' :
-                                  'text-yellow-800'
-                                }`}>
-                                  {req.request_type === 'day_off' ? 'Day Off' : 'Available'} - {req.status}
+                                <span className="font-medium text-green-800">
+                                  {req.request_type === 'day_off' ? 'Day Off' : 'Available'}
                                 </span>
                                 <span className="text-xs text-gray-500">
                                   {req.start_date} - {req.end_date}
