@@ -2,9 +2,9 @@ import { useState, useEffect } from 'react'
 import DatePicker from 'react-datepicker'
 import 'react-datepicker/dist/react-datepicker.css'
 import { format, startOfWeek, addDays } from 'date-fns'
-import { 
-  getSchedule, generateSchedule, saveSchedule, 
-  getEmployees, publishSchedule, getAvailabilityRequests,
+import {
+  getSchedule, generateSchedule, saveSchedule,
+  getEmployees, updateEmployee, publishSchedule, getAvailabilityRequests,
   approveAvailabilityRequest, rejectAvailabilityRequest,
   getEvents, createEvent, updateEvent, deleteEvent, clearSchedule
 } from '../api'
@@ -117,6 +117,9 @@ export default function ScheduleManager() {
   const [generationStatus, setGenerationStatus] = useState<string>('')
   const [progressPercent, setProgressPercent] = useState<number>(0)
   const [generationTime, setGenerationTime] = useState<number | null>(null)
+  const [activeTab, setActiveTab] = useState<'schedule' | 'preferences'>('schedule')
+  const [employeePreferences, setEmployeePreferences] = useState<Record<string, Record<string, number>>>({})
+  const [approvedRequests, setApprovedRequests] = useState<any[]>([])
 
   // Dynamic locations - base locations + event locations
   const locations = [
@@ -143,6 +146,8 @@ export default function ScheduleManager() {
     loadEmployees()
     loadAvailabilityRequests()
     loadEvents()
+    loadEmployeePreferences()
+    loadApprovedRequests()
   }, [weekStart])
 
   useEffect(() => {
@@ -153,6 +158,43 @@ export default function ScheduleManager() {
     const data = await getEmployees(true)
     const employeeList = Array.isArray(data) ? data : Array.isArray(data?.employees) ? data.employees : []
     setEmployees(employeeList)
+  }
+
+  const loadEmployeePreferences = async () => {
+    try {
+      const data = await getEmployees(true)
+      const employeeList = Array.isArray(data) ? data : Array.isArray(data?.employees) ? data.employees : []
+      const prefs: Record<string, Record<string, number>> = {}
+      employeeList.forEach((emp: any) => {
+        if (emp.employee_type !== 'manager' && emp.preferences) {
+          prefs[emp.id] = emp.preferences
+        }
+      })
+      setEmployeePreferences(prefs)
+    } catch (err) {
+      console.error('Error loading employee preferences:', err)
+    }
+  }
+
+  const handleSaveEmployeePreferences = async (employeeId: string, preferences: Record<string, number>) => {
+    try {
+      await updateEmployee(employeeId, { preferences })
+      setEmployeePreferences(prev => ({ ...prev, [employeeId]: preferences }))
+    } catch (err) {
+      alert('Error saving preferences. Please try again.')
+    }
+  }
+
+  const loadApprovedRequests = async () => {
+    try {
+      const data = await getAvailabilityRequests()
+      const approved = data.filter((r: any) =>
+        r.status === 'approved' || r.status === 'AvailabilityRequestStatus.APPROVED'
+      )
+      setApprovedRequests(approved)
+    } catch (err) {
+      console.error('Error loading approved requests:', err)
+    }
   }
 
   const loadAvailabilityRequests = async () => {
@@ -1046,9 +1088,27 @@ export default function ScheduleManager() {
         </div>
 
         <div className="bg-white rounded-lg shadow p-4 lg:p-6 mb-6">
-          <h3 className="font-medium mb-4">
-            Week of {format(weekStart, 'MMMM d, yyyy')}
-          </h3>
+          {/* Tabs */}
+          <div className="flex gap-4 mb-4 border-b">
+            <button
+              onClick={() => setActiveTab('schedule')}
+              className={`pb-2 px-4 font-medium ${activeTab === 'schedule' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500'}`}
+            >
+              Schedule
+            </button>
+            <button
+              onClick={() => setActiveTab('preferences')}
+              className={`pb-2 px-4 font-medium ${activeTab === 'preferences' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500'}`}
+            >
+              Employee Preferences
+            </button>
+          </div>
+
+          {activeTab === 'schedule' && (
+            <>
+              <h3 className="font-medium mb-4">
+                Week of {format(weekStart, 'MMMM d, yyyy')}
+              </h3>
 
           {/* Schedule Status */}
           {schedule && (
@@ -1284,6 +1344,81 @@ export default function ScheduleManager() {
                 </button>
               </div>
             </div>
+          )}
+          </>
+          )}
+
+          {activeTab === 'preferences' && (
+            <>
+              <h3 className="font-medium mb-4">
+                Employee Preferences & Approved Availability
+              </h3>
+              <div className="space-y-4">
+                {employees.filter((e: any) => e.employee_type !== 'manager').map((emp: any) => {
+                  const empApprovedRequests = approvedRequests.filter((r: any) => r.employee_id === emp.id)
+                  return (
+                    <div key={emp.id} className="border rounded-lg p-4">
+                      <h4 className="font-semibold mb-3">{emp.name}</h4>
+
+                      {/* Job Preferences */}
+                      <div className="mb-4">
+                        <h5 className="text-sm font-medium mb-2 text-gray-600">Job Preferences (Manager Set)</h5>
+                        <div className="space-y-2">
+                          {['ground_floor', 'second_floor', 'sixth_floor', 'call_center'].map(jobType => (
+                            <div key={jobType} className="flex items-center gap-3">
+                              <span className="flex-1 text-sm capitalize">{jobType.replace('_', ' ')}</span>
+                              <div className="flex items-center gap-1">
+                                {[1,2,3,4,5,6,7,8,9,10].map(num => (
+                                  <button
+                                    key={num}
+                                    onClick={() => {
+                                      const newPrefs = { ...(employeePreferences[emp.id] || {}), [jobType]: num }
+                                      handleSaveEmployeePreferences(emp.id, newPrefs)
+                                    }}
+                                    className={`w-6 h-6 rounded text-xs font-medium ${
+                                      (employeePreferences[emp.id] || {})[jobType] === num ? 'bg-blue-600 text-white' : 'bg-gray-200 hover:bg-gray-300'
+                                    }`}
+                                  >
+                                    {num}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Approved Availability Requests */}
+                      {empApprovedRequests.length > 0 && (
+                        <div>
+                          <h5 className="text-sm font-medium mb-2 text-gray-600">Approved Availability Requests</h5>
+                          <div className="space-y-2">
+                            {empApprovedRequests.map((req: any) => (
+                              <div key={req.id} className="bg-green-50 border border-green-200 rounded p-2 text-sm">
+                                <div className="font-medium text-green-800">
+                                  {req.request_type === 'day_off' ? 'Day Off' : 'Available'}
+                                </div>
+                                <div className="text-gray-600">
+                                  {Array.isArray(req.days_of_week) ? req.days_of_week.join(', ') : req.day_of_week}
+                                </div>
+                                <div className="text-gray-500 text-xs">
+                                  {req.start_date} - {req.end_date}
+                                </div>
+                                {req.start_time && req.end_time && (
+                                  <div className="text-gray-500 text-xs">
+                                    {req.start_time} - {req.end_time}
+                                  </div>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            </>
           )}
         </div>
 

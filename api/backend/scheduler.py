@@ -238,13 +238,14 @@ class SchedulingEngine:
         score = 0.0
         
         # Job preference weight (1-10, default 5)
-        # Priority: availability request > general preferences > historical preferences > default
+        # Priority: manager-set preferences (employee.preferences) > availability request preferences > historical preferences > default
         pref_weight = 5
-        if employee_preferences and employee.id in employee_preferences:
+        if employee.preferences and shift.job_type in employee.preferences:
+            # Manager-set preferences have highest priority
+            pref_weight = employee.preferences.get(shift.job_type, 5)
+        elif employee_preferences and employee.id in employee_preferences:
             prefs = employee_preferences[employee.id]
             pref_weight = prefs.get(shift.job_type, 5)
-        elif employee.preferences and shift.job_type in employee.preferences:
-            pref_weight = employee.preferences.get(shift.job_type, 5)
         elif historical_preferences and employee.id in historical_preferences:
             hist_prefs = historical_preferences[employee.id]
             pref_weight = hist_prefs.get(shift.job_type, 5)
