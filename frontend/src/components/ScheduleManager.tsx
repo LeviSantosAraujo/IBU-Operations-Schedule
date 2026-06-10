@@ -302,14 +302,14 @@ export default function ScheduleManager() {
   const handleGenerate = async () => {
     if (!weekStart) return
     
-    // Check if events exist for this week
+    // Check if events exist for this week - show advisory but allow generation
     if (events.length === 0) {
       setShowEventAdvisory(true)
-      return
     }
-    
+
     setGenerating(true)
     setGenerationStatus('Initializing scheduler...')
+    setProgressPercent(0)
     
     // Estimated time: ~52 seconds total for generation
     // Distribute progress updates across estimated duration
