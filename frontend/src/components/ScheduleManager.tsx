@@ -117,7 +117,7 @@ export default function ScheduleManager() {
   const [generationStatus, setGenerationStatus] = useState<string>('')
   const [progressPercent, setProgressPercent] = useState<number>(0)
   const [generationTime, setGenerationTime] = useState<number | null>(null)
-  const [activeTab, setActiveTab] = useState<'schedule' | 'preferences' | 'availability'>('schedule')
+  const [activeTab, setActiveTab] = useState<'schedule' | 'preferences'>('schedule')
   const [employeePreferences, setEmployeePreferences] = useState<Record<string, Record<string, number>>>({})
   const [approvedRequests, setApprovedRequests] = useState<any[]>([])
   const [allRequests, setAllRequests] = useState<any[]>([])
@@ -1104,12 +1104,6 @@ export default function ScheduleManager() {
             >
               Employee Preferences
             </button>
-            <button
-              onClick={() => setActiveTab('availability')}
-              className={`pb-2 px-4 font-medium ${activeTab === 'availability' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500'}`}
-            >
-              Availability History
-            </button>
           </div>
 
           {activeTab === 'schedule' && (
@@ -1395,55 +1389,6 @@ export default function ScheduleManager() {
                     </div>
                   </div>
                 ))}
-              </div>
-            </>
-          )}
-
-          {activeTab === 'availability' && (
-            <>
-              <h3 className="font-medium mb-4">
-                Approved Availability History
-              </h3>
-              <div className="space-y-4">
-                {employees.filter((e: any) => e.employee_type !== 'manager').map((emp: any) => {
-                  const empRequests = approvedRequests.filter((r: any) => r.employee_id === emp.id)
-                  return (
-                    <div key={emp.id} className="border rounded-lg p-4">
-                      <h4 className="font-semibold mb-3">{emp.name}</h4>
-                      {empRequests.length === 0 ? (
-                        <p className="text-sm text-gray-500">No approved availability requests</p>
-                      ) : (
-                        <div className="space-y-2">
-                          {empRequests.map((req: any) => (
-                            <div key={req.id} className="bg-green-50 border border-green-200 rounded p-3 text-sm">
-                              <div className="flex items-center justify-between mb-2">
-                                <span className="font-medium text-green-800">
-                                  {req.request_type === 'day_off' ? 'Day Off' : 'Available'}
-                                </span>
-                                <span className="text-xs text-gray-500">
-                                  {req.start_date} - {req.end_date}
-                                </span>
-                              </div>
-                              <div className="text-gray-600">
-                                Days: {Array.isArray(req.days_of_week) ? req.days_of_week.join(', ') : req.day_of_week}
-                              </div>
-                              {req.start_time && req.end_time && (
-                                <div className="text-gray-600">
-                                  Time: {req.start_time} - {req.end_time}
-                                </div>
-                              )}
-                              {req.employee_comment && (
-                                <div className="text-gray-500 text-xs mt-1 italic">
-                                  Comment: {req.employee_comment}
-                                </div>
-                              )}
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  )
-                })}
               </div>
             </>
           )}
