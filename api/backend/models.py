@@ -55,7 +55,7 @@ class Employee(BaseModel):
     email: Optional[str] = None
     employee_type: EmployeeType
     max_hours_per_week: int = Field(..., description="Maximum hours per week")
-    preferences: Dict[JobType, int] = Field(default_factory=dict, description="Job preferences with weights 1-10")
+    preferences: Dict[str, int] = Field(default_factory=dict, description="Job preferences with weights 1-10")
     active: bool = True
     created_at: datetime = Field(default_factory=datetime.now)
 
