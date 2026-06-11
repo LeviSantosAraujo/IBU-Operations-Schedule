@@ -65,7 +65,7 @@ class EmployeeUpdate(BaseModel):
     email: Optional[str] = None
     employee_type: Optional[EmployeeType] = None
     max_hours_per_week: Optional[int] = None
-    preferences: Optional[Dict[JobType, int]] = None
+    preferences: Optional[Dict[str, int]] = None
     active: Optional[bool] = None
 
 class Availability(BaseModel):
