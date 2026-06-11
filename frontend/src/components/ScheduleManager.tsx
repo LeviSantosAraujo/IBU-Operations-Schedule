@@ -498,6 +498,10 @@ export default function ScheduleManager() {
   const recalculateHours = (shifts: Shift[]) => {
     const totals: any = {}
     shifts.forEach(shift => {
+      // Skip day off shifts - they should not count toward hours
+      if (shift.location === 'day off' || shift.locked_availability_type === 'Day Off') {
+        return
+      }
       totals[shift.employee_id] = (totals[shift.employee_id] || 0) + shift.hours
     })
     return totals

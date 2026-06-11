@@ -1222,6 +1222,10 @@ def get_schedule_by_week(week_start_date: date) -> Optional[WeeklySchedule]:
                 )
                 shifts.append(shift)
                 
+                # Skip day off shifts when calculating total hours
+                if shift.location == 'day off' or shift.locked_availability_type == 'Day Off':
+                    continue
+                
                 if emp_id in total_hours:
                     total_hours[emp_id] += hours
                 else:
@@ -1326,6 +1330,10 @@ def get_all_schedules() -> List[WeeklySchedule]:
                             location=str(sheet.cell(row=row, column=14).value) if sheet.cell(row=row, column=14).value else None
                         )
                         shifts.append(shift)
+                        
+                        # Skip day off shifts when calculating total hours
+                        if shift.location == 'day off' or shift.locked_availability_type == 'Day Off':
+                            continue
                         
                         if emp_id in total_hours:
                             total_hours[emp_id] += hours

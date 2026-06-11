@@ -827,6 +827,9 @@ async def update_schedule_shifts(
     # Recalculate total hours
     total_hours = {}
     for shift in shifts:
+        # Skip day off shifts when calculating total hours
+        if shift.location == 'day off' or shift.locked_availability_type == 'Day Off':
+            continue
         current = total_hours.get(shift.employee_id, 0)
         total_hours[shift.employee_id] = current + shift.hours
     schedule.total_hours = total_hours
@@ -1072,12 +1075,15 @@ async def approve_availability_request(request_id: str, body: Dict = {}, authori
                             week_start_date=week_start
                         )
 
-                    # Calculate hours
-                    start_h, start_m = map(int, start_t.split(':'))
-                    end_h, end_m = map(int, end_t.split(':'))
-                    hours = (end_h + end_m / 60) - (start_h + start_m / 60)
-                    if hours < 0:
-                        hours += 24
+                    # Calculate hours (0 for day off, calculated for regular shifts)
+                    if request_type == 'day_off':
+                        hours = 0.0
+                    else:
+                        start_h, start_m = map(int, start_t.split(':'))
+                        end_h, end_m = map(int, end_t.split(':'))
+                        hours = (end_h + end_m / 60) - (start_h + start_m / 60)
+                        if hours < 0:
+                            hours += 24
 
                     locked_shift = Shift(
                         id=f"locked_{request_data['id']}_{current_date.isoformat()}",
