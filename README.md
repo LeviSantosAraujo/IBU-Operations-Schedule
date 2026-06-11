@@ -32,30 +32,32 @@ A comprehensive automated scheduling system built with Python (FastAPI) and Reac
 ### For Managers
 - **Auto-Schedule Generation**: Enhanced algorithm with 4 phases:
   - Phase 0: Event staffing (exact number needed, no overstaffing)
-  - Phase 1-3: Regular location staffing (based on 4-week historical analysis)
+  - Phase 1-3: Regular location staffing (based on configurable staffing targets)
   - Phase 4: Fairness phase (ensures all employees reach max hours)
   - Considers last 4 weeks of historical data to balance workload
   - Prioritizes employees with fewer recent hours
   - Respects hour limits, Day Off, availability, and preferences
   - Manager-set preferences have highest priority over employee-set preferences
+- **Staffing Targets Configuration**: Set how many people needed per location per day
+  - Access via "Auto-Generate" modal before generating schedule
+  - Configure targets for all locations: Ground Floor, 2nd Floor, 6th Floor, Call Center, 80 Bloor, Working from Home
+  - Settings are saved and persist for future schedule generations
+  - Manager can adjust targets at any time before generating
+  - Event creation now uses staffing targets automatically (no manual people_needed input)
 - **Employee Preferences Management**: Set job preferences for each employee
   - Access via "Employee Preferences" tab in Schedule view
   - Set 1-10 preference for all locations: Ground Floor, 2nd Floor, 6th Floor, Call Center, 80 Bloor, Working from Home, Event
   - Event preference determines priority for event staffing
   - Manager-set preferences override employee-set preferences in auto-generation
   - Changes are saved immediately
-- **Availability History**: View approved availability requests
-  - Access via "Availability History" tab in Schedule view
-  - Shows all approved availability requests for each employee
-  - Displays request type, days, date range, time range, and comments
-  - Filtered to show only manager-approved requests
 - **Event Management**: Create and manage events for the week
-  - Specify event name, date, time range, location, and people needed
+  - Specify event name, date, time range, and location
+  - People needed is automatically set from staffing targets configuration
   - Events appear as dynamic filterable locations in sidebar
   - Toast notification shows events for 5 seconds after create/delete
   - Edit/delete event locations directly from sidebar
   - Events take priority over regular location staffing
-  - System blocks auto-generate if no events exist (manager must create events first)
+  - Create events directly from the Auto-Generate modal
 - **Manual Schedule Editing**: Add/remove shifts easily
 - **Clear Schedule**: Remove all timeshifts for a week while preserving events and locations
   - Useful for starting fresh with the same events
@@ -191,24 +193,29 @@ Navigate to "My Availability" to:
 ### 3. Creating Schedules (Manager)
 Navigate to "Schedule" to:
 1. Select the week starting date
-2. **Create Events** (required):
-   - Click "Create Event" button
-   - Enter event name, date, time range, location, and people needed
+2. Click **Auto-Generate** to open the configuration modal
+3. **Configure Staffing Targets** (optional but recommended):
+   - Set how many people needed per location per day
+   - Settings persist for future schedule generations
+   - Adjust as needed for each week
+4. **Create Events** (optional):
+   - Click "+ Add Event" in the modal
+   - Enter event name, date, time range, and location
+   - People needed is automatically set from staffing targets
    - Events take priority over regular location staffing
-   - System blocks auto-generate if no events exist
-3. **Set Employee Preferences** (optional but recommended):
+5. **Set Employee Preferences** (optional but recommended):
    - Click "Employee Preferences" tab
    - Set 1-10 preference for each location for each employee
    - Event preference determines priority for event staffing
    - Manager-set preferences override employee-set preferences
-4. Click **Auto-Generate** to create initial schedule
+6. Click **Generate Schedule** to create initial schedule
    - Algorithm prioritizes: hour limits → Day Off → events → locations → availability → manager preferences → employee preferences
-5. Review and adjust:
+7. Review and adjust:
    - Click **Add Shift** to manually add shifts
    - Click trash icon on any shift to remove it
    - Click **Clear Schedule** to remove all shifts while preserving events (useful for starting fresh)
-6. Click **Save** to save changes
-7. Click **Publish** when finalized
+8. Click **Save** to save changes
+9. Click **Publish** when finalized
 
 ### 4. Floor Coverage
 Navigate to "Floor Coverage" to:
@@ -254,11 +261,13 @@ The enhanced auto-scheduler uses a priority-based approach with 4 phases:
 - Events take priority over all regular location staffing
 
 ### Phase 1-3: Regular Location Staffing
-- Fills daily staffing targets based on 4-week historical analysis:
-  - Call Center: 4-5 employees/day
-  - 2nd Floor: 3-4 employees/day
-  - Ground Floor: 1-2 employees/day
-  - WFH/6th Floor/80 Bloor: 0-1 employees/day
+- Fills daily staffing targets based on manager configuration:
+  - Call Center: configurable (default 4 employees/day)
+  - 2nd Floor: configurable (default 3 employees/day)
+  - Ground Floor: configurable (default 1 employee/day)
+  - 6th Floor: configurable (default 2 employees/day)
+  - WFH/80 Bloor: configurable (default 0-1 employees/day)
+- Staffing targets are set via Auto-Generate modal and persist for future generations
 - Respects all constraints: hour limits, Day Off, availability requests, preferences
 
 ### Phase 4: Fairness Phase (Maximization)
@@ -285,15 +294,17 @@ The enhanced auto-scheduler uses a priority-based approach with 4 phases:
 
 ## Configuration
 
-The system uses location-based staffing targets derived from historical analysis. These are automatically calculated from the past 4 weeks of schedule data and can be viewed in the scheduler output.
+The system uses configurable staffing targets for each location. These are set by managers via the Auto-Generate modal and persist for future schedule generations.
 
-Location targets (based on 4-week average):
-- Call Center: ~23 employees/week (4-5/day)
-- 2nd Floor: ~17 employees/week (3-4/day)
-- Ground Floor: ~5 employees/week (1-2/day)
-- WFH: ~3 employees/week (0-1/day)
-- 6th Floor: ~1 employee/week (0-1/day)
-- 80 Bloor: ~1 employee/week (0-1/day)
+Default staffing targets (can be customized):
+- Call Center: 4 employees/day
+- 2nd Floor: 3 employees/day
+- Ground Floor: 1 employee/day
+- 6th Floor: 2 employees/day
+- WFH: 1 employee/day
+- 80 Bloor: 1 employee/day
+
+Staffing targets are stored in the Config sheet of the Excel file and can be adjusted at any time before generating a schedule.
 
 ## Future Enhancements
 
