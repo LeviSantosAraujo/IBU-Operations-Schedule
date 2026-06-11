@@ -797,7 +797,38 @@ async def auto_generate_schedule(
     user: Dict = Depends(require_manager)
 ):
     """Auto-generate a schedule for a week (managers only)"""
-    schedule = generate_schedule(week_start_date)
+    from scheduler import SchedulingEngine
+
+    # Get staffing targets from config
+    config = get_system_config()
+    staffing_targets = config.get('staffing_targets', {})
+
+    # Convert staffing targets to location_requirements format
+    # staffing_targets is simple dict like {'ground_floor': 2, 'call_center': 4}
+    # location_requirements needs to be {'location': {'monday': 2, 'tuesday': 2, ...}}
+    location_requirements = {}
+    days = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']
+
+    # Map staffing target keys to location names
+    location_map = {
+        'ground_floor': 'ground floor',
+        'second_floor': '2nd floor',
+        'sixth_floor': '6th floor',
+        'call_center': 'call center',
+        '80_bloor': '80 bloor',
+        'working_from_home': 'working from home'
+    }
+
+    for key, target in staffing_targets.items():
+        location_name = location_map.get(key, key.replace('_', ' '))
+        location_requirements[location_name] = {day: target for day in days}
+
+    # If no staffing targets set, use defaults
+    if not location_requirements:
+        location_requirements = None
+
+    engine = SchedulingEngine()
+    schedule = engine.generate_auto_schedule(week_start_date, location_requirements)
     return save_schedule(schedule)
 
 @app.post("/api/schedules", response_model=WeeklySchedule)
@@ -978,6 +1009,19 @@ async def get_config():
 @app.put("/api/config")
 async def update_config(config: Dict):
     """Update system configuration"""
+    return save_system_config(config)
+
+@app.get("/api/staffing-targets")
+async def get_staffing_targets():
+    """Get staffing targets for all locations"""
+    config = get_system_config()
+    return config.get('staffing_targets', {})
+
+@app.put("/api/staffing-targets")
+async def update_staffing_targets(targets: Dict[str, int], user: Dict = Depends(require_manager)):
+    """Update staffing targets for locations"""
+    config = get_system_config()
+    config['staffing_targets'] = targets
     return save_system_config(config)
 
 # ============ Availability Requests ============

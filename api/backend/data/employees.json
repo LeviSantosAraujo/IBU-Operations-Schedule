@@ -30,7 +30,9 @@
       "second_floor": 9,
       "sixth_floor": 3,
       "call_center": 2,
-      "event": 10
+      "event": 10,
+      "80_bloor": 6,
+      "working_from_home": 2
     },
     "active": true,
     "created_at": "2026-06-06 09:45:48.044955"
@@ -41,9 +43,17 @@
     "email": null,
     "employee_type": "employee",
     "max_hours_per_week": 24,
-    "preferences": {},
+    "preferences": {
+      "call_center": 10,
+      "80_bloor": 1,
+      "working_from_home": 5,
+      "event": 1,
+      "sixth_floor": 10,
+      "second_floor": 6,
+      "ground_floor": 1
+    },
     "active": true,
-    "created_at": "2026-06-06T09:45:48.044963"
+    "created_at": "2026-06-06 09:45:48.044963"
   },
   {
     "id": "emp_006",
@@ -51,9 +61,17 @@
     "email": null,
     "employee_type": "employee",
     "max_hours_per_week": 24,
-    "preferences": {},
+    "preferences": {
+      "call_center": 9,
+      "80_bloor": 1,
+      "working_from_home": 3,
+      "event": 5,
+      "sixth_floor": 4,
+      "second_floor": 6,
+      "ground_floor": 7
+    },
     "active": true,
-    "created_at": "2026-06-06T09:45:48.044970"
+    "created_at": "2026-06-06 09:45:48.044970"
   },
   {
     "id": "emp_007",
@@ -61,9 +79,17 @@
     "email": null,
     "employee_type": "employee",
     "max_hours_per_week": 24,
-    "preferences": {},
+    "preferences": {
+      "event": 10,
+      "working_from_home": 2,
+      "80_bloor": 1,
+      "call_center": 5,
+      "sixth_floor": 6,
+      "second_floor": 7,
+      "ground_floor": 8
+    },
     "active": true,
-    "created_at": "2026-06-06T09:45:48.044977"
+    "created_at": "2026-06-06 09:45:48.044977"
   },
   {
     "id": "emp_008",
@@ -71,9 +97,17 @@
     "email": null,
     "employee_type": "employee",
     "max_hours_per_week": 24,
-    "preferences": {},
+    "preferences": {
+      "ground_floor": 3,
+      "second_floor": 6,
+      "sixth_floor": 8,
+      "call_center": 10,
+      "80_bloor": 4,
+      "working_from_home": 6,
+      "event": 3
+    },
     "active": true,
-    "created_at": "2026-06-06T09:45:48.044983"
+    "created_at": "2026-06-06 09:45:48.044983"
   },
   {
     "id": "emp_009",
@@ -81,9 +115,17 @@
     "email": null,
     "employee_type": "employee",
     "max_hours_per_week": 24,
-    "preferences": {},
+    "preferences": {
+      "ground_floor": 10,
+      "second_floor": 4,
+      "sixth_floor": 9,
+      "call_center": 9,
+      "80_bloor": 1,
+      "working_from_home": 5,
+      "event": 2
+    },
     "active": true,
-    "created_at": "2026-06-06T09:45:48.044990"
+    "created_at": "2026-06-06 09:45:48.044990"
   },
   {
     "id": "emp_010",
@@ -91,9 +133,17 @@
     "email": null,
     "employee_type": "employee",
     "max_hours_per_week": 24,
-    "preferences": {},
+    "preferences": {
+      "ground_floor": 9,
+      "second_floor": 8,
+      "sixth_floor": 8,
+      "call_center": 10,
+      "80_bloor": 8,
+      "working_from_home": 2,
+      "event": 5
+    },
     "active": true,
-    "created_at": "2026-06-06T09:45:48.044998"
+    "created_at": "2026-06-06 09:45:48.044998"
   },
   {
     "id": "emp_011",
@@ -101,9 +151,17 @@
     "email": null,
     "employee_type": "employee",
     "max_hours_per_week": 24,
-    "preferences": {},
+    "preferences": {
+      "ground_floor": 10,
+      "second_floor": 5,
+      "sixth_floor": 6,
+      "call_center": 9,
+      "80_bloor": 2,
+      "working_from_home": 1,
+      "event": 1
+    },
     "active": true,
-    "created_at": "2026-06-06T09:45:48.045005"
+    "created_at": "2026-06-06 09:45:48.045005"
   },
   {
     "id": "emp_012",
@@ -111,9 +169,17 @@
     "email": null,
     "employee_type": "employee",
     "max_hours_per_week": 24,
-    "preferences": {},
+    "preferences": {
+      "ground_floor": 3,
+      "second_floor": 10,
+      "sixth_floor": 9,
+      "call_center": 8,
+      "80_bloor": 2,
+      "working_from_home": 5,
+      "event": 7
+    },
     "active": true,
-    "created_at": "2026-06-06T09:45:48.045015"
+    "created_at": "2026-06-06 09:45:48.045015"
   },
   {
     "id": "emp_013",
@@ -121,9 +187,13 @@
     "email": null,
     "employee_type": "employee",
     "max_hours_per_week": 24,
-    "preferences": {},
+    "preferences": {
+      "ground_floor": 1,
+      "second_floor": 10,
+      "sixth_floor": 7
+    },
     "active": true,
-    "created_at": "2026-06-06T09:45:48.045024"
+    "created_at": "2026-06-06 09:45:48.045024"
   },
   {
     "id": "emp_014",

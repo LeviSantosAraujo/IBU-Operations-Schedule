@@ -194,6 +194,11 @@ class Notification(BaseModel):
     created_at: datetime = Field(default_factory=datetime.now)
     read: bool = False
 
+class StaffingTarget(BaseModel):
+    """Staffing target for a location"""
+    location: str
+    target: int  # Number of people needed per day
+
 class Event(BaseModel):
     """Event created by managers for a specific week"""
     id: str

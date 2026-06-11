@@ -108,11 +108,18 @@ export const getEmployeeHoursSummary = (weekStartDate: string) =>
   api.get(`/analytics/employee-hours/${weekStartDate}`).then(r => r.data)
 
 // Config
-export const getConfig = () => 
+export const getConfig = () =>
   api.get('/config').then(r => r.data)
 
-export const updateConfig = (data: any) => 
+export const updateConfig = (data: any) =>
   api.put('/config', data).then(r => r.data)
+
+// Staffing Targets
+export const getStaffingTargets = () =>
+  api.get('/staffing-targets').then(r => r.data)
+
+export const updateStaffingTargets = (targets: Record<string, number>) =>
+  api.put('/staffing-targets', targets).then(r => r.data)
 
 // Availability Requests
 export function getAvailabilityRequests() {

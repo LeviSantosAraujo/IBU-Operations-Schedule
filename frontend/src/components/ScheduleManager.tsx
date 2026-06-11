@@ -6,7 +6,8 @@ import {
   getSchedule, generateSchedule, saveSchedule,
   getEmployees, updateEmployee, publishSchedule, getAvailabilityRequests,
   approveAvailabilityRequest, rejectAvailabilityRequest,
-  getEvents, createEvent, updateEvent, deleteEvent, clearSchedule
+  getEvents, createEvent, updateEvent, deleteEvent, clearSchedule,
+  getStaffingTargets, updateStaffingTargets
 } from '../api'
 import { 
   Plus, Trash2, Save, Play, Calendar, ChevronLeft, ChevronRight, 
@@ -107,7 +108,6 @@ export default function ScheduleManager() {
     start_time: '18:00',
     end_time: '22:00',
     location: 'ground floor',
-    people_needed: 3,
     description: ''
   })
   const [showEventAdvisory, setShowEventAdvisory] = useState(false)
@@ -121,6 +121,15 @@ export default function ScheduleManager() {
   const [employeePreferences, setEmployeePreferences] = useState<Record<string, Record<string, number>>>({})
   const [approvedRequests, setApprovedRequests] = useState<any[]>([])
   const [allRequests, setAllRequests] = useState<any[]>([])
+  const [showAutoGenerateModal, setShowAutoGenerateModal] = useState(false)
+  const [staffingTargets, setStaffingTargets] = useState<Record<string, number>>({
+    'ground_floor': 2,
+    'second_floor': 3,
+    'sixth_floor': 1,
+    'call_center': 4,
+    '80_bloor': 1,
+    'working_from_home': 1
+  })
 
   // Dynamic locations - base locations + event locations
   const locations = [
@@ -149,6 +158,7 @@ export default function ScheduleManager() {
     loadEvents()
     loadEmployeePreferences()
     loadApprovedRequests()
+    loadStaffingTargets()
   }, [weekStart])
 
   useEffect(() => {
@@ -196,6 +206,17 @@ export default function ScheduleManager() {
       setAllRequests(data)
     } catch (err) {
       console.error('Error loading approved requests:', err)
+    }
+  }
+
+  const loadStaffingTargets = async () => {
+    try {
+      const data = await getStaffingTargets()
+      if (data && Object.keys(data).length > 0) {
+        setStaffingTargets(data)
+      }
+    } catch (err) {
+      console.error('Error loading staffing targets:', err)
     }
   }
 
@@ -278,7 +299,8 @@ export default function ScheduleManager() {
       const eventData = {
         ...eventForm,
         date: format(eventForm.date, 'yyyy-MM-dd'),
-        week_start_date: formattedDate
+        week_start_date: formattedDate,
+        people_needed: staffingTargets[eventForm.location.replace(' ', '_')] || 3
       }
       await createEvent(eventData)
       await loadEvents()
@@ -289,7 +311,6 @@ export default function ScheduleManager() {
         start_time: '18:00',
         end_time: '22:00',
         location: 'ground floor',
-        people_needed: 3,
         description: ''
       })
       // Show toast with refreshed events
@@ -346,16 +367,19 @@ export default function ScheduleManager() {
   const handleGenerate = async () => {
     if (!weekStart) return
 
-    // Check if events exist for this week - block generation if not
-    if (events.length === 0) {
-      setShowEventAdvisory(true)
-      return
-    }
+    // Show auto-generate modal with staffing targets and event creation
+    setShowAutoGenerateModal(true)
+  }
+
+  const handleAutoGenerate = async () => {
+    // Save staffing targets
+    await updateStaffingTargets(staffingTargets)
+    setShowAutoGenerateModal(false)
 
     setGenerating(true)
     setGenerationStatus('Initializing scheduler...')
     setProgressPercent(0)
-    
+
     // Estimated time: ~52 seconds total for generation
     // Distribute progress updates across estimated duration
     const statuses = [
@@ -954,7 +978,7 @@ export default function ScheduleManager() {
                   <div className="text-xs text-gray-600">
                     {format(new Date(event.date), 'MMM dd')} • {event.start_time}–{event.end_time}
                   </div>
-                  <div className="text-xs text-gray-500 capitalize">{event.location} • {event.people_needed} people needed</div>
+                  <div className="text-xs text-gray-500 capitalize">{event.location}</div>
                   <button
                     onClick={() => handleDeleteEvent(event.id)}
                     className="mt-1 text-xs text-red-500 hover:text-red-700"
@@ -1682,37 +1706,90 @@ export default function ScheduleManager() {
         </div>
       )}
 
-      {/* Event Advisory Modal */}
-      {showEventAdvisory && (
+      {/* Auto-Generate Modal */}
+      {showAutoGenerateModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-md">
+          <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-bold">No Events Created</h3>
-              <button 
-                onClick={() => setShowEventAdvisory(false)}
+              <h3 className="text-lg font-bold">Auto-Generate Schedule</h3>
+              <button
+                onClick={() => setShowAutoGenerateModal(false)}
                 className="p-1 hover:bg-gray-100 rounded"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
-            <p className="text-gray-600 mb-6">
-              No events have been created for this week. Would you like to create events before generating the schedule?
-            </p>
+
+            {/* Staffing Targets */}
+            <div className="mb-6">
+              <h4 className="font-semibold mb-3">Staffing Targets (people per day)</h4>
+              <div className="grid grid-cols-2 gap-3">
+                {Object.entries(staffingTargets).map(([location, target]) => (
+                  <div key={location} className="flex items-center gap-2">
+                    <label className="flex-1 text-sm capitalize">{location.replace('_', ' ')}</label>
+                    <input
+                      type="number"
+                      min="0"
+                      max="10"
+                      value={target}
+                      onChange={(e) => setStaffingTargets({
+                        ...staffingTargets,
+                        [location]: parseInt(e.target.value) || 0
+                      })}
+                      className="w-20 px-2 py-1 border rounded text-center"
+                    />
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Events Section */}
+            <div className="mb-6">
+              <div className="flex items-center justify-between mb-3">
+                <h4 className="font-semibold">Events for {format(weekStart, 'MMM d, yyyy')}</h4>
+                <button
+                  onClick={() => setShowEventModal(true)}
+                  className="text-sm bg-blue-600 text-white px-3 py-1 rounded hover:bg-blue-700"
+                >
+                  + Add Event
+                </button>
+              </div>
+              {events.length === 0 ? (
+                <p className="text-sm text-gray-500 italic">No events created yet</p>
+              ) : (
+                <div className="space-y-2">
+                  {events.map((event: any) => (
+                    <div key={event.id} className="flex items-center justify-between bg-gray-50 p-2 rounded">
+                      <div>
+                        <div className="font-medium">{event.name}</div>
+                        <div className="text-xs text-gray-600">
+                          {format(new Date(event.date), 'MMM d')} • {event.start_time}-{event.end_time} • {event.location}
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => handleDeleteEvent(event.id)}
+                        className="text-red-600 hover:text-red-700"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
             <div className="flex gap-3">
               <button
-                onClick={() => {
-                  setShowEventAdvisory(false)
-                  setShowEventModal(true)
-                }}
-                className="flex-1 bg-blue-600 text-white py-2 rounded hover:bg-blue-700"
+                onClick={handleAutoGenerate}
+                className="flex-1 bg-green-600 text-white py-2 rounded hover:bg-green-700"
               >
-                Create Events
+                Generate Schedule
               </button>
               <button
-                onClick={handleGenerateWithoutEvents}
+                onClick={() => setShowAutoGenerateModal(false)}
                 className="flex-1 bg-gray-600 text-white py-2 rounded hover:bg-gray-700"
               >
-                Generate Without Events
+                Cancel
               </button>
             </div>
           </div>
@@ -1786,16 +1863,6 @@ export default function ScheduleManager() {
                   <option value="call center">Call Center</option>
                   <option value="80 bloor">80 Bloor</option>
                 </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-1">People Needed</label>
-                <input
-                  type="number"
-                  min="1"
-                  value={eventForm.people_needed}
-                  onChange={(e) => setEventForm({...eventForm, people_needed: parseInt(e.target.value) || 1})}
-                  className="w-full border rounded px-3 py-2"
-                />
               </div>
               <div>
                 <label className="block text-sm font-medium mb-1">Description (optional)</label>
