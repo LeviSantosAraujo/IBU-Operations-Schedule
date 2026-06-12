@@ -20,13 +20,19 @@ api.interceptors.request.use((config) => {
   return config
 })
 
-// Handle 401/403 errors
+// Handle auth errors - only redirect on 401 for non-background requests
+let isRedirecting = false
 api.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response?.status === 401) {
-      auth.logout()
-      if (window.location.pathname !== '/login') {
+    if (error.response?.status === 401 && !isRedirecting) {
+      const url = error.config?.url || ''
+      // Don't redirect for background polling endpoints
+      const pollingEndpoints = ['/notifications', '/availability-requests']
+      const isPolling = pollingEndpoints.some(ep => url.includes(ep))
+      if (!isPolling && window.location.pathname !== '/login') {
+        isRedirecting = true
+        auth.logout()
         window.location.replace('/login')
       }
     }
