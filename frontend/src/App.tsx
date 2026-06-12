@@ -57,7 +57,7 @@ function AppLayout({ onLogout }: { onLogout: () => void }) {
             <div className="flex items-center">
               <div className="flex-shrink-0 font-bold text-xl">IBU Operations team schedule</div>
               {/* Desktop Navigation */}
-              <div className="hidden md:block ml-10 flex space-x-4">
+              <div className="hidden md:flex ml-10 space-x-4">
                 {/* Employees see their schedule and availability */}
                 {!isManager && (
                   <>
