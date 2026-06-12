@@ -20,21 +20,13 @@ api.interceptors.request.use((config) => {
   return config
 })
 
-// Handle auth errors - only redirect on 401 for non-background requests
-let isRedirecting = false
+// Handle auth errors - let React Router handle redirects via ProtectedRoute
 api.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response?.status === 401 && !isRedirecting) {
-      const url = error.config?.url || ''
-      // Don't redirect for background polling endpoints
-      const pollingEndpoints = ['/notifications', '/availability-requests']
-      const isPolling = pollingEndpoints.some(ep => url.includes(ep))
-      if (!isPolling && window.location.pathname !== '/login') {
-        isRedirecting = true
-        auth.logout()
-        window.location.replace('/login')
-      }
+    // Clear token on 401, but let ProtectedRoute handle the redirect
+    if (error.response?.status === 401) {
+      auth.logout()
     }
     return Promise.reject(error)
   }
