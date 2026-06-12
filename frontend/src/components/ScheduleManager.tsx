@@ -65,13 +65,17 @@ interface Shift {
   comment?: string
   description?: string
   locked?: boolean
+  is_call_center?: boolean
   locked_availability_type?: string
 }
 
 export default function ScheduleManager() {
   const [weekStart, setWeekStart] = useState<Date>(startOfWeek(new Date(), { weekStartsOn: 1 }))
   const [schedule, setSchedule] = useState<any>(null)
+  const [approvedAvailabilities, setApprovedAvailabilities] = useState<any[]>([])
+  const [availabilityRequests, setAvailabilityRequests] = useState<any[]>([])
   const [employees, setEmployees] = useState<any[]>([])
+  const [employeeSubmittedPrefs, setEmployeeSubmittedPrefs] = useState<Record<string, Record<string, number>>>({})
   const [_loading, setLoading] = useState(false)
   const [generating, setGenerating] = useState(false)
   const [selectedLocation, setSelectedLocation] = useState<string>('all')
@@ -96,7 +100,6 @@ export default function ScheduleManager() {
     description: ''
   })
   const [saved, setSaved] = useState(false)
-  const [availabilityRequests, setAvailabilityRequests] = useState<any[]>([])
   const [showApprovalModal, setShowApprovalModal] = useState(false)
   const [selectedRequest, setSelectedRequest] = useState<any>(null)
   const [managerComment, setManagerComment] = useState('')
@@ -161,6 +164,15 @@ export default function ScheduleManager() {
     loadStaffingTargets()
   }, [weekStart])
 
+  // Listen for schedule update events (e.g., from notification bell approvals)
+  useEffect(() => {
+    const handleScheduleUpdate = () => {
+      loadSchedule()
+    }
+    window.addEventListener('scheduleUpdate', handleScheduleUpdate)
+    return () => window.removeEventListener('scheduleUpdate', handleScheduleUpdate)
+  }, [weekStart])
+
   useEffect(() => {
     loadSchedule()
   }, [weekStart])
@@ -176,12 +188,24 @@ export default function ScheduleManager() {
       const data = await getEmployees(true)
       const employeeList = Array.isArray(data) ? data : Array.isArray(data?.employees) ? data.employees : []
       const prefs: Record<string, Record<string, number>> = {}
+      const employeePrefs: Record<string, Record<string, number>> = {}
       employeeList.forEach((emp: any) => {
-        if (emp.employee_type !== 'manager' && emp.preferences) {
-          prefs[emp.id] = emp.preferences
+        if (emp.employee_type !== 'manager') {
+          // Store employee-submitted preferences separately
+          if (emp.preferences && Object.keys(emp.preferences).length > 0) {
+            employeePrefs[emp.id] = emp.preferences
+          }
+          // Load manager_preferences if non-empty, else fall back to employee preferences
+          const hasManagerPrefs = emp.manager_preferences && Object.keys(emp.manager_preferences).length > 0
+          if (hasManagerPrefs) {
+            prefs[emp.id] = emp.manager_preferences
+          } else if (emp.preferences && Object.keys(emp.preferences).length > 0) {
+            prefs[emp.id] = emp.preferences
+          }
         }
       })
       setEmployeePreferences(prefs)
+      setEmployeeSubmittedPrefs(employeePrefs)
     } catch (err) {
       console.error('Error loading employee preferences:', err)
     }
@@ -189,7 +213,7 @@ export default function ScheduleManager() {
 
   const handleSaveEmployeePreferences = async (employeeId: string, preferences: Record<string, number>) => {
     try {
-      await updateEmployee(employeeId, { preferences })
+      await updateEmployee(employeeId, { manager_preferences: preferences })
       setEmployeePreferences(prev => ({ ...prev, [employeeId]: preferences }))
     } catch (err) {
       alert('Error saving preferences. Please try again.')
@@ -223,14 +247,14 @@ export default function ScheduleManager() {
   const loadAvailabilityRequests = async () => {
     try {
       const data = await getAvailabilityRequests()
-      // Only load pending requests - approved requests already have locked shifts
+      // Load all non-approved requests for managers to review
       const formattedDate = format(weekStart, 'yyyy-MM-dd')
       const weekEnd = format(addDays(weekStart, 6), 'yyyy-MM-dd')
 
       const weekRequests = data.filter((r: any) => {
-        // Only include pending requests
+        // Exclude only approved requests (they already have locked shifts)
         const status = r.status?.toLowerCase() || ''
-        if (status !== 'pending' && status !== 'availabilityrequeststatus.pending') {
+        if (status === 'approved' || status === 'availabilityrequeststatus.approved') {
           return false
         }
 
@@ -299,8 +323,7 @@ export default function ScheduleManager() {
       const eventData = {
         ...eventForm,
         date: format(eventForm.date, 'yyyy-MM-dd'),
-        week_start_date: formattedDate,
-        people_needed: staffingTargets[eventForm.location.replace(' ', '_')] || 3
+        week_start_date: formattedDate
       }
       await createEvent(eventData)
       await loadEvents()
@@ -356,9 +379,13 @@ export default function ScheduleManager() {
       const formattedDate = format(weekStart, 'yyyy-MM-dd')
       const data = await getSchedule(formattedDate)
       setSchedule(data)
+      setApprovedAvailabilities(data.approved_availabilities || [])
+      setAvailabilityRequests(data.availability_requests || [])
     } catch (err) {
       console.error('Error loading schedule:', err)
       setSchedule(null)
+      setApprovedAvailabilities([])
+      setAvailabilityRequests([])
     } finally {
       setLoading(false)
     }
@@ -549,6 +576,10 @@ export default function ScheduleManager() {
     if (shift.location) {
       const shiftLocs = shift.location.split(',').map((l: string) => l.toLowerCase().trim())
       if (shiftLocs.includes(selectedLocation.toLowerCase())) return true
+    }
+    // Check by call center role
+    if (selectedLocation === 'call center' && shift.is_call_center) {
+      return true
     }
     // Check by event name for event shifts
     if (shift.is_event && shift.event_name && shift.event_name.toLowerCase().replace(/\s+/g, '_') === selectedLocation.toLowerCase()) {
@@ -897,62 +928,6 @@ export default function ScheduleManager() {
         </div>
       </div>
 
-      {/* Availability Requests Panel - Only show pending */}
-      {availabilityRequests.filter((r: any) => r.status === 'pending' || r.status === 'AvailabilityRequestStatus.PENDING').length > 0 && (
-        <div className="w-full lg:w-64 flex-shrink-0">
-          <div className="bg-white rounded-lg shadow p-4 sticky top-4">
-            <div className="flex items-center gap-2 mb-4">
-              <Bell className="w-4 h-4 text-orange-500" />
-              <h2 className="font-bold text-sm">Pending Requests</h2>
-              <span className="bg-orange-500 text-white text-xs px-2 py-1 rounded-full">
-                {availabilityRequests.filter((r: any) => r.status === 'pending' || r.status === 'AvailabilityRequestStatus.PENDING').length}
-              </span>
-            </div>
-            <div className="space-y-2 max-h-96 overflow-y-auto">
-              {availabilityRequests.filter((r: any) => r.status === 'pending' || r.status === 'AvailabilityRequestStatus.PENDING').map((request: any) => {
-                const emp = employees.find((e: any) => e.id === request.employee_id)
-
-                // Handle both new and old schema
-                const requestType = request.request_type || 'availability'
-                const daysDisplay = Array.isArray(request.days_of_week) && request.days_of_week.length > 0
-                  ? request.days_of_week.map((d: string) => d.charAt(0).toUpperCase() + d.slice(1)).join(', ')
-                  : request.day_of_week || 'N/A'
-
-                let description = ''
-                if (requestType === 'day_off') {
-                  description = `Day Off for ${daysDisplay}`
-                } else {
-                  const timeRange = request.start_time && request.end_time
-                    ? ` (${request.start_time} - ${request.end_time})`
-                    : ''
-                  description = `Available on ${daysDisplay}${timeRange}`
-                }
-
-                const dateRange = request.start_date && request.end_date
-                  ? `${request.start_date} to ${request.end_date}`
-                  : ''
-
-                return (
-                  <div key={request.id} className="p-3 bg-gray-50 rounded border">
-                    <div className="font-medium text-sm">{emp?.name || request.employee_id}</div>
-                    <div className="text-xs text-gray-600 capitalize">{description}</div>
-                    {dateRange && <div className="text-xs text-gray-500">{dateRange}</div>}
-                    <div className="mt-2 flex gap-2">
-                      <button
-                        onClick={() => openApprovalModal(request)}
-                        className="flex-1 text-xs bg-blue-600 text-white py-1 rounded hover:bg-blue-700"
-                      >
-                        Review
-                      </button>
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* Events Toast Notification */}
       {eventToast && (
         <div className="fixed top-6 right-6 z-50 w-80 bg-white rounded-lg shadow-xl border border-purple-200 overflow-hidden animate-in">
@@ -1158,6 +1133,10 @@ export default function ScheduleManager() {
               if (s.location && s.location.split(',').map((l: string) => l.toLowerCase().trim()).includes(selectedLocation.toLowerCase())) {
                 return true
               }
+              // Check by call center role
+              if (selectedLocation === 'call center' && s.is_call_center) {
+                return true
+              }
               // Check by event name for event shifts
               if (s.is_event && s.event_name && s.event_name.toLowerCase().replace(/\s+/g, '_') === selectedLocation.toLowerCase()) {
                 return true
@@ -1206,7 +1185,9 @@ export default function ScheduleManager() {
 
           {/* Main Schedule Grid */}
           {schedule ? (
-            <div className="bg-white rounded-lg shadow overflow-x-auto">
+            <>
+              {/* Desktop Table View */}
+              <div className="hidden lg:block bg-white rounded-lg shadow overflow-x-auto">
               <table className="w-full min-w-[1200px]">
                 <thead>
                   <tr className="bg-gray-100">
@@ -1250,9 +1231,15 @@ export default function ScheduleManager() {
                             })
                             .sort((a: any, b: any) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime())
 
+                          // Get approved availabilities for this employee and day
+                          const empDayAvailabilities = approvedAvailabilities.filter((a: any) => 
+                            a.employee_id === emp.id && a[day.toLowerCase()]
+                          )
+
                           const hasShifts = shifts.length > 0
                           const showRequests = empDayRequests.length > 0 && !hasShifts
-                          
+                          const showAvailabilities = empDayAvailabilities.length > 0 && !hasShifts
+
                           return (
                             <td
                               key={`${emp.id}-${day}`}
@@ -1312,6 +1299,9 @@ export default function ScheduleManager() {
                                         <div className="text-gray-600 flex items-center gap-1">
                                           <MapPin className="w-3 h-3" />
                                           {shift.location}
+                                          {shift.is_call_center && (
+                                            <span className="ml-1 px-1.5 py-0.5 bg-blue-100 text-blue-700 text-xs rounded font-medium">CC</span>
+                                          )}
                                         </div>
                                       )}
                                       {shift.comment && (
@@ -1328,20 +1318,44 @@ export default function ScheduleManager() {
                                 </div>
                                 )
                               ))}
+                              {showAvailabilities && (() => {
+                                const avail = empDayAvailabilities[0]
+                                const availType = avail?.[day.toLowerCase()] || ''
+                                const availLabel = availType.replace('_', ' ').toUpperCase()
+                                return (
+                                  <div className="text-xs font-medium p-1 rounded bg-blue-100 text-blue-700 border border-blue-300">
+                                    <div>📅 {availLabel}</div>
+                                    <div className="text-[10px] opacity-70">Approved availability</div>
+                                  </div>
+                                )
+                              })()}
                               {showRequests && (() => {
                                 const latest = empDayRequests[0]
                                 const latestStatus = latest?.status || ''
                                 const isApproved = latestStatus === 'AvailabilityRequestStatus.APPROVED' || latestStatus === 'approved'
                                 const isRejected = latestStatus === 'AvailabilityRequestStatus.REJECTED' || latestStatus === 'rejected'
                                 const isPending = latestStatus === 'AvailabilityRequestStatus.PENDING' || latestStatus === 'pending'
-                                const statusLabel = isApproved ? '✅ Approved' : isRejected ? '❌ Rejected' : isPending ? '⏳ Pending' : ''
+                                const managerComment = latest?.manager_comment || ''
+                                
+                                // For approved: show "Approved" if no comment, otherwise show comment
+                                // For rejected: always show comment
+                                // For pending: show "Pending"
+                                let displayText = ''
+                                if (isApproved) {
+                                  displayText = managerComment || 'Approved'
+                                } else if (isRejected) {
+                                  displayText = managerComment || 'Rejected'
+                                } else if (isPending) {
+                                  displayText = 'Pending'
+                                }
+                                
                                 const statusColor = isApproved ? 'bg-green-100 text-green-700' :
                                                    isRejected ? 'bg-red-100 text-red-700' :
                                                    isPending ? 'bg-yellow-100 text-yellow-700' : ''
                                 const count = empDayRequests.length
                                 return (
                                   <div className={`text-xs font-medium p-1 rounded ${statusColor}`}>
-                                    <div>{statusLabel}</div>
+                                    <div>{displayText}</div>
                                     {count > 1 && <div className="text-[10px] opacity-70">{count}x submitted</div>}
                                   </div>
                                 )
@@ -1355,6 +1369,128 @@ export default function ScheduleManager() {
                 </tbody>
               </table>
             </div>
+
+              {/* Mobile Card View */}
+              <div className="lg:hidden space-y-4">
+                {employees.map(emp => {
+                  const empHours = getEmployeeHours(emp.id)
+                  return (
+                    <div key={emp.id} className="bg-white rounded-lg shadow p-4">
+                      <div className="flex justify-between items-center mb-3">
+                        <div>
+                          <h3 className="font-semibold">{emp.name}</h3>
+                          <p className="text-xs text-gray-500">{emp.employee_type}</p>
+                        </div>
+                        <div className={`text-sm font-bold ${getHoursColorClass(emp, empHours)}`}>
+                          {empHours.toFixed(1)}h
+                        </div>
+                      </div>
+                      <div className="space-y-2">
+                        {days.map((day, i) => {
+                          const shifts = getShiftsForCell(emp.id, day)
+                          const empDayRequests = availabilityRequests
+                            .filter((r: any) => {
+                              if (r.employee_id !== emp.id) return false
+                              if (Array.isArray(r.days_of_week) && r.days_of_week.length > 0) {
+                                return r.days_of_week.some((d: string) => d.toLowerCase() === day)
+                              }
+                              if (r.day_of_week) {
+                                return r.day_of_week.toLowerCase() === day
+                              }
+                              return false
+                            })
+                            .sort((a: any, b: any) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime())
+
+                          const empDayAvailabilities = approvedAvailabilities.filter((a: any) =>
+                            a.employee_id === emp.id && a[day.toLowerCase()]
+                          )
+
+                          const hasShifts = shifts.length > 0
+                          const showRequests = empDayRequests.length > 0 && !hasShifts
+                          const showAvailabilities = empDayAvailabilities.length > 0 && !hasShifts
+
+                          return (
+                            <div key={`${emp.id}-${day}`} className="border-b pb-2 last:border-0">
+                              <div className="text-xs font-semibold text-gray-600 mb-1">
+                                {day.slice(0, 3)} {format(weekDates[i], 'M/d')}
+                              </div>
+                              {shifts.map((shift: Shift) => (
+                                shift.locked ? (
+                                  <div
+                                    key={shift.id}
+                                    className={`p-2 rounded mb-1 text-xs border ${
+                                      shift.location === 'day off' ? 'border-black bg-black text-white' : 'border-gray-400 bg-gray-200 text-gray-600'
+                                    }`}
+                                  >
+                                    <div className="font-semibold">🔒 {shift.locked_availability_type || 'Approved'}</div>
+                                    <div className="font-medium">{shift.start_time} - {shift.end_time}</div>
+                                    {shift.location && <div className="text-xs mt-1">{shift.location}</div>}
+                                  </div>
+                                ) : (
+                                  <div
+                                    key={shift.id}
+                                    className={`p-2 rounded mb-1 text-xs border ${getShiftColorClass(shift)}`}
+                                  >
+                                    <div className="font-medium">{shift.start_time} - {shift.end_time}</div>
+                                    <div className="text-gray-700 flex items-center gap-1">
+                                      <Clock className="w-3 h-3" />
+                                      {shift.hours}h
+                                    </div>
+                                    {shift.location && (
+                                      <div className="text-gray-700 flex items-center gap-1">
+                                        <MapPin className="w-3 h-3" />
+                                        {shift.location}
+                                      </div>
+                                    )}
+                                    {shift.is_call_center && (
+                                      <div className="text-blue-600 font-semibold text-xs">CC</div>
+                                    )}
+                                  </div>
+                                )
+                              ))}
+                              {showRequests && (() => {
+                                const latest = empDayRequests[0]
+                                const latestStatus = latest?.status || ''
+                                const isApproved = latestStatus === 'AvailabilityRequestStatus.APPROVED' || latestStatus === 'approved'
+                                const isRejected = latestStatus === 'AvailabilityRequestStatus.REJECTED' || latestStatus === 'rejected'
+                                const isPending = latestStatus === 'AvailabilityRequestStatus.PENDING' || latestStatus === 'pending'
+                                const managerComment = latest?.manager_comment || ''
+                                
+                                let displayText = ''
+                                if (isApproved) {
+                                  displayText = managerComment || 'Approved'
+                                } else if (isRejected) {
+                                  displayText = managerComment || 'Rejected'
+                                } else if (isPending) {
+                                  displayText = 'Pending'
+                                }
+                                
+                                const statusColor = isApproved ? 'bg-green-100 text-green-700' :
+                                                   isRejected ? 'bg-red-100 text-red-700' :
+                                                   isPending ? 'bg-yellow-100 text-yellow-700' : ''
+                                return (
+                                  <div className={`text-xs font-medium p-1 rounded ${statusColor}`}>
+                                    {displayText}
+                                  </div>
+                                )
+                              })()}
+                              {showAvailabilities && (
+                                <div className="text-xs p-1 rounded bg-blue-50 text-blue-700">
+                                  {empDayAvailabilities[0][day.toLowerCase()]}
+                                </div>
+                              )}
+                              {!hasShifts && !showRequests && !showAvailabilities && (
+                                <div className="text-xs text-gray-300 italic">—</div>
+                              )}
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </>
           ) : (
             <div className="text-center py-12 bg-white rounded-lg shadow">
               <p className="text-gray-500 mb-4">No schedule for this week yet.</p>
@@ -1390,26 +1526,36 @@ export default function ScheduleManager() {
 
                     {/* Job Preferences */}
                     <div>
-                      <h5 className="text-sm font-medium mb-2 text-gray-600">Job Preferences (Manager Set)</h5>
+                      <h5 className="text-sm font-medium mb-2 text-gray-600">Job Preferences</h5>
                       <div className="space-y-2">
                         {['ground_floor', 'second_floor', 'sixth_floor', 'call_center', '80_bloor', 'working_from_home', 'event'].map(jobType => (
                           <div key={jobType} className="flex items-center gap-3">
                             <span className="flex-1 text-sm capitalize">{jobType.replace('_', ' ')}</span>
                             <div className="flex items-center gap-1">
-                              {[1,2,3,4,5,6,7,8,9,10].map(num => (
-                                <button
-                                  key={num}
-                                  onClick={() => {
-                                    const newPrefs = { ...(employeePreferences[emp.id] || {}), [jobType]: num }
-                                    handleSaveEmployeePreferences(emp.id, newPrefs)
-                                  }}
-                                  className={`w-6 h-6 rounded text-xs font-medium ${
-                                    (employeePreferences[emp.id] || {})[jobType] === num ? 'bg-blue-600 text-white' : 'bg-gray-200 hover:bg-gray-300'
-                                  }`}
-                                >
-                                  {num}
-                                </button>
-                              ))}
+                              {[1,2,3,4,5,6,7,8,9,10].map(num => {
+                                const currentPref = (employeePreferences[emp.id] || {})[jobType]
+                                const employeePref = (employeeSubmittedPrefs[emp.id] || {})[jobType]
+                                const isCurrent = currentPref === num
+                                const isEmployeeChoice = employeePref === num && currentPref !== employeePref
+                                
+                                return (
+                                  <button
+                                    key={num}
+                                    onClick={() => {
+                                      const newPrefs = { ...(employeePreferences[emp.id] || {}), [jobType]: num }
+                                      handleSaveEmployeePreferences(emp.id, newPrefs)
+                                    }}
+                                    className={`w-6 h-6 rounded text-xs font-medium ${
+                                      isCurrent ? 'bg-blue-600 text-white' : 
+                                      isEmployeeChoice ? 'bg-red-200 text-red-700 border-2 border-red-400' : 
+                                      'bg-gray-200 hover:bg-gray-300'
+                                    }`}
+                                    title={isEmployeeChoice ? `Employee's choice: ${num}` : ''}
+                                  >
+                                    {num}
+                                  </button>
+                                )
+                              })}
                             </div>
                           </div>
                         ))}
@@ -1424,10 +1570,10 @@ export default function ScheduleManager() {
 
         {/* Edit Shift Modal */}
         {showEditModal && editingShift && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-            <div className="bg-white rounded-lg p-6 w-96">
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-lg p-6 w-full max-w-md">
               <h3 className="text-lg font-bold mb-4">Edit Shift</h3>
-              
+
               <div className="space-y-3">
                 <div className="grid grid-cols-2 gap-2">
                   <div>
@@ -1500,10 +1646,10 @@ export default function ScheduleManager() {
 
         {/* Add Shift Modal */}
         {showAddShift && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-            <div className="bg-white rounded-lg p-6 w-96">
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-lg p-6 w-full max-w-md">
               <h3 className="text-lg font-bold mb-4">Add Shift</h3>
-              
+
               <div className="space-y-3">
                 <div>
                   <label className="block text-sm font-medium mb-1">Employee</label>
@@ -1722,9 +1868,33 @@ export default function ScheduleManager() {
 
             {/* Staffing Targets */}
             <div className="mb-6">
-              <h4 className="font-semibold mb-3">Staffing Targets (people per day)</h4>
+              <div className="flex items-center justify-between mb-3">
+                <h4 className="font-semibold">Staffing Targets (people per day)</h4>
+                <button
+                  onClick={() => setShowEventModal(true)}
+                  className="text-sm bg-blue-600 text-white px-3 py-1 rounded hover:bg-blue-700"
+                >
+                  + Add Event
+                </button>
+              </div>
               <div className="grid grid-cols-2 gap-3">
-                {Object.entries(staffingTargets).map(([location, target]) => (
+                {/* Call Center Role (separate from locations) */}
+                <div key="call_center" className="flex items-center gap-2 bg-blue-50 p-1 rounded">
+                  <label className="flex-1 text-sm">Call Center Role</label>
+                  <input
+                    type="number"
+                    min="0"
+                    max="10"
+                    value={staffingTargets.call_center || 0}
+                    onChange={(e) => setStaffingTargets({
+                      ...staffingTargets,
+                      call_center: parseInt(e.target.value) || 0
+                    })}
+                    className="w-20 px-2 py-1 border rounded text-center"
+                  />
+                </div>
+                {/* Regular locations */}
+                {Object.entries(staffingTargets).filter(([key]) => !key.startsWith('event_') && key !== 'call_center' && key !== 'working_from_home').map(([location, target]) => (
                   <div key={location} className="flex items-center gap-2">
                     <label className="flex-1 text-sm capitalize">{location.replace('_', ' ')}</label>
                     <input
@@ -1740,42 +1910,37 @@ export default function ScheduleManager() {
                     />
                   </div>
                 ))}
-              </div>
-            </div>
-
-            {/* Events Section */}
-            <div className="mb-6">
-              <div className="flex items-center justify-between mb-3">
-                <h4 className="font-semibold">Events for {format(weekStart, 'MMM d, yyyy')}</h4>
-                <button
-                  onClick={() => setShowEventModal(true)}
-                  className="text-sm bg-blue-600 text-white px-3 py-1 rounded hover:bg-blue-700"
-                >
-                  + Add Event
-                </button>
-              </div>
-              {events.length === 0 ? (
-                <p className="text-sm text-gray-500 italic">No events created yet</p>
-              ) : (
-                <div className="space-y-2">
-                  {events.map((event: any) => (
-                    <div key={event.id} className="flex items-center justify-between bg-gray-50 p-2 rounded">
-                      <div>
-                        <div className="font-medium">{event.name}</div>
-                        <div className="text-xs text-gray-600">
-                          {format(new Date(event.date), 'MMM d')} • {event.start_time}-{event.end_time} • {event.location}
-                        </div>
-                      </div>
+                {/* Events as locations */}
+                {events.map((event: any) => {
+                  const eventKey = event.id  // Event IDs already start with event_
+                  const currentValue = staffingTargets[eventKey] || 0
+                  return (
+                    <div key={event.id} className="flex items-center gap-2 bg-orange-50 p-1 rounded">
+                      <label className="flex-1 text-sm truncate" title={`${event.name} (${format(new Date(event.date), 'MMM d')})`}>
+                        {event.name}
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        max="20"
+                        value={currentValue}
+                        onChange={(e) => setStaffingTargets({
+                          ...staffingTargets,
+                          [eventKey]: parseInt(e.target.value) || 0
+                        })}
+                        className="w-20 px-2 py-1 border rounded text-center"
+                      />
                       <button
                         onClick={() => handleDeleteEvent(event.id)}
-                        className="text-red-600 hover:text-red-700"
+                        className="text-red-500 hover:text-red-700 p-1"
+                        title="Delete event"
                       >
-                        <Trash2 className="w-4 h-4" />
+                        <Trash2 className="w-3 h-3" />
                       </button>
                     </div>
-                  ))}
-                </div>
-              )}
+                  )
+                })}
+              </div>
             </div>
 
             <div className="flex gap-3">
@@ -1798,8 +1963,8 @@ export default function ScheduleManager() {
 
       {/* Event Creation Modal */}
       {showEventModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-md">
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-md max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-bold">Create Event</h3>
               <button 

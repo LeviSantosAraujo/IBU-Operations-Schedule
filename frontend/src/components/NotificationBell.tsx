@@ -1,18 +1,29 @@
 import { useState, useEffect } from 'react'
-import { Bell, X, Check, XCircle } from 'lucide-react'
-import { getNotifications, markNotificationAsRead } from '../api'
+import { Bell, X, Check, XCircle, User } from 'lucide-react'
+import { getNotifications, markNotificationAsRead, getAvailabilityRequests, approveAvailabilityRequest, rejectAvailabilityRequest } from '../api'
+import { auth } from '../auth'
 
 export default function NotificationBell() {
   const [notifications, setNotifications] = useState<any[]>([])
+  const [availabilityRequests, setAvailabilityRequests] = useState<any[]>([])
   const [isOpen, setIsOpen] = useState(false)
   const [unreadCount, setUnreadCount] = useState(0)
+  const [isManager] = useState(auth.isManager())
 
   useEffect(() => {
     loadNotifications()
+    if (isManager) {
+      loadAvailabilityRequests()
+    }
     // Poll for new notifications every 30 seconds
-    const interval = setInterval(loadNotifications, 30000)
+    const interval = setInterval(() => {
+      loadNotifications()
+      if (isManager) {
+        loadAvailabilityRequests()
+      }
+    }, 30000)
     return () => clearInterval(interval)
-  }, [])
+  }, [isManager])
 
   const loadNotifications = async () => {
     try {
@@ -24,12 +35,47 @@ export default function NotificationBell() {
     }
   }
 
+  const loadAvailabilityRequests = async () => {
+    try {
+      const data = await getAvailabilityRequests()
+      const pendingRequests = data.filter((r: any) => 
+        r.status === 'pending' || r.status === 'AvailabilityRequestStatus.PENDING'
+      )
+      setAvailabilityRequests(pendingRequests)
+    } catch (err) {
+      console.error('Error loading availability requests:', err)
+    }
+  }
+
   const handleMarkAsRead = async (notificationId: string) => {
     try {
       await markNotificationAsRead(notificationId)
       loadNotifications()
     } catch (err) {
       console.error('Error marking notification as read:', err)
+    }
+  }
+
+  const handleApprove = async (requestId: string, comment: string = '') => {
+    try {
+      await approveAvailabilityRequest(requestId, comment)
+      loadAvailabilityRequests()
+      // Wait a moment for Excel file to be saved, then refresh schedule
+      setTimeout(() => {
+        window.dispatchEvent(new CustomEvent('scheduleUpdate'))
+      }, 500)
+    } catch (err) {
+      console.error('Error approving request:', err)
+      alert('Error approving request. Please try again.')
+    }
+  }
+
+  const handleReject = async (requestId: string, comment: string = '') => {
+    try {
+      await rejectAvailabilityRequest(requestId, comment)
+      loadAvailabilityRequests()
+    } catch (err) {
+      console.error('Error rejecting request:', err)
     }
   }
 
@@ -44,6 +90,8 @@ export default function NotificationBell() {
     }
   }
 
+  const totalCount = unreadCount + availabilityRequests.length
+
   return (
     <div className="relative">
       <button
@@ -51,9 +99,9 @@ export default function NotificationBell() {
         className="relative p-2 rounded hover:bg-blue-800 transition-colors"
       >
         <Bell className="w-5 h-5" />
-        {unreadCount > 0 && (
+        {totalCount > 0 && (
           <span className="absolute top-0 right-0 bg-red-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center">
-            {unreadCount}
+            {totalCount}
           </span>
         )}
       </button>
@@ -64,7 +112,7 @@ export default function NotificationBell() {
             className="fixed inset-0 z-10"
             onClick={() => setIsOpen(false)}
           />
-          <div className="absolute right-0 top-12 w-80 bg-white rounded-lg shadow-xl border z-20 max-h-96 overflow-y-auto">
+          <div className="absolute right-0 top-12 w-full sm:w-96 max-w-[calc(100vw-2rem)] bg-white rounded-lg shadow-xl border z-20 max-h-[80vh] overflow-y-auto">
             <div className="p-4 border-b flex justify-between items-center">
               <h3 className="font-semibold">Notifications</h3>
               <button
@@ -74,7 +122,50 @@ export default function NotificationBell() {
                 <X className="w-4 h-4" />
               </button>
             </div>
-            {notifications.length === 0 ? (
+            
+            {/* Availability Requests Section - Managers Only */}
+            {isManager && availabilityRequests.length > 0 && (
+              <div className="border-b">
+                <div className="p-3 bg-orange-50">
+                  <h4 className="font-semibold text-sm text-orange-800">Pending Availability Requests</h4>
+                </div>
+                <div className="divide-y">
+                  {availabilityRequests.map((request) => (
+                    <div key={request.id} className="p-3">
+                      <div className="flex items-start gap-2 mb-2">
+                        <User className="w-4 h-4 text-gray-500 mt-0.5" />
+                        <div className="flex-1">
+                          <p className="text-sm font-medium">{request.employee_name || 'Employee'}</p>
+                          <p className="text-xs text-gray-600">
+                            {request.request_type === 'availability' ? 'Availability Request' : 'Time Off Request'}
+                          </p>
+                          {request.comment && (
+                            <p className="text-xs text-gray-500 italic mt-1">"{request.comment}"</p>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => handleApprove(request.id)}
+                          className="flex-1 bg-green-600 text-white text-xs py-2 px-3 rounded hover:bg-green-700 min-h-[44px]"
+                        >
+                          Approve
+                        </button>
+                        <button
+                          onClick={() => handleReject(request.id)}
+                          className="flex-1 bg-red-600 text-white text-xs py-2 px-3 rounded hover:bg-red-700 min-h-[44px]"
+                        >
+                          Reject
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Regular Notifications */}
+            {notifications.length === 0 && availabilityRequests.length === 0 ? (
               <div className="p-4 text-gray-500 text-sm">No notifications</div>
             ) : (
               <div className="divide-y">

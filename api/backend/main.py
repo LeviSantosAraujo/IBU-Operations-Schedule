@@ -548,12 +548,26 @@ async def get_me(authorization: Optional[str] = Header(None)):
 # ============ Employee Endpoints ============
 
 @app.get("/api/employees", response_model=List[Employee])
-async def list_employees(active_only: bool = False):
-    """List all employees"""
+async def list_employees(active_only: bool = False, authorization: str = Header(None)):
+    """List all employees (managers see manager_preferences, employees do not)"""
     try:
         employees = get_all_employees()
         if active_only:
             employees = [e for e in employees if e.active]
+        
+        # Hide manager_preferences from non-managers
+        user = None
+        if authorization:
+            try:
+                user = require_auth(authorization)
+            except:
+                pass  # If auth fails, just return employees without manager_preferences
+        
+        # Hide manager_preferences if user is not a manager (or if auth failed)
+        if not user or user.get('employee_type') != 'MANAGER':
+            for emp in employees:
+                emp.manager_preferences = {}
+        
         return employees
     except Exception as e:
         print(f"Error loading employees: {e}")
@@ -591,6 +605,15 @@ async def update_employee(
     # Build updated employee by merging existing with new values
     update_data = employee_update.model_dump(exclude_unset=True)
     
+    # Only managers can update manager_preferences
+    if user.get('employee_type') != 'MANAGER' and 'manager_preferences' in update_data:
+        del update_data['manager_preferences']
+    
+    # Managers cannot modify employee-submitted preferences (they can only view them)
+    # Employees can modify their own preferences
+    if user.get('employee_type') == 'MANAGER' and 'preferences' in update_data:
+        del update_data['preferences']
+    
     # Create updated employee object
     updated_employee = Employee(
         id=employee_id,
@@ -599,6 +622,7 @@ async def update_employee(
         employee_type=update_data.get("employee_type", existing.employee_type),
         max_hours_per_week=update_data.get("max_hours_per_week", existing.max_hours_per_week),
         preferences=update_data.get("preferences", existing.preferences),
+        manager_preferences=update_data.get("manager_preferences", existing.manager_preferences),
         active=update_data.get("active", existing.active),
         created_at=existing.created_at
     )
@@ -785,11 +809,33 @@ async def get_schedule(
     authorization: Optional[str] = Header(None)
 ):
     """Get schedule for a specific week (all authenticated users)"""
-    require_auth(authorization)
+    user = require_auth(authorization)
     schedule = get_schedule_by_week(week_start_date)
     if not schedule:
         raise HTTPException(status_code=404, detail="Schedule not found")
-    return schedule
+    
+    # Add approved availabilities to the schedule response
+    all_availabilities = get_availabilities()
+    approved_availabilities = [a for a in all_availabilities if a.approved and a.week_start_date == week_start_date]
+    
+    # Filter: managers see all, employees see only their own
+    if user.get('employee_type') != 'MANAGER':
+        approved_availabilities = [a for a in approved_availabilities if a.employee_id == user.get('employee_id')]
+    
+    # Add availability requests to the schedule response
+    all_requests = get_availability_requests()
+    # Filter by week start date
+    week_requests = [r for r in all_requests if r.get('week_start_date') == week_start_date]
+    # Filter: managers see all, employees see only their own
+    if user.get('employee_type') != 'MANAGER':
+        week_requests = [r for r in week_requests if r.get('employee_id') == user.get('employee_id')]
+    
+    # Add availabilities and requests to schedule (this is a dynamic field, not in the model)
+    schedule_data = schedule.model_dump()
+    schedule_data['approved_availabilities'] = approved_availabilities
+    schedule_data['availability_requests'] = week_requests
+    
+    return schedule_data
 
 @app.post("/api/schedules/generate/{week_start_date}", response_model=WeeklySchedule)
 async def auto_generate_schedule(
@@ -807,28 +853,46 @@ async def auto_generate_schedule(
     # staffing_targets is simple dict like {'ground_floor': 2, 'call_center': 4}
     # location_requirements needs to be {'location': {'monday': 2, 'tuesday': 2, ...}}
     location_requirements = {}
-    days = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']
+    event_staffing = {}  # event_id -> people_needed
+    call_center_target = 0  # Number of people to assign call center role for the week
+    days = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday']  # Sunday excluded - only for events
 
     # Map staffing target keys to location names
+    # Note: call_center is now a role/flag, not a physical location
     location_map = {
         'ground_floor': 'ground floor',
         'second_floor': '2nd floor',
         'sixth_floor': '6th floor',
-        'call_center': 'call center',
         '80_bloor': '80 bloor',
         'working_from_home': 'working from home'
     }
 
     for key, target in staffing_targets.items():
-        location_name = location_map.get(key, key.replace('_', ' '))
-        location_requirements[location_name] = {day: target for day in days}
+        if key.startswith('event_'):
+            # Event staffing target - handle both old (event_event_...) and new (event_...) formats
+            # Strip double prefix if present
+            event_id = key.replace('event_event_', 'event_')
+            event_staffing[event_id] = target
+            print(f"[API] Event staffing: {key} -> {event_id} = {target}")
+        elif key == 'call_center':
+            # Call center is now a role/flag, not a location - pass separately to scheduler
+            # Target is people per day (applies to every day)
+            call_center_target = target
+            print(f"[API] Call center role target: {target} people per day")
+        else:
+            # Regular location staffing target - target is people per day (applies to every day)
+            # Skip working_from_home - manager assigns manually on-demand
+            if key == 'working_from_home':
+                continue
+            location_name = location_map.get(key, key.replace('_', ' '))
+            location_requirements[location_name] = {day: target for day in days}
+            print(f"[API] Location staffing: {key} -> {location_name} = {target} people per day")
 
-    # If no staffing targets set, use defaults
-    if not location_requirements:
-        location_requirements = None
-
+    print(f"[API] Total event staffing entries: {len(event_staffing)}")
+    print(f"[API] Call center target: {call_center_target}")
+    print(f"[API] Location requirements passed to scheduler: {location_requirements}")
     engine = SchedulingEngine()
-    schedule = engine.generate_auto_schedule(week_start_date, location_requirements)
+    schedule = engine.generate_auto_schedule(week_start_date, location_requirements, event_staffing, call_center_target)
     return save_schedule(schedule)
 
 @app.post("/api/schedules", response_model=WeeklySchedule)
@@ -1015,13 +1079,37 @@ async def update_config(config: Dict):
 async def get_staffing_targets():
     """Get staffing targets for all locations"""
     config = get_system_config()
-    return config.get('staffing_targets', {})
+    targets = config.get('staffing_targets', {})
+    
+    # Normalize keys: strip double event_ prefix
+    cleaned_targets = {}
+    for key, value in targets.items():
+        # Always strip double event_ prefix if present
+        normalized_key = key.replace('event_event_', 'event_')
+        cleaned_targets[normalized_key] = value
+    
+    # Remove working_from_home from targets (manager assigns manually)
+    if 'working_from_home' in cleaned_targets:
+        del cleaned_targets['working_from_home']
+    
+    return cleaned_targets
 
 @app.put("/api/staffing-targets")
 async def update_staffing_targets(targets: Dict[str, int], user: Dict = Depends(require_manager)):
     """Update staffing targets for locations"""
     config = get_system_config()
-    config['staffing_targets'] = targets
+    
+    # Normalize keys: strip double event_ prefix
+    cleaned_targets = {}
+    for key, value in targets.items():
+        # Always strip double event_ prefix if present
+        normalized_key = key.replace('event_event_', 'event_')
+        # Remove working_from_home from targets (manager assigns manually)
+        if normalized_key == 'working_from_home':
+            continue
+        cleaned_targets[normalized_key] = value
+    
+    config['staffing_targets'] = cleaned_targets
     return save_system_config(config)
 
 # ============ Availability Requests ============
@@ -1103,60 +1191,62 @@ async def approve_availability_request(request_id: str, body: Dict = {}, authori
                 avail_label = f"{start_t} - {end_t}"
                 color = '#D1D5DB'
 
-            # Create locked shifts for each date in range that matches the days_of_week
+            # Create locked shifts for each date in range
+            # Use the actual date's day of week, not the days_of_week array
             current_date = start_date
             day_map = {0: 'monday', 1: 'tuesday', 2: 'wednesday', 3: 'thursday', 4: 'friday', 5: 'saturday', 6: 'sunday'}
 
             while current_date <= end_date:
                 day_name = day_map[current_date.weekday()]
-                if day_name in days_of_week:
-                    # Get or create schedule for this week
-                    week_start = current_date - timedelta(days=current_date.weekday())
-                    schedule = get_schedule_by_week(week_start)
-                    if not schedule:
-                        schedule = WeeklySchedule(
-                            id=f"sched_{week_start.isoformat()}",
-                            week_start_date=week_start
-                        )
-
-                    # Calculate hours (0 for day off, calculated for regular shifts)
-                    if request_type == 'day_off':
-                        hours = 0.0
-                    else:
-                        start_h, start_m = map(int, start_t.split(':'))
-                        end_h, end_m = map(int, end_t.split(':'))
-                        hours = (end_h + end_m / 60) - (start_h + start_m / 60)
-                        if hours < 0:
-                            hours += 24
-
-                    locked_shift = Shift(
-                        id=f"locked_{request_data['id']}_{current_date.isoformat()}",
-                        employee_id=request_data['employee_id'],
-                        day_of_week=day_name,
-                        start_time=start_t,
-                        end_time=end_t,
-                        job_type=JobType.DESK,
-                        hours=hours,
-                        locked=True,
-                        locked_availability_type=avail_label,
-                        color=color,
-                        location='day off' if request_type == 'day_off' else None,
-                        comment=request_data.get('employee_comment', ''),
-                        preferences=request_data.get('preferences')
+                # Get or create schedule for this week
+                week_start = current_date - timedelta(days=current_date.weekday())
+                schedule = get_schedule_by_week(week_start)
+                if not schedule:
+                    schedule = WeeklySchedule(
+                        id=f"sched_{week_start.isoformat()}",
+                        week_start_date=week_start
                     )
 
-                    # Remove any previous locked shift for same employee/day
-                    schedule.shifts = [s for s in schedule.shifts if not (
-                        getattr(s, 'locked', False) and
-                        s.employee_id == request_data['employee_id'] and
-                        s.day_of_week == day_name
-                    )]
-                    schedule.shifts.append(locked_shift)
-                    save_schedule(schedule)
+                # Calculate hours (0 for day off, calculated for regular shifts)
+                if request_type == 'day_off':
+                    hours = 0.0
+                else:
+                    start_h, start_m = map(int, start_t.split(':'))
+                    end_h, end_m = map(int, end_t.split(':'))
+                    hours = (end_h + end_m / 60) - (start_h + start_m / 60)
+                    if hours < 0:
+                        hours += 24
+
+                locked_shift = Shift(
+                    id=f"locked_{request_data['id']}_{current_date.isoformat()}",
+                    employee_id=request_data['employee_id'],
+                    day_of_week=day_name,
+                    start_time=start_t,
+                    end_time=end_t,
+                    job_type=JobType.DESK,
+                    hours=hours,
+                    locked=True,
+                    locked_availability_type=avail_label,
+                    color=color,
+                    location='day off' if request_type == 'day_off' else None,
+                    comment=request_data.get('employee_comment', ''),
+                    preferences=request_data.get('preferences')
+                )
+
+                # Remove any previous locked shift for same employee/day
+                schedule.shifts = [s for s in schedule.shifts if not (
+                    getattr(s, 'locked', False) and
+                    s.employee_id == request_data['employee_id'] and
+                    s.day_of_week == day_name
+                )]
+                schedule.shifts.append(locked_shift)
+                save_schedule(schedule)
 
                 current_date += timedelta(days=1)
         except Exception as e:
+            import traceback
             print(f"Warning: could not add locked shift: {e}")
+            traceback.print_exc()
 
         # Send notification to employee
         comment_part = f" Manager note: {body.get('comment')}" if body.get('comment') else ""
@@ -1277,6 +1367,8 @@ async def create_event(event_data: dict, authorization: str = Header(None)):
         event_data['created_by'] = user['employee_id']
     if not event_data.get('created_at'):
         event_data['created_at'] = datetime.now()
+    if 'people_needed' not in event_data:
+        event_data['people_needed'] = 0
     
     # Convert string dates to date/datetime objects
     if isinstance(event_data.get('week_start_date'), str):

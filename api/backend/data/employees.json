@@ -34,6 +34,7 @@
       "80_bloor": 6,
       "working_from_home": 2
     },
+    "manager_preferences": {},
     "active": true,
     "created_at": "2026-06-06 09:45:48.044955"
   },
@@ -48,10 +49,11 @@
       "80_bloor": 1,
       "working_from_home": 5,
       "event": 1,
-      "sixth_floor": 10,
+      "sixth_floor": 9,
       "second_floor": 6,
       "ground_floor": 1
     },
+    "manager_preferences": {},
     "active": true,
     "created_at": "2026-06-06 09:45:48.044963"
   },
@@ -70,6 +72,7 @@
       "second_floor": 6,
       "ground_floor": 7
     },
+    "manager_preferences": {},
     "active": true,
     "created_at": "2026-06-06 09:45:48.044970"
   },
@@ -88,6 +91,7 @@
       "second_floor": 7,
       "ground_floor": 8
     },
+    "manager_preferences": {},
     "active": true,
     "created_at": "2026-06-06 09:45:48.044977"
   },
@@ -101,11 +105,12 @@
       "ground_floor": 3,
       "second_floor": 6,
       "sixth_floor": 8,
-      "call_center": 10,
-      "80_bloor": 4,
+      "call_center": 9,
+      "80_bloor": 1,
       "working_from_home": 6,
       "event": 3
     },
+    "manager_preferences": {},
     "active": true,
     "created_at": "2026-06-06 09:45:48.044983"
   },
@@ -118,12 +123,13 @@
     "preferences": {
       "ground_floor": 10,
       "second_floor": 4,
-      "sixth_floor": 9,
-      "call_center": 9,
+      "sixth_floor": 8,
+      "call_center": 8,
       "80_bloor": 1,
       "working_from_home": 5,
       "event": 2
     },
+    "manager_preferences": {},
     "active": true,
     "created_at": "2026-06-06 09:45:48.044990"
   },
@@ -142,6 +148,7 @@
       "working_from_home": 2,
       "event": 5
     },
+    "manager_preferences": {},
     "active": true,
     "created_at": "2026-06-06 09:45:48.044998"
   },
@@ -156,10 +163,11 @@
       "second_floor": 5,
       "sixth_floor": 6,
       "call_center": 9,
-      "80_bloor": 2,
+      "80_bloor": 1,
       "working_from_home": 1,
       "event": 1
     },
+    "manager_preferences": {},
     "active": true,
     "created_at": "2026-06-06 09:45:48.045005"
   },
@@ -174,10 +182,11 @@
       "second_floor": 10,
       "sixth_floor": 9,
       "call_center": 8,
-      "80_bloor": 2,
+      "80_bloor": 1,
       "working_from_home": 5,
       "event": 7
     },
+    "manager_preferences": {},
     "active": true,
     "created_at": "2026-06-06 09:45:48.045015"
   },
@@ -190,8 +199,13 @@
     "preferences": {
       "ground_floor": 1,
       "second_floor": 10,
-      "sixth_floor": 7
+      "sixth_floor": 7,
+      "call_center": 7,
+      "80_bloor": 1,
+      "working_from_home": 4,
+      "event": 6
     },
+    "manager_preferences": {},
     "active": true,
     "created_at": "2026-06-06 09:45:48.045024"
   },
@@ -201,9 +215,18 @@
     "email": null,
     "employee_type": "employee",
     "max_hours_per_week": 24,
-    "preferences": {},
+    "preferences": {
+      "ground_floor": 5,
+      "second_floor": 5,
+      "sixth_floor": 5,
+      "call_center": 5,
+      "80_bloor": 5,
+      "working_from_home": 5,
+      "event": 5
+    },
+    "manager_preferences": {},
     "active": true,
-    "created_at": "2026-06-06T09:45:48.045034"
+    "created_at": "2026-06-06 09:45:48.045034"
   },
   {
     "id": "emp_015",
@@ -211,9 +234,18 @@
     "email": null,
     "employee_type": "employee",
     "max_hours_per_week": 24,
-    "preferences": {},
+    "preferences": {
+      "ground_floor": 5,
+      "second_floor": 5,
+      "sixth_floor": 5,
+      "call_center": 5,
+      "80_bloor": 1,
+      "working_from_home": 5,
+      "event": 5
+    },
+    "manager_preferences": {},
     "active": true,
-    "created_at": "2026-06-06T09:45:48.045042"
+    "created_at": "2026-06-06 09:45:48.045042"
   },
   {
     "id": "emp_016",
@@ -221,9 +253,18 @@
     "email": null,
     "employee_type": "employee",
     "max_hours_per_week": 24,
-    "preferences": {},
+    "preferences": {
+      "ground_floor": 5,
+      "second_floor": 5,
+      "sixth_floor": 5,
+      "call_center": 5,
+      "80_bloor": 5,
+      "working_from_home": 5,
+      "event": 5
+    },
+    "manager_preferences": {},
     "active": true,
-    "created_at": "2026-06-06T09:45:48.045050"
+    "created_at": "2026-06-06 09:45:48.045050"
   },
   {
     "id": "emp_003",
@@ -231,7 +272,16 @@
     "email": "",
     "employee_type": "employee",
     "max_hours_per_week": 30,
-    "preferences": {},
+    "preferences": {
+      "80_bloor": 10,
+      "event": 8,
+      "working_from_home": 4,
+      "call_center": 3,
+      "sixth_floor": 4,
+      "second_floor": 8,
+      "ground_floor": 5
+    },
+    "manager_preferences": {},
     "active": true,
     "created_at": "2026-06-06 09:45:48.044947"
   },
@@ -244,5 +294,16 @@
     "preferences": {},
     "active": true,
     "created_at": "2026-06-08 15:13:53.873968"
+  },
+  {
+    "id": "emp_1781301193630",
+    "name": "AdN",
+    "email": "",
+    "employee_type": "employee",
+    "max_hours_per_week": 24,
+    "preferences": {},
+    "manager_preferences": {},
+    "active": true,
+    "created_at": "2026-06-12 17:53:13.638945"
   }
 ]

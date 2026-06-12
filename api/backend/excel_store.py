@@ -1447,6 +1447,8 @@ def get_floor_coverage(floor: str, day_of_week: str, time_slot: str, week_start_
 
 def get_system_config() -> Dict[str, Any]:
     """Get system config from Excel"""
+    import json
+    import ast
     wb = _get_workbook()
     if not wb:
         return {}
@@ -1463,7 +1465,19 @@ def get_system_config() -> Dict[str, Any]:
             key = sheet.cell(row=row, column=1).value
             value = sheet.cell(row=row, column=2).value
             if key:
-                config[key] = value
+                # Try to parse JSON for complex values (like staffing_targets dict)
+                if isinstance(value, str):
+                    # Try JSON first (new format)
+                    try:
+                        config[key] = json.loads(value)
+                    except (json.JSONDecodeError, ValueError):
+                        # Fall back to Python literal eval (for old format with single quotes)
+                        try:
+                            config[key] = ast.literal_eval(value)
+                        except (ValueError, SyntaxError):
+                            config[key] = value
+                else:
+                    config[key] = value
         
         wb.close()
         return config
@@ -1473,6 +1487,7 @@ def get_system_config() -> Dict[str, Any]:
 
 def save_system_config(config: Dict[str, Any]):
     """Save system config to Excel"""
+    import json
     wb = _get_workbook()
     if not wb:
         raise ValueError("No Excel file available")
@@ -1491,7 +1506,11 @@ def save_system_config(config: Dict[str, Any]):
     for key, value in config.items():
         row = sheet.max_row + 1
         sheet.cell(row=row, column=1, value=key)
-        sheet.cell(row=row, column=2, value=str(value))
+        # Serialize dict/list values as JSON for proper deserialization
+        if isinstance(value, (dict, list)):
+            sheet.cell(row=row, column=2, value=json.dumps(value))
+        else:
+            sheet.cell(row=row, column=2, value=str(value))
     
     _save_workbook(wb)
     wb.close()

@@ -55,7 +55,8 @@ class Employee(BaseModel):
     email: Optional[str] = None
     employee_type: EmployeeType
     max_hours_per_week: int = Field(..., description="Maximum hours per week")
-    preferences: Dict[str, int] = Field(default_factory=dict, description="Job preferences with weights 1-10")
+    preferences: Dict[str, int] = Field(default_factory=dict, description="Employee-submitted job preferences with weights 1-10")
+    manager_preferences: Dict[str, int] = Field(default_factory=dict, description="Manager-set job preferences (overrides employee preferences)")
     active: bool = True
     created_at: datetime = Field(default_factory=datetime.now)
 
@@ -66,6 +67,7 @@ class EmployeeUpdate(BaseModel):
     employee_type: Optional[EmployeeType] = None
     max_hours_per_week: Optional[int] = None
     preferences: Optional[Dict[str, int]] = None
+    manager_preferences: Optional[Dict[str, int]] = None
     active: Optional[bool] = None
 
 class Availability(BaseModel):
@@ -118,6 +120,7 @@ class Shift(BaseModel):
     locked: bool = False  # Locked availability - manager cannot schedule over this
     locked_availability_type: Optional[str] = None  # The approved availability type
     preferences: Optional[Dict[str, int]] = None  # Employee job preferences (e.g., {"call_center": 8, "second_floor": 5})
+    is_call_center: bool = False  # Whether this shift is assigned to call center duties (can be combined with any location)
 
 class WeeklySchedule(BaseModel):
     id: str
@@ -199,6 +202,12 @@ class StaffingTarget(BaseModel):
     location: str
     target: int  # Number of people needed per day
 
+class LocationHours(BaseModel):
+    """Operating hours for a location"""
+    location: str
+    start_time: str  # HH:MM format
+    end_time: str  # HH:MM format
+
 class Event(BaseModel):
     """Event created by managers for a specific week"""
     id: str
@@ -208,7 +217,7 @@ class Event(BaseModel):
     start_time: str  # HH:MM format
     end_time: str  # HH:MM format
     location: str  # Where the event happens
-    people_needed: int  # Number of employees needed
+    people_needed: int = 0  # Number of employees needed (set in auto-generate screen)
     description: Optional[str] = None
     created_by: str  # Manager employee_id who created the event
     created_at: datetime = Field(default_factory=datetime.now)

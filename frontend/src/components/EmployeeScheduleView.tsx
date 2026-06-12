@@ -59,6 +59,9 @@ interface Shift {
   comment?: string  // Unmapped text/comment from cell
   requires_break?: boolean  // Whether shift requires 30-min break
   break_provided?: boolean  // Whether break was provided
+  is_call_center?: boolean  // Whether shift has call center role
+  locked?: boolean  // Locked availability - manager cannot schedule over this
+  locked_availability_type?: string  // The approved availability type
 }
 
 export default function EmployeeScheduleView() {
@@ -74,6 +77,15 @@ export default function EmployeeScheduleView() {
     loadEmployees()
     loadSchedule()
     loadMyAvailabilityRequests()
+  }, [weekStart])
+
+  // Listen for schedule update events (e.g., from notification bell approvals)
+  useEffect(() => {
+    const handleScheduleUpdate = () => {
+      loadSchedule()
+    }
+    window.addEventListener('scheduleUpdate', handleScheduleUpdate)
+    return () => window.removeEventListener('scheduleUpdate', handleScheduleUpdate)
   }, [weekStart])
 
   const loadEmployees = async () => {
@@ -261,7 +273,15 @@ export default function EmployeeScheduleView() {
                     ) : (
                       byDay[day].map((shift: Shift) => {
                         const emp = employees.find((e: any) => e.id === shift.employee_id)
-                        return (
+                        return shift.locked ? (
+                          <div key={shift.id} className={`rounded p-1 mb-1 text-xs border ${
+                            shift.location === 'day off' ? 'border-black bg-black text-white' : 'border-gray-400 bg-gray-200 text-gray-600'
+                          }`}>
+                            <div className="font-semibold">🔒 {shift.locked_availability_type || 'Approved'}</div>
+                            <div className="font-medium">{shift.start_time} – {shift.end_time}</div>
+                            {shift.comment && <div className="italic text-xs">{shift.comment}</div>}
+                          </div>
+                        ) : (
                           <div key={shift.id} className="bg-white bg-opacity-70 rounded p-1 mb-1 text-xs border border-white shadow-sm">
                             <div className="font-semibold">{emp?.name || shift.employee_id}</div>
                             <div className="text-gray-600">{shift.start_time} – {shift.end_time}</div>
@@ -337,25 +357,39 @@ export default function EmployeeScheduleView() {
                             style={shouldDim ? { backgroundColor: '#E5E7EB' } : {}}
                           >
                             {shifts.map((shift: Shift) => (
-                              <div 
-                                key={shift.id} 
-                                className={`shift-card p-2 rounded mb-1 text-xs border relative ${getShiftColorClass(shift)} ${!isShiftHighlighted(shift) ? 'opacity-30' : ''}`}
-                              >
-                                <div className="font-medium">{shift.start_time} - {shift.end_time}</div>
-                                <div className="text-gray-700 flex items-center gap-1">
-                                  <Clock className="w-3 h-3" />
-                                  {shift.hours}h
+                              shift.locked ? (
+                                <div
+                                  key={shift.id}
+                                  className={`p-2 rounded mb-1 text-xs border relative ${
+                                    shift.location === 'day off' ? 'border-black bg-black text-white' : 'border-gray-400 bg-gray-200 text-gray-600'
+                                  }`}
+                                  title={`Approved availability: ${shift.locked_availability_type}`}
+                                >
+                                  <div className="font-semibold">🔒 {shift.locked_availability_type || 'Approved'}</div>
+                                  <div className="font-medium">{shift.start_time} - {shift.end_time}</div>
+                                  {shift.comment && <div className="italic text-xs mt-1">{shift.comment}</div>}
                                 </div>
-                                {shift.location && (
+                              ) : (
+                                <div
+                                  key={shift.id}
+                                  className={`shift-card p-2 rounded mb-1 text-xs border relative ${getShiftColorClass(shift)} ${!isShiftHighlighted(shift) ? 'opacity-30' : ''}`}
+                                >
+                                  <div className="font-medium">{shift.start_time} - {shift.end_time}</div>
                                   <div className="text-gray-700 flex items-center gap-1">
-                                    <MapPin className="w-3 h-3" />
-                                    {shift.location}
+                                    <Clock className="w-3 h-3" />
+                                    {shift.hours}h
                                   </div>
-                                )}
-                                {shift.comment && (
-                                  <div className="text-gray-600 italic mt-1">{shift.comment}</div>
-                                )}
-                              </div>
+                                  {shift.location && (
+                                    <div className="text-gray-700 flex items-center gap-1">
+                                      <MapPin className="w-3 h-3" />
+                                      {shift.location}
+                                    </div>
+                                  )}
+                                  {shift.comment && (
+                                    <div className="text-gray-600 italic mt-1">{shift.comment}</div>
+                                  )}
+                                </div>
+                              )
                             ))}
                             {showRequestHistory && (
                               <div className="space-y-1">

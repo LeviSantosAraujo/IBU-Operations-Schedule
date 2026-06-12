@@ -24,17 +24,17 @@ export const auth = {
     
     const data = await response.json()
     localStorage.setItem(TOKEN_KEY, data.token)
-    localStorage.setItem(USER_KEY, JSON.stringify({
-      employee_id: data.employee.id,
-      employee_name: data.employee.name,
-      role: data.role
-    }))
     
-    return {
+    // Map backend employee_type to frontend role
+    const role = data.role || 'employee'
+    const user = {
       employee_id: data.employee.id,
       employee_name: data.employee.name,
-      role: data.role
+      role: role as 'admin' | 'manager' | 'employee' | 'intern' | 'student_worker'
     }
+    localStorage.setItem(USER_KEY, JSON.stringify(user))
+    
+    return user
   },
   
   logout: async () => {

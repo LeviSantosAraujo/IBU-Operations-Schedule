@@ -28,6 +28,10 @@ A comprehensive automated scheduling system built with Python (FastAPI) and Reac
   - Set job preferences (e.g., prefer Call Center, 2nd Floor)
   - View request history with status (Pending/Approved/Rejected)
 - **Schedule View**: View your own schedule with other employees' shifts dimmed if not assigned
+- **Locked Shifts Display**: Approved availability requests appear as locked shifts (🔒) in your schedule
+  - Day off requests show as black boxes with "🔒 Day Off"
+  - Availability requests show as gray boxes with time range
+  - These locked shifts cannot be overridden by managers
 
 ### For Managers
 - **Auto-Schedule Generation**: Enhanced algorithm with 4 phases:
@@ -40,7 +44,10 @@ A comprehensive automated scheduling system built with Python (FastAPI) and Reac
   - Manager-set preferences have highest priority over employee-set preferences
 - **Staffing Targets Configuration**: Set how many people needed per location per day
   - Access via "Auto-Generate" modal before generating schedule
-  - Configure targets for all locations: Ground Floor, 2nd Floor, 6th Floor, Call Center, 80 Bloor, Working from Home
+  - Configure targets for all locations: Ground Floor, 2nd Floor, 6th Floor, 80 Bloor
+  - Call Center is a role/flag that can be combined with any location (e.g., "2nd Floor + Call Center")
+  - The number represents people needed each day (applies to every day of the week)
+  - Working from Home is not included in auto-generation (manager assigns on-demand)
   - Settings are saved and persist for future schedule generations
   - Manager can adjust targets at any time before generating
   - Event creation now uses staffing targets automatically (no manual people_needed input)
@@ -49,6 +56,9 @@ A comprehensive automated scheduling system built with Python (FastAPI) and Reac
   - Set 1-10 preference for all locations: Ground Floor, 2nd Floor, 6th Floor, Call Center, 80 Bloor, Working from Home, Event
   - Event preference determines priority for event staffing
   - Manager-set preferences override employee-set preferences in auto-generation
+  - Managers can only modify manager_preferences (their choices for employees)
+  - Managers cannot modify employee-submitted preferences (can only view them)
+  - Employee choices are visually distinguished in red with border in the manager preferences UI
   - Changes are saved immediately
 - **Event Management**: Create and manage events for the week
   - Specify event name, date, time range, and location
@@ -66,20 +76,22 @@ A comprehensive automated scheduling system built with Python (FastAPI) and Reac
 - **Hours Tracking**: Visual indicators for employees approaching hour limits
 - **Multi-week Storage**: Access historical schedules
 - **Availability Request Management**: Approve/reject employee availability requests
-  - View pending requests with detailed descriptions (e.g., "Day Off for Monday")
-  - See date ranges and employee comments
-  - Approve once for entire date range (creates locked shifts for all matching dates)
+  - View pending requests in the notification bell (top right corner)
+  - Click the bell icon to see pending requests with approve/reject buttons
+  - Approvals create locked shifts for the entire date range in the schedule
+  - Locked shifts appear as 🔒 in the schedule (black for day off, gray for availability)
   - Employee preferences are stored in locked shifts and used by scheduler
   - Optional manager comments for approvals (required for rejections)
+  - Schedule automatically refreshes after approval to show locked shifts
 
 ### Locations
-- Call Center (CC)
-- 2nd Floor (2F)
-- Ground Floor (GR)
-- 6th Floor (6F)
-- Working From Home (WFH)
-- 80 Bloor
-- Events (special location for event staffing)
+- Ground Floor (GR) - 7:30 AM - 6:00 PM
+- 2nd Floor (2F) - 08:00 AM - 6:00 PM
+- 6th Floor (6F) - 08:00 AM - 6:00 PM
+- 80 Bloor - 08:30 AM - 6:00 PM
+- Working From Home (WFH) - 08:00 AM - 6:00 PM
+- Events (special location for event staffing - times defined per event)
+- Call Center (CC) - Role/flag that can be combined with any location (e.g., "2nd Floor + Call Center")
 
 ## Tech Stack
 
@@ -262,16 +274,26 @@ The enhanced auto-scheduler uses a priority-based approach with 4 phases:
 
 ### Phase 1-3: Regular Location Staffing
 - Fills daily staffing targets based on manager configuration:
-  - Call Center: configurable (default 4 employees/day)
   - 2nd Floor: configurable (default 3 employees/day)
   - Ground Floor: configurable (default 1 employee/day)
   - 6th Floor: configurable (default 2 employees/day)
-  - WFH/80 Bloor: configurable (default 0-1 employees/day)
+  - 80 Bloor: configurable (default 0-1 employees/day)
 - Staffing targets are set via Auto-Generate modal and persist for future generations
 - Respects all constraints: hour limits, Day Off, availability requests, preferences
+- Each employee assigned to only one shift per location per day
+- Working from Home is not included in auto-generation (manager assigns on-demand)
+
+### Call Center Role Assignment
+- After location staffing, assigns call center role to existing shifts
+- Call Center is a role/flag that can be combined with any location
+- Number of call center roles is set via staffing target (people per day)
+- Assigned based on employee call center preferences (higher preference = priority)
+- Respects call center hour cap (max 16 hours per week per employee)
+- Displayed as blue "CC" badge next to location in schedule
 
 ### Phase 4: Fairness Phase (Maximization)
-- Ensures all employees reach their maximum hours capacity
+- Skipped when manager staffing targets are provided (only assigns specified staffing)
+- When enabled, ensures all employees reach their maximum hours capacity
 - Considers last 4 weeks of historical schedule data
 - Prioritizes employees who have worked fewer hours recently
 - Adds extra shifts to regular locations (can overstaff locations)
