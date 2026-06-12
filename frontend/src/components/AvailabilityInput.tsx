@@ -40,7 +40,7 @@ export default function AvailabilityInput({ initialDate }: AvailabilityInputProp
   useEffect(() => {
     const user = auth.getUser()
     if (user) {
-      setIsManager(user.role === 'manager')
+      setIsManager(user.role?.toLowerCase() === 'manager')
       setCurrentUserId(user.employee_id)
       
       // Non-managers auto-select themselves
