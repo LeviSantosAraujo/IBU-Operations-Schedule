@@ -4,9 +4,17 @@ A comprehensive automated scheduling system built with Python (FastAPI) and Reac
 
 ## Deployment Notes
 - Uses Vercel for hosting
-- Python dependencies in root requirements.txt
+- Python dependencies in root requirements.txt and api/requirements.txt
 - Frontend built with Vite
-- Data stored in Excel files (portable, no database needed)
+- Data stored in JSON files (api/backend/data/) for Vercel serverless compatibility
+- Authentication uses JWT tokens (stateless, works with serverless)
+- Mobile-responsive design with card-based views on small screens
+
+**Important for Vercel Deployment:**
+- Set `BLOB_READ_WRITE_TOKEN` environment variable in Vercel for persistent data storage
+- Set `JWT_SECRET` environment variable in Vercel for secure JWT token signing
+- Without these, data is stored in-memory and lost between serverless function invocations
+- To set up Vercel Blob: https://vercel.com/docs/storage/vercel-blob
 
 ## Features
 
@@ -153,16 +161,21 @@ The frontend will be available at `http://localhost:3000`
 
 ```
 Schedule Sheet IBU/
-├── backend/
-│   ├── data/                  # Excel data storage (auto-created)
-│   ├── uploads/              # Excel file uploads
-│   ├── main.py               # FastAPI application entry point
-│   ├── models.py             # Pydantic data models (Employee, Event, etc.)
-│   ├── excel_store.py        # Excel file operations
-│   ├── scheduler.py          # Enhanced scheduling algorithm
-│   ├── auth.py               # Authentication/authorization
-│   ├── blob_config.py        # Vercel Blob storage configuration
-│   └── requirements.txt      # Python dependencies
+├── api/
+│   ├── backend/
+│   │   ├── data/                  # JSON data storage (employees.json, etc.)
+│   │   ├── uploads/              # Excel file uploads (local dev)
+│   │   ├── main.py               # FastAPI application entry point
+│   │   ├── models.py             # Pydantic data models (Employee, Event, etc.)
+│   │   ├── excel_store.py        # Excel file operations
+│   │   ├── data_store.py         # JSON file operations (Vercel fallback)
+│   │   ├── storage.py            # Storage abstraction (blob/local/memory)
+│   │   ├── scheduler.py          # Enhanced scheduling algorithm
+│   │   ├── auth.py               # JWT-based authentication
+│   │   ├── blob_config.py        # Vercel Blob storage configuration
+│   │   └── requirements.txt      # Python dependencies
+│   ├── index.py                  # Vercel serverless entry point
+│   └── requirements.txt          # Root Python dependencies
 ├── frontend/
 │   ├── src/
 │   │   ├── components/       # React components
@@ -170,15 +183,16 @@ Schedule Sheet IBU/
 │   │   │   ├── ScheduleManager.tsx
 │   │   │   ├── EmployeeScheduleView.tsx
 │   │   │   ├── EmployeeManagement.tsx
+│   │   │   ├── NotificationBell.tsx
 │   │   │   └── FloorCoverage.tsx
-│   │   ├── api.ts            # API client
+│   │   ├── api.ts            # API client with Axios interceptors
 │   │   ├── auth.ts           # Authentication utilities
-│   │   ├── App.tsx           # Main app component
+│   │   ├── App.tsx           # Main app component with routing
 │   │   └── main.tsx          # Entry point
+│   ├── .env.production       # Production environment variables
 │   ├── package.json          # Node dependencies
 │   └── vite.config.ts        # Vite configuration
 ├── requirements.txt          # Root Python dependencies
-├── vercel.json              # Vercel deployment config
 └── README.md
 ```
 
@@ -252,16 +266,15 @@ At the bottom of the Schedule page, see:
 
 ## Data Storage
 
-All data is stored in Excel files in `backend/uploads/ibu_schedule.xlsx`:
-- Employees sheet - Employee records
-- Availability sheet - Weekly availability submissions
-- Weekly schedule tabs (e.g., "May 11-17") - Weekly schedules with shifts
-- Config sheet - System configuration
-- Events sheet - Event records for special staffing needs
-- Availability_Requests sheet - Employee availability change requests
-- Notifications sheet - System notifications
+Data is stored in JSON files in `api/backend/data/` for Vercel serverless compatibility:
+- employees.json - Employee records
+- availabilities.json - Weekly availability submissions
+- schedules.json - Weekly schedules with shifts
+- config.json - System configuration
+- availability_requests.json - Employee availability change requests
+- notifications.json - System notifications
 
-This makes the system portable - just backup the Excel file.
+**Note:** The system also supports Excel file storage for local development and portability. On Vercel, data is stored in-memory with JSON fallbacks due to the read-only filesystem.
 
 ## Scheduling Algorithm
 
