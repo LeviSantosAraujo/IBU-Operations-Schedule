@@ -112,20 +112,26 @@ def get_excel_data(filename: str = "ibu_schedule.xlsx") -> Optional[bytes]:
     # Try blob first
     data = blob_get(filename)
     if data:
+        EXCEL_DATA_STORE["current"] = data  # Cache in memory
         return data
-    
-    # Try local storage
+
+    # Try memory storage
+    if "current" in EXCEL_DATA_STORE:
+        return EXCEL_DATA_STORE["current"]
+
+    # Try local storage (bundled with deployment)
     try:
         from pathlib import Path
         upload_path = Path(__file__).parent / "uploads" / filename
         if upload_path.exists():
             with open(upload_path, "rb") as f:
-                return f.read()
+                data = f.read()
+                EXCEL_DATA_STORE["current"] = data  # Cache it
+                return data
     except:
         pass
-    
-    # Try memory storage
-    return EXCEL_DATA_STORE.get("current")
+
+    return None
 
 def excel_file_exists(filename: str = "ibu_schedule.xlsx") -> bool:
     """Check if Excel file exists in any storage"""

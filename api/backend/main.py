@@ -85,10 +85,12 @@ except OSError:
 app = FastAPI(title="IBU Operations team schedule", version="2.0.0", lifespan=lifespan)
 
 # Enable CORS for frontend
+# Note: allow_credentials=True is incompatible with allow_origins=["*"]
+# We use allow_credentials=False and handle auth via Bearer token headers instead
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
