@@ -9,28 +9,37 @@ export default function NotificationBell() {
   const [isOpen, setIsOpen] = useState(false)
   const [unreadCount, setUnreadCount] = useState(0)
   const [isManager] = useState(auth.isManager())
+  const [hasAuthError, setHasAuthError] = useState(false)
 
   useEffect(() => {
+    if (hasAuthError) return // Stop polling if auth error occurred
+
     loadNotifications()
     if (isManager) {
       loadAvailabilityRequests()
     }
     // Poll for new notifications every 30 seconds
     const interval = setInterval(() => {
-      loadNotifications()
-      if (isManager) {
-        loadAvailabilityRequests()
+      if (!hasAuthError) {
+        loadNotifications()
+        if (isManager) {
+          loadAvailabilityRequests()
+        }
       }
     }, 30000)
     return () => clearInterval(interval)
-  }, [isManager])
+  }, [isManager, hasAuthError])
 
   const loadNotifications = async () => {
     try {
       const data = await getNotifications()
       setNotifications(data || [])
       setUnreadCount((data || []).filter((n: any) => !n.read).length)
-    } catch (err) {
+      setHasAuthError(false)
+    } catch (err: any) {
+      if (err.response?.status === 401 || err.response?.status === 403) {
+        setHasAuthError(true)
+      }
       console.error('Error loading notifications:', err)
     }
   }
@@ -38,11 +47,15 @@ export default function NotificationBell() {
   const loadAvailabilityRequests = async () => {
     try {
       const data = await getAvailabilityRequests()
-      const pendingRequests = data.filter((r: any) => 
+      const pendingRequests = data.filter((r: any) =>
         r.status === 'pending' || r.status === 'AvailabilityRequestStatus.PENDING'
       )
       setAvailabilityRequests(pendingRequests)
-    } catch (err) {
+      setHasAuthError(false)
+    } catch (err: any) {
+      if (err.response?.status === 401 || err.response?.status === 403) {
+        setHasAuthError(true)
+      }
       console.error('Error loading availability requests:', err)
     }
   }
