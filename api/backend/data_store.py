@@ -6,23 +6,47 @@ from models import Employee, Availability, WeeklySchedule, SystemConfig
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
 
-# Ensure data directory exists
-os.makedirs(DATA_DIR, exist_ok=True)
+# In-memory fallback for read-only filesystems (Vercel serverless)
+_MEMORY_STORE: Dict[str, List[Dict]] = {}
+_READ_ONLY = False
+
+# Try to ensure data directory exists
+try:
+    os.makedirs(DATA_DIR, exist_ok=True)
+except OSError:
+    _READ_ONLY = True
 
 def _get_path(filename: str) -> str:
     return os.path.join(DATA_DIR, filename)
 
 def _load_json(filename: str) -> List[Dict]:
+    # Check in-memory store first (writes go here on read-only fs)
+    if filename in _MEMORY_STORE:
+        return list(_MEMORY_STORE[filename])
+    # Try disk
     path = _get_path(filename)
     if not os.path.exists(path):
         return []
-    with open(path, 'r') as f:
-        return json.load(f)
+    try:
+        with open(path, 'r') as f:
+            data = json.load(f)
+            _MEMORY_STORE[filename] = list(data)  # Cache in memory
+            return data
+    except Exception:
+        return []
 
 def _save_json(filename: str, data: List[Dict]):
-    path = _get_path(filename)
-    with open(path, 'w') as f:
-        json.dump(data, f, indent=2, default=str)
+    # Always update memory store
+    _MEMORY_STORE[filename] = list(data)
+    # Try disk write (will fail silently on Vercel read-only fs)
+    if _READ_ONLY:
+        return
+    try:
+        path = _get_path(filename)
+        with open(path, 'w') as f:
+            json.dump(data, f, indent=2, default=str)
+    except OSError:
+        pass  # Read-only filesystem - memory store is the fallback
 
 # Employee operations
 def get_all_employees() -> List[Employee]:
