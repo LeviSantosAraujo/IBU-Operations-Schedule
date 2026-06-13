@@ -14,7 +14,7 @@ from storage import blob_put
 
 DATA_DIR = Path(__file__).parent / "data"
 
-def sync_file(filename):
+def sync_file(filename, store_id):
     """Sync a single JSON file to blob storage"""
     filepath = DATA_DIR / filename
     if not filepath.exists():
@@ -24,7 +24,7 @@ def sync_file(filename):
     with open(filepath, 'r') as f:
         data = f.read()
     
-    success = blob_put(filename, data.encode('utf-8'))
+    success = blob_put(filename, data.encode('utf-8'), store_id)
     if success:
         print(f"✓ Synced {filename} ({len(data)} bytes)")
     else:
@@ -45,14 +45,17 @@ def main():
         "notifications.json",
     ]
     
+    store_id = os.getenv("BLOB_READ_WRITE_TOKEN_STORE_ID")
+    
     print("Syncing local JSON files to Vercel Blob storage...")
     print(f"Data directory: {DATA_DIR}")
     print(f"BLOB_READ_WRITE_TOKEN set: {bool(os.getenv('BLOB_READ_WRITE_TOKEN'))}")
+    print(f"BLOB_READ_WRITE_TOKEN_STORE_ID: {store_id}")
     print()
     
     success_count = 0
     for filename in json_files:
-        if sync_file(filename):
+        if sync_file(filename, store_id):
             success_count += 1
     
     print()

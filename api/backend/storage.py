@@ -33,7 +33,7 @@ def _init_vercel_blob():
         BLOB_STORAGE = None
     return False
 
-def blob_put(key: str, data: bytes) -> bool:
+def blob_put(key: str, data: bytes, store_id: Optional[str] = None) -> bool:
     """Put data to blob storage (overwrites existing blob with same key)"""
     if not BLOB_AVAILABLE or not os.getenv("BLOB_READ_WRITE_TOKEN"):
         print(f"blob_put: BLOB_AVAILABLE={BLOB_AVAILABLE}, TOKEN_SET={bool(os.getenv('BLOB_READ_WRITE_TOKEN'))}")
@@ -42,10 +42,13 @@ def blob_put(key: str, data: bytes) -> bool:
     try:
         import vercel_blob
         print(f"blob_put: Writing {len(data)} bytes to {key}")
-        result = vercel_blob.put(key, data, {
+        options = {
             "addRandomSuffix": "false",
             "allowOverwrite": "true",
-        })
+        }
+        if store_id:
+            options["storeId"] = store_id
+        result = vercel_blob.put(key, data, options)
         print(f"blob_put: Success, result={result}")
         return True
     except Exception as e:
