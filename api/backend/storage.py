@@ -46,8 +46,11 @@ def blob_put(key: str, data: bytes, store_id: Optional[str] = None) -> bool:
             "addRandomSuffix": "false",
             "allowOverwrite": "true",
         }
+        # Use store_id from parameter or environment variable
         if store_id:
             options["storeId"] = store_id
+        elif os.getenv("BLOB_READ_WRITE_TOKEN_STORE_ID"):
+            options["storeId"] = os.getenv("BLOB_READ_WRITE_TOKEN_STORE_ID")
         result = vercel_blob.put(key, data, options)
         print(f"blob_put: Success, result={result}")
         return True
