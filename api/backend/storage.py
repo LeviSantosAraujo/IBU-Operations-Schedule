@@ -38,36 +38,31 @@ def _init_vercel_blob():
     return False
 
 def blob_put(key: str, data: bytes, store_id: Optional[str] = None) -> bool:
-    """Put data to blob storage using REST API for private stores"""
+    """Put data to blob storage using Python SDK with store_id"""
     if not BLOB_AVAILABLE or not os.getenv("BLOB_READ_WRITE_TOKEN"):
         print(f"blob_put: BLOB_AVAILABLE={BLOB_AVAILABLE}, TOKEN_SET={bool(os.getenv('BLOB_READ_WRITE_TOKEN'))}")
         return False
 
     try:
-        import requests
-        token = os.getenv("BLOB_READ_WRITE_TOKEN")
+        import vercel_blob
         sid = store_id or os.getenv("BLOB_READ_WRITE_TOKEN_STORE_ID")
         
-        print(f"blob_put: Using REST API for private store, store_id={sid}")
+        print(f"blob_put: Using Python SDK with store_id={sid}")
         
-        # Use Vercel Blob REST API with store_id in URL for private stores
-        url = f"https://blob.vercel-storage.com/{sid}/{key}"
-        headers = {
-            "Authorization": f"Bearer {token}",
-            "Content-Type": "application/octet-stream"
+        options = {
+            "addRandomSuffix": "false",
+            "allowOverwrite": "true",
         }
         
-        response = requests.put(url, data=data, headers=headers)
-        print(f"blob_put: REST API response status={response.status_code}")
+        # Try using store_id in options
+        if sid:
+            options["storeId"] = sid
         
-        if response.status_code in [200, 201]:
-            print(f"blob_put: Success via REST API")
-            return True
-        else:
-            print(f"blob_put: REST API error: {response.text}")
-            return False
+        result = vercel_blob.put(key, data, options)
+        print(f"blob_put: Success, result={result}")
+        return True
     except Exception as e:
-        print(f"Error putting to blob via REST API: {e}")
+        print(f"Error putting to blob via SDK: {e}")
         import traceback
         traceback.print_exc()
         # Don't let blob errors block operations
