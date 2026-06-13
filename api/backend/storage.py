@@ -36,17 +36,22 @@ def _init_vercel_blob():
 def blob_put(key: str, data: bytes) -> bool:
     """Put data to blob storage (overwrites existing blob with same key)"""
     if not BLOB_AVAILABLE or not os.getenv("BLOB_READ_WRITE_TOKEN"):
+        print(f"blob_put: BLOB_AVAILABLE={BLOB_AVAILABLE}, TOKEN_SET={bool(os.getenv('BLOB_READ_WRITE_TOKEN'))}")
         return False
 
     try:
         import vercel_blob
-        vercel_blob.put(key, data, {
+        print(f"blob_put: Writing {len(data)} bytes to {key}")
+        result = vercel_blob.put(key, data, {
             "addRandomSuffix": "false",
             "allowOverwrite": "true",
         })
+        print(f"blob_put: Success, result={result}")
         return True
     except Exception as e:
         print(f"Error putting to blob: {e}")
+        import traceback
+        traceback.print_exc()
         # Don't let blob errors block operations
         return False
 
@@ -58,14 +63,17 @@ def blob_get(key: str) -> Optional[bytes]:
     download the content from its public URL.
     """
     if not BLOB_AVAILABLE or not os.getenv("BLOB_READ_WRITE_TOKEN"):
+        print(f"blob_get: BLOB_AVAILABLE={BLOB_AVAILABLE}, TOKEN_SET={bool(os.getenv('BLOB_READ_WRITE_TOKEN'))}")
         return None
 
     try:
         import vercel_blob
         import requests
 
+        print(f"blob_get: Listing blobs with prefix {key}")
         result = vercel_blob.list({"prefix": key})
         blobs = result.get("blobs", []) if isinstance(result, dict) else []
+        print(f"blob_get: Found {len(blobs)} blobs with prefix {key}")
 
         # Find exact pathname match (prefix could match similar names)
         target = None
@@ -74,18 +82,25 @@ def blob_get(key: str) -> Optional[bytes]:
                 target = blob
                 break
         if target is None:
+            print(f"blob_get: No exact match for {key}")
             return None
 
         url = target.get("downloadUrl") or target.get("url")
         if not url:
+            print(f"blob_get: No URL found for {key}")
             return None
 
+        print(f"blob_get: Fetching from {url}")
         resp = requests.get(url, timeout=10)
         if resp.status_code == 200:
+            print(f"blob_get: Success, got {len(resp.content)} bytes")
             return resp.content
+        print(f"blob_get: HTTP {resp.status_code}")
         return None
     except Exception as e:
         print(f"Error getting from blob: {e}")
+        import traceback
+        traceback.print_exc()
         # Don't let blob errors block operations
         return None
 
