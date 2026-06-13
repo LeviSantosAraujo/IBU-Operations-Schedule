@@ -1447,6 +1447,42 @@ async def remove_event(event_id: str, authorization: str = Header(None)):
 async def health_check():
     return {"status": "healthy", "timestamp": datetime.now()}
 
+# ============ Admin: Reset Blob Data ============
+
+@app.post("/api/admin/reset-blob-data")
+async def reset_blob_data(authorization: str = Header(None)):
+    """Reset blob storage with local JSON data (for clearing stale data)"""
+    user = require_manager(authorization)
+    
+    from storage import blob_put
+    from pathlib import Path
+    import json
+    
+    data_dir = Path(__file__).parent / "data"
+    json_files = [
+        "employees.json",
+        "passwords.json",
+        "availability_requests.json",
+        "events.json",
+        "coverage_requirements.json",
+        "notifications.json",
+    ]
+    
+    results = {}
+    for filename in json_files:
+        filepath = data_dir / filename
+        if not filepath.exists():
+            results[filename] = "skipped (not found)"
+            continue
+        
+        with open(filepath, 'r') as f:
+            data = f.read()
+        
+        success = blob_put(filename, data.encode('utf-8'))
+        results[filename] = "success" if success else "failed"
+    
+    return {"success": True, "results": results}
+
 if __name__ == "__main__":
     import uvicorn
     # Initialize blob storage for cloud deployment
