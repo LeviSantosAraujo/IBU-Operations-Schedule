@@ -38,7 +38,8 @@ def _initialize_local_file():
     except Exception as e:
         print(f"Failed to initialize local Excel file: {e}")
 
-_initialize_local_file()
+# NOTE: Module-level initialization removed to prevent loading Excel on import
+# All data should come from data_store.py (JSON/blob storage)
 
 def set_excel_file(path: str):
     """Set the active Excel file path (local storage)"""
