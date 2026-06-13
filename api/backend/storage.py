@@ -38,28 +38,37 @@ def _init_vercel_blob():
     return False
 
 def blob_put(key: str, data: bytes, store_id: Optional[str] = None) -> bool:
-    """Put data to blob storage (overwrites existing blob with same key)"""
+    """Put data to blob storage using REST API (works with private stores)"""
     if not BLOB_AVAILABLE or not os.getenv("BLOB_READ_WRITE_TOKEN"):
         print(f"blob_put: BLOB_AVAILABLE={BLOB_AVAILABLE}, TOKEN_SET={bool(os.getenv('BLOB_READ_WRITE_TOKEN'))}")
         return False
 
     try:
-        import vercel_blob
-        print(f"blob_put: Writing {len(data)} bytes to {key}")
-        options = {
-            "addRandomSuffix": "false",
-            "allowOverwrite": "true",
+        import requests
+        token = os.getenv("BLOB_READ_WRITE_TOKEN")
+        sid = store_id or os.getenv("BLOB_READ_WRITE_TOKEN_STORE_ID")
+        
+        print(f"blob_put: Using REST API for private store, store_id={sid}")
+        
+        # Use Vercel Blob REST API for private stores
+        url = f"https://blob.vercel-storage.com/{key}"
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/octet-stream",
+            "x-blob-store-id": sid if sid else ""
         }
-        # Use store_id from parameter or environment variable
-        if store_id:
-            options["storeId"] = store_id
-        elif os.getenv("BLOB_READ_WRITE_TOKEN_STORE_ID"):
-            options["storeId"] = os.getenv("BLOB_READ_WRITE_TOKEN_STORE_ID")
-        result = vercel_blob.put(key, data, options)
-        print(f"blob_put: Success, result={result}")
-        return True
+        
+        response = requests.put(url, data=data, headers=headers)
+        print(f"blob_put: REST API response status={response.status_code}")
+        
+        if response.status_code in [200, 201]:
+            print(f"blob_put: Success via REST API")
+            return True
+        else:
+            print(f"blob_put: REST API error: {response.text}")
+            return False
     except Exception as e:
-        print(f"Error putting to blob: {e}")
+        print(f"Error putting to blob via REST API: {e}")
         import traceback
         traceback.print_exc()
         # Don't let blob errors block operations
