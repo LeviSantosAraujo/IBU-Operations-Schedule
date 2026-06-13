@@ -1,5 +1,6 @@
 import json
 import os
+import hashlib
 from typing import List, Optional, Dict
 from datetime import date
 from models import Employee, Availability, WeeklySchedule, SystemConfig
@@ -219,3 +220,37 @@ def initialize_sample_data():
         ]
         for emp in sample_employees:
             save_employee(emp)
+
+# ============ Password Management ============
+
+def hash_password(password: str) -> str:
+    """Hash password using SHA-256 (first 16 chars for storage)"""
+    return hashlib.sha256(password.encode()).hexdigest()[:16]
+
+def set_manager_password(employee_id: str, employee_name: str, password: str):
+    """Set password for a manager in JSON storage"""
+    passwords = _load_json("passwords.json")
+    # Remove existing password for this employee
+    passwords = [p for p in passwords if p.get("employee_id") != employee_id]
+    # Add new password
+    passwords.append({
+        "employee_id": employee_id,
+        "employee_name": employee_name,
+        "password_hash": hash_password(password),
+        "role": "manager",
+        "last_login": None
+    })
+    _save_json("passwords.json", passwords)
+
+def verify_manager_password(employee_id: str, password: str) -> bool:
+    """Verify manager password"""
+    passwords = _load_json("passwords.json")
+    for pwd in passwords:
+        if pwd.get("employee_id") == employee_id:
+            return pwd.get("password_hash") == hash_password(password)
+    return False
+
+def manager_has_password(employee_id: str) -> bool:
+    """Check if manager has password set"""
+    passwords = _load_json("passwords.json")
+    return any(p.get("employee_id") == employee_id for p in passwords)
