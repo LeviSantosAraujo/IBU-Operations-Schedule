@@ -2,8 +2,8 @@ import json
 import os
 import hashlib
 from typing import List, Optional, Dict
-from datetime import date, timedelta
-from models import Employee, Availability, WeeklySchedule, SystemConfig, AvailabilityRequest, Event
+from datetime import date, timedelta, datetime
+from models import Employee, Availability, WeeklySchedule, SystemConfig, AvailabilityRequest, Event, HourlyCoverageRequirement
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
 
@@ -333,3 +333,54 @@ def get_all_week_schedule_dates() -> List[date]:
         except:
             pass
     return sorted(dates)
+
+# ============ Coverage Requirements ============
+
+def get_coverage_requirements(week_start_date: date) -> List[HourlyCoverageRequirement]:
+    """Get hourly coverage requirements for a week"""
+    data = _load_json("coverage_requirements.json")
+    requirements = []
+    for item in data:
+        try:
+            req_week = item.get("week_start_date")
+            if isinstance(req_week, str):
+                req_week = date.fromisoformat(req_week)
+            if req_week == week_start_date:
+                requirements.append(HourlyCoverageRequirement(**item))
+        except:
+            pass
+    return requirements
+
+def save_coverage_requirement(requirement: HourlyCoverageRequirement) -> HourlyCoverageRequirement:
+    """Save a coverage requirement"""
+    requirements = _load_json("coverage_requirements.json")
+    # Remove existing if updating
+    requirements = [r for r in requirements if r.get("id") != requirement.id]
+    requirements.append(requirement.model_dump())
+    _save_json("coverage_requirements.json", requirements)
+    return requirement
+
+# ============ Notifications ============
+
+def get_notifications(employee_id: str) -> List[Dict]:
+    """Get all notifications for an employee"""
+    data = _load_json("notifications.json")
+    notifications = [n for n in data if n.get("employee_id") == employee_id]
+    return sorted(notifications, key=lambda x: x.get("created_at", ""), reverse=True)
+
+def save_notification(notification: Dict) -> bool:
+    """Save a notification"""
+    notifications = _load_json("notifications.json")
+    notifications.append(notification)
+    _save_json("notifications.json", notifications)
+    return True
+
+def mark_notification_read(notification_id: str) -> bool:
+    """Mark a notification as read"""
+    notifications = _load_json("notifications.json")
+    for n in notifications:
+        if n.get("id") == notification_id:
+            n["read"] = True
+            _save_json("notifications.json", notifications)
+            return True
+    return False
