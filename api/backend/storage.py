@@ -19,8 +19,7 @@ def _init_vercel_blob():
     # Enable blob storage for persistent Excel storage
     if os.getenv("BLOB_READ_WRITE_TOKEN"):
         try:
-            from vercel_blob import BlobClient
-            BLOB_STORAGE = BlobClient
+            from vercel_blob import put, get
             BLOB_AVAILABLE = True
             print("Vercel Blob storage enabled")
             return True
@@ -38,17 +37,11 @@ def blob_put(key: str, data: bytes) -> bool:
     """Put data to blob storage"""
     if not BLOB_AVAILABLE or not os.getenv("BLOB_READ_WRITE_TOKEN"):
         return False
-    
+
     try:
-        if hasattr(BLOB_STORAGE, 'put'):
-            # New API
-            BLOB_STORAGE.put(key, data)
-            return True
-        elif hasattr(BLOB_STORAGE, 'from_env'):
-            # Old API
-            client = BLOB_STORAGE.from_env()
-            client.put(key, data)
-            return True
+        from vercel_blob import put
+        put(key, data, { "addRandomSuffix": "false" })
+        return True
     except Exception as e:
         print(f"Error putting to blob: {e}")
         # Don't let blob errors block operations
@@ -58,15 +51,10 @@ def blob_get(key: str) -> Optional[bytes]:
     """Get data from blob storage"""
     if not BLOB_AVAILABLE or not os.getenv("BLOB_READ_WRITE_TOKEN"):
         return None
-    
+
     try:
-        if hasattr(BLOB_STORAGE, 'download_file'):
-            # New API
-            return BLOB_STORAGE.download_file(key)
-        elif hasattr(BLOB_STORAGE, 'from_env'):
-            # Old API
-            client = BLOB_STORAGE.from_env()
-            return client.get(key)
+        from vercel_blob import get
+        return get(key)
     except Exception as e:
         print(f"Error getting from blob: {e}")
         # Don't let blob errors block operations
