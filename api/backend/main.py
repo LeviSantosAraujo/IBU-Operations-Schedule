@@ -856,7 +856,7 @@ async def update_config(config: Dict):
 async def get_staffing_targets():
     """Get staffing targets for all locations"""
     config = get_system_config()
-    targets = config.get('staffing_targets', {})
+    targets = config.staffing_targets
     
     # Normalize keys: strip double event_ prefix
     cleaned_targets = {}
