@@ -21,9 +21,21 @@ def _get_path(filename: str) -> str:
     return os.path.join(DATA_DIR, filename)
 
 def _load_json(filename: str) -> List[Dict]:
-    # Check in-memory store first (writes go here on read-only fs)
+    # Try blob storage first (for Vercel persistence)
+    try:
+        from storage import blob_get
+        blob_data = blob_get(filename)
+        if blob_data:
+            data = json.loads(blob_data.decode('utf-8'))
+            _MEMORY_STORE[filename] = list(data)  # Cache in memory
+            return data
+    except Exception:
+        pass  # Blob not available or error
+
+    # Check in-memory store
     if filename in _MEMORY_STORE:
         return list(_MEMORY_STORE[filename])
+
     # Try disk
     path = _get_path(filename)
     if not os.path.exists(path):
@@ -39,6 +51,15 @@ def _load_json(filename: str) -> List[Dict]:
 def _save_json(filename: str, data: List[Dict]):
     # Always update memory store
     _MEMORY_STORE[filename] = list(data)
+
+    # Try blob storage (for Vercel persistence)
+    try:
+        from storage import blob_put
+        json_str = json.dumps(data, indent=2, default=str)
+        blob_put(filename, json_str.encode('utf-8'))
+    except Exception:
+        pass  # Blob not available or error
+
     # Try disk write (will fail silently on Vercel read-only fs)
     if _READ_ONLY:
         return
@@ -47,7 +68,7 @@ def _save_json(filename: str, data: List[Dict]):
         with open(path, 'w') as f:
             json.dump(data, f, indent=2, default=str)
     except OSError:
-        pass  # Read-only filesystem - memory store is the fallback
+        pass  # Read-only filesystem - blob/memory store is the fallback
 
 # Employee operations
 def get_all_employees() -> List[Employee]:
