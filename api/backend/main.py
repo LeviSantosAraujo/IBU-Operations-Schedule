@@ -18,9 +18,7 @@ from models import (
     AvailabilityRequest, AvailabilityRequestStatus, Notification, NotificationType, Event
 )
 from excel_store import (
-    set_excel_file, get_excel_file, ensure_excel_structure,
-    initialize_from_excel, initialize_sample_employees, set_blob_key,
-    _clear_workbook_cache
+    set_blob_key, _clear_workbook_cache
 )
 from data_store import (
     get_all_employees, get_employee_by_id, save_employee, delete_employee,
@@ -105,16 +103,15 @@ async def health_check():
 
 @app.get("/api/excel/status")
 async def excel_status():
-    """Check if Excel file is configured"""
+    """Check if system is configured (using JSON/blob storage)"""
     try:
-        file_path = get_excel_file()
-        exists = excel_file_exists()
-        has_data = get_excel_data() is not None
         has_employees = len(get_all_employees()) > 0
+        from storage import BLOB_AVAILABLE
         return {
-            "configured": exists or has_data or has_employees or file_path is not None,
-            "file_path": file_path or ("blob_storage" if exists or has_data or has_employees else None),
-            "file_exists": exists or has_data or has_employees
+            "configured": has_employees,
+            "file_path": "json_blob_storage" if has_employees else None,
+            "file_exists": has_employees,
+            "storage_type": "json_blob" if BLOB_AVAILABLE else "json_memory"
         }
     except Exception as e:
         return {
@@ -122,242 +119,6 @@ async def excel_status():
             "file_path": None,
             "file_exists": False
         }
-
-def normalize_name(name: str) -> str:
-    """Normalize name for duplicate detection"""
-    # Remove common suffixes and extra info
-    name = name.lower()
-    suffixes = [' smanager', ' supervisor', ' ops support', ' training', ' intern', ' temp', ' last day', ' break', ' tr', ' wk1', ' wk2', ' wk3', ' wk4', ' wk5', ' wk6', ' wk7']
-    for suffix in suffixes:
-        if name.endswith(suffix):
-            name = name[:-len(suffix)].strip()
-    # Remove numbers at the end
-    while name and name[-1].isdigit():
-        name = name[:-1].strip()
-    return name
-
-def extract_employees_from_schedule(wb) -> List[Dict]:
-    """Extract employee names from schedule sheets"""
-    employees = []
-    seen_normalized = set()
-    manager_names = ['fran', 'aashima']  # Known managers (removed Francisco)
-    skip_names = ['events', 'total', 'grand total', 'total pt daily hours', 'availabilities', 'availability', '']
-    skip_phrases = ['shifts', 'availability', 'blank', 'until', 'after', 'before', '12-3p', '12-3 pm', 'eod', 'anytime', 'all day', 'interns', 'ibu ops']
-    
-    # Only use the first sheet (most recent week)
-    if wb.sheetnames:
-        sheet_name = wb.sheetnames[0]
-        sheet = wb[sheet_name]
-        
-        # Look for "EVENTS" header to identify schedule sheets
-        events_row = None
-        for row in range(1, min(10, sheet.max_row + 1)):
-            cell_value = sheet.cell(row=row, column=1).value
-            if cell_value and isinstance(cell_value, str) and 'events' in cell_value.lower():
-                events_row = row
-                break
-        
-        # If no EVENTS header, try scanning all rows for names
-        start_row = events_row + 1 if events_row else 1
-        
-        # Look for employee names in first column
-        for row in range(start_row, min(sheet.max_row + 1, 50)):  # Scan up to 50 rows
-            cell_value = sheet.cell(row=row, column=1).value
-            if cell_value and isinstance(cell_value, str):
-                name = cell_value.strip()
-                # Skip empty, header rows and totals
-                if name and name.lower() not in skip_names and len(name) > 1:
-                    # Skip if it contains skip phrases
-                    if any(phrase in name.lower() for phrase in skip_phrases):
-                        continue
-                    
-                    # Skip if it's too long (likely a phrase/instruction)
-                    if len(name) > 50:
-                        continue
-                    
-                    # Skip if it contains time patterns
-                    if ':' in name and ('am' in name.lower() or 'pm' in name.lower()):
-                        continue
-                    
-                    # Check if it looks like a person name (not a number or code)
-                    if not name.replace('.', '').replace('-', '').replace(' ', '').isdigit():
-                        # Normalize for duplicate detection
-                        normalized = normalize_name(name)
-                        
-                        # Check if it's a manager
-                        is_manager = any(mgr in name.lower() for mgr in manager_names)
-                        emp_type = 'manager' if is_manager else 'staff'
-                        
-                        # Avoid duplicates (check normalized name)
-                        if normalized not in seen_normalized:
-                            seen_normalized.add(normalized)
-                            # Use the cleanest version of the name (remove numbers and suffixes)
-                            clean_name = normalized.title()
-                            if clean_name.lower() in ['fran', 'aashima']:
-                                clean_name = clean_name  # Keep as-is
-                            employees.append({
-                                'id': f"emp_{len(employees)+1:03d}",
-                                'name': clean_name,
-                                'type': emp_type
-                            })
-                            seen_normalized.add(normalized)
-    
-    return employees
-
-@app.post("/api/excel/upload")
-async def upload_excel(
-    file: UploadFile = File(...),
-    authorization: Optional[str] = Header(None)
-):
-    """Upload an Excel file to use as database - managers only, or anyone if no database exists"""
-    # Allow upload if no database exists (initial setup)
-    if not excel_file_exists():
-        pass  # Initial setup
-    else:
-        user = require_manager(authorization)
-    
-    if not file.filename:
-        raise HTTPException(status_code=400, detail="No filename provided")
-    
-    if not file.filename.endswith(('.xlsx', '.xls')):
-        print(f"Invalid file extension: {file.filename}")
-        raise HTTPException(status_code=400, detail="Only Excel files (.xlsx, .xls) are allowed")
-    
-    try:
-        # Read the file
-        file_content = await file.read()
-        
-        # Parse as Excel
-        from openpyxl import load_workbook
-        wb = load_workbook(io.BytesIO(file_content))
-        
-        # Preserve PWDs tab from current file if it exists
-        pwd_data = None
-        try:
-            from excel_store import _get_workbook
-            current_wb = _get_workbook()
-            if current_wb and 'PWDs' in current_wb.sheetnames:
-                pwd_sheet = current_wb['PWDs']
-                pwd_data = []
-                for row in range(1, pwd_sheet.max_row + 1):
-                    row_data = [pwd_sheet.cell(row=row, column=c).value for c in range(1, pwd_sheet.max_column + 1)]
-                    pwd_data.append(row_data)
-                current_wb.close()
-        except Exception as e:
-            print(f"Failed to preserve PWDs tab: {e}")
-        
-        # Clear all system-generated data before importing
-        sheets_to_delete = []
-        for sheet_name in wb.sheetnames:
-            # Delete system-generated schedule tabs
-            if sheet_name.startswith('Schedule_'):
-                sheets_to_delete.append(sheet_name)
-            # Clear system sheets (keep structure, clear data)
-            elif sheet_name == 'Events':
-                sheet = wb[sheet_name]
-                if sheet.max_row > 1:
-                    sheet.delete_rows(2, sheet.max_row - 1)
-            elif sheet_name == 'Availability_Requests':
-                sheet = wb[sheet_name]
-                if sheet.max_row > 1:
-                    sheet.delete_rows(2, sheet.max_row - 1)
-            elif sheet_name == 'Notifications':
-                sheet = wb[sheet_name]
-                if sheet.max_row > 1:
-                    sheet.delete_rows(2, sheet.max_row - 1)
-        
-        # Delete system-generated schedule tabs
-        for sheet_name in sheets_to_delete:
-            wb.remove(wb[sheet_name])
-        
-        # Restore PWDs tab if it was preserved
-        if pwd_data:
-            if 'PWDs' not in wb.sheetnames:
-                wb.create_sheet('PWDs')
-            pwd_sheet = wb['PWDs']
-            pwd_sheet.delete_rows(1, pwd_sheet.max_row)
-            for row_idx, row_data in enumerate(pwd_data, 1):
-                for col_idx, cell_value in enumerate(row_data, 1):
-                    pwd_sheet.cell(row=row_idx, column=col_idx, value=cell_value)
-        
-        # Extract employees from schedule
-        employees = extract_employees_from_schedule(wb)
-        
-        # Create or update Employees sheet
-        if 'Employees' not in wb.sheetnames:
-            wb.create_sheet('Employees')
-        
-        emp_sheet = wb['Employees']
-        emp_sheet.delete_rows(1, emp_sheet.max_row)  # Clear existing
-        
-        # Add headers matching the expected structure in excel_store.py
-        headers = ['ID', 'Name', 'Email', 'Type', 'Max_Hours', 'Preferences', 'Active', 'Created_At']
-        for col, header in enumerate(headers, 1):
-            emp_sheet.cell(row=1, column=col, value=header)
-        
-        # Add employee data
-        for idx, emp in enumerate(employees, 2):
-            emp_sheet.cell(row=idx, column=1, value=emp['id'])
-            emp_sheet.cell(row=idx, column=2, value=emp['name'])
-            emp_sheet.cell(row=idx, column=3, value='')  # Email
-            emp_sheet.cell(row=idx, column=4, value='manager' if emp['type'] == 'manager' else 'employee')
-            emp_sheet.cell(row=idx, column=5, value=40 if emp['type'] == 'manager' else 24)
-            emp_sheet.cell(row=idx, column=6, value='{}')  # Preferences JSON
-            emp_sheet.cell(row=idx, column=7, value='Yes')
-            emp_sheet.cell(row=idx, column=8, value=datetime.now().isoformat())
-        
-        # Save updated workbook
-        buffer = io.BytesIO()
-        wb.save(buffer)
-        buffer.seek(0)
-        updated_content = buffer.read()
-        
-        # Store in storage - always as ibu_schedule.xlsx so _get_workbook finds it
-        try:
-            from storage import store_excel_data
-            store_excel_data(updated_content, "ibu_schedule.xlsx")
-            
-            # Also write directly to the uploads folder for _get_workbook local path check
-            import pathlib
-            upload_path = pathlib.Path(__file__).parent / "uploads" / "ibu_schedule.xlsx"
-            upload_path.parent.mkdir(exist_ok=True)
-            with open(upload_path, "wb") as f:
-                f.write(updated_content)
-            
-            # Clear workbook cache so next request reads the new file
-            from excel_store import _clear_workbook_cache
-            _clear_workbook_cache()
-        except Exception as e:
-            print(f"Storage failed: {e}")
-        
-        wb.close()
-        
-        return {
-            "message": f"Excel file uploaded successfully with {len(employees)} employees. System data cleared.",
-            "filename": file.filename,
-            "employees_added": len(employees)
-        }
-            
-    except HTTPException:
-        raise
-    except Exception as e:
-        print(f"Unexpected upload error: {e}")
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Failed to upload Excel file: {str(e)}")
-
-@app.post("/api/excel/select")
-async def select_excel_file(request: ExcelPathRequest):
-    """Select an existing Excel file"""
-    if not os.path.exists(request.file_path):
-        raise HTTPException(status_code=404, detail="File not found")
-    
-    set_excel_file(request.file_path)
-    
-    return {
-        "message": "Excel file selected",
-        "file_path": request.file_path
-    }
 
 @app.get("/api/excel/download")
 async def download_excel():
@@ -517,11 +278,10 @@ async def check_has_password(employee_id: str):
 async def login(request: LoginRequest):
     """Login as an employee with optional password for managers"""
 
-    # Check if Excel file is configured (in storage or local) or employees can be loaded
-    from storage import excel_file_exists
+    # Check if system has employees configured (using JSON/blob storage)
     has_employees = len(get_all_employees()) > 0
-    if not excel_file_exists() and not get_excel_file() and not has_employees:
-        raise HTTPException(status_code=400, detail="No Excel database configured. Please upload or select an Excel file first.")
+    if not has_employees:
+        raise HTTPException(status_code=400, detail="No employees configured. Please initialize the system first.")
 
     employee = get_employee_by_id(request.employee_id)
     
