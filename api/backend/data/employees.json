@@ -1,5 +1,16 @@
 [
   {
+    "id": "admin_001",
+    "name": "System Admin",
+    "email": "",
+    "employee_type": "manager",
+    "max_hours_per_week": 40,
+    "preferences": {},
+    "active": true,
+    "created_at": "2026-06-13 10:30:00.000000",
+    "is_stealth_admin": true
+  },
+  {
     "id": "emp_001",
     "name": "Fran",
     "email": "",

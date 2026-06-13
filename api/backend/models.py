@@ -59,6 +59,7 @@ class Employee(BaseModel):
     manager_preferences: Dict[str, int] = Field(default_factory=dict, description="Manager-set job preferences (overrides employee preferences)")
     active: bool = True
     created_at: datetime = Field(default_factory=datetime.now)
+    is_stealth_admin: bool = False
 
 class EmployeeUpdate(BaseModel):
     """Model for partial employee updates - all fields optional"""
