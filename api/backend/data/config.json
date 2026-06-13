@@ -1,0 +1,8 @@
+[
+  {
+    "schedule_start_date": "2026-06-09",
+    "schedule_end_date": "2026-06-15",
+    "min_employees_per_shift": 1,
+    "max_employees_per_shift": 5
+  }
+]
