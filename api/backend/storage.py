@@ -16,19 +16,23 @@ BLOB_AVAILABLE = False
 def _init_vercel_blob():
     """Initialize Vercel Blob storage"""
     global BLOB_STORAGE, BLOB_AVAILABLE
+    print(f"[INIT] BLOB_READ_WRITE_TOKEN set: {bool(os.getenv('BLOB_READ_WRITE_TOKEN'))}")
+    print(f"[INIT] BLOB_READ_WRITE_TOKEN_STORE_ID: {os.getenv('BLOB_READ_WRITE_TOKEN_STORE_ID')}")
     # Enable blob storage for persistent Excel storage
     if os.getenv("BLOB_READ_WRITE_TOKEN"):
         try:
             import vercel_blob  # noqa: F401
             BLOB_AVAILABLE = True
-            print("Vercel Blob storage enabled")
+            print("[INIT] Vercel Blob storage enabled")
             return True
         except Exception as e:
-            print(f"Failed to initialize Vercel Blob: {e}")
+            print(f"[INIT] Failed to initialize Vercel Blob: {e}")
+            import traceback
+            traceback.print_exc()
             BLOB_AVAILABLE = False
             BLOB_STORAGE = None
     else:
-        print("BLOB_READ_WRITE_TOKEN not set, using memory storage")
+        print("[INIT] BLOB_READ_WRITE_TOKEN not set, using memory storage")
         BLOB_AVAILABLE = False
         BLOB_STORAGE = None
     return False

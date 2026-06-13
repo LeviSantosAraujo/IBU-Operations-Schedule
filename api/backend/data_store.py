@@ -21,64 +21,73 @@ def _get_path(filename: str) -> str:
     return os.path.join(DATA_DIR, filename)
 
 def _load_json(filename: str) -> List[Dict]:
-    print(f"_load_json: Loading {filename}")
+    print(f"[LOAD] Loading {filename}")
     # Try blob storage first (for Vercel persistence)
     try:
-        from storage import blob_get
+        from storage import blob_get, BLOB_AVAILABLE
+        print(f"[LOAD] BLOB_AVAILABLE={BLOB_AVAILABLE}")
         blob_data = blob_get(filename)
         if blob_data:
             data = json.loads(blob_data.decode('utf-8'))
             _MEMORY_STORE[filename] = list(data)  # Cache in memory
-            print(f"_load_json: Loaded {filename} from blob ({len(data)} items)")
+            print(f"[LOAD] Loaded {filename} from blob ({len(data)} items)")
             return data
+        else:
+            print(f"[LOAD] Blob returned None for {filename}")
     except Exception as e:
-        print(f"_load_json: Blob error for {filename}: {e}")
+        print(f"[LOAD] Blob error for {filename}: {e}")
+        import traceback
+        traceback.print_exc()
 
     # Check in-memory store
     if filename in _MEMORY_STORE:
-        print(f"_load_json: Loaded {filename} from memory ({len(_MEMORY_STORE[filename])} items)")
+        print(f"[LOAD] Loaded {filename} from memory ({len(_MEMORY_STORE[filename])} items)")
         return list(_MEMORY_STORE[filename])
 
     # Try disk
     path = _get_path(filename)
+    print(f"[LOAD] Trying disk at {path}")
     if not os.path.exists(path):
-        print(f"_load_json: {filename} not found on disk, returning empty")
+        print(f"[LOAD] {filename} not found on disk, returning empty")
         return []
     try:
         with open(path, 'r') as f:
             data = json.load(f)
             _MEMORY_STORE[filename] = list(data)  # Cache in memory
-            print(f"_load_json: Loaded {filename} from disk ({len(data)} items)")
+            print(f"[LOAD] Loaded {filename} from disk ({len(data)} items)")
             return data
     except Exception as e:
-        print(f"_load_json: Disk error for {filename}: {e}")
+        print(f"[LOAD] Disk error for {filename}: {e}")
         return []
 
 def _save_json(filename: str, data: List[Dict]):
-    print(f"_save_json: Saving {filename} ({len(data)} items)")
+    print(f"[SAVE] Saving {filename} ({len(data)} items)")
     # Always update memory store
     _MEMORY_STORE[filename] = list(data)
 
     # Try blob storage (for Vercel persistence)
     try:
-        from storage import blob_put
+        from storage import blob_put, BLOB_AVAILABLE
+        print(f"[SAVE] BLOB_AVAILABLE={BLOB_AVAILABLE}")
         json_str = json.dumps(data, indent=2, default=str)
         success = blob_put(filename, json_str.encode('utf-8'))
-        print(f"_save_json: Blob put for {filename} returned {success}")
+        print(f"[SAVE] Blob put for {filename} returned {success}")
     except Exception as e:
-        print(f"_save_json: Blob error for {filename}: {e}")
+        print(f"[SAVE] Blob error for {filename}: {e}")
+        import traceback
+        traceback.print_exc()
 
     # Try disk write (will fail silently on Vercel read-only fs)
     if _READ_ONLY:
-        print(f"_save_json: Skipping disk write (read-only fs)")
+        print(f"[SAVE] Skipping disk write (read-only fs)")
         return
     try:
         path = _get_path(filename)
         with open(path, 'w') as f:
             json.dump(data, f, indent=2, default=str)
-        print(f"_save_json: Saved {filename} to disk")
+        print(f"[SAVE] Saved {filename} to disk")
     except OSError as e:
-        print(f"_save_json: Disk error for {filename}: {e}")
+        print(f"[SAVE] Disk error for {filename}: {e}")
         pass  # Read-only filesystem - blob/memory store is the fallback
 
 # Employee operations
