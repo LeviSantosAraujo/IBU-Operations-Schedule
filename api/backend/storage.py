@@ -13,6 +13,9 @@ EXCEL_DATA_STORE: Dict[str, bytes] = {}
 BLOB_STORAGE = None
 BLOB_AVAILABLE = False
 
+# Initialize blob storage on module load
+_init_vercel_blob()
+
 def _init_vercel_blob():
     """Initialize Vercel Blob storage"""
     global BLOB_STORAGE, BLOB_AVAILABLE
