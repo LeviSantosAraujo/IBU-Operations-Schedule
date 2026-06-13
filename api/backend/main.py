@@ -50,25 +50,10 @@ class SetPasswordRequest(BaseModel):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Load local Excel file into memory on startup"""
-    # Clear any cached workbook to force reload
+    """Startup: do not load Excel file - all data is served from JSON/blob storage"""
     _clear_workbook_cache()
-    # Load local Excel file into memory storage
-    local_path = Path(__file__).parent / "uploads" / "ibu_schedule.xlsx"
-    if local_path.exists():
-        try:
-            wb = load_workbook(local_path)
-            import io
-            buffer = io.BytesIO()
-            wb.save(buffer)
-            buffer.seek(0)
-            store_excel_data(buffer.getvalue())
-            wb.close()
-            print(f"Loaded local Excel file into memory storage")
-        except Exception as e:
-            print(f"Failed to load local Excel file: {e}")
+    print("[STARTUP] Server starting - using JSON/blob storage for all data")
     yield
-    # Cleanup on shutdown
     _clear_workbook_cache()
 
 class ExcelPathRequest(BaseModel):
