@@ -376,25 +376,53 @@ async def select_excel_file(request: ExcelPathRequest):
 
 @app.get("/api/excel/download")
 async def download_excel():
-    """Download the current Excel file from blob storage"""
+    """Export current JSON data to Excel file for viewing"""
     from fastapi.responses import StreamingResponse
     import io
+    from openpyxl import Workbook
+    from data_store import get_all_employees, get_all_schedules, get_system_config
+
+    # Create Excel workbook
+    wb = Workbook()
     
-    # Try to get from blob first
-    file_data = download_excel_from_blob()
-    if file_data:
-        return StreamingResponse(
-            io.BytesIO(file_data),
-            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            headers={"Content-Disposition": "attachment; filename=IBU_Schedule.xlsx"}
-        )
+    # Employees sheet
+    emp_sheet = wb.active
+    emp_sheet.title = "Employees"
+    emp_sheet.append(["ID", "Name", "Email", "Type", "Max Hours", "Active"])
+    for emp in get_all_employees():
+        emp_sheet.append([
+            emp.id, emp.name, emp.email or "", emp.employee_type,
+            emp.max_hours_per_week, emp.active
+        ])
     
-    # Fall back to local file
-    file_path = get_excel_file()
-    if file_path and os.path.exists(file_path):
-        return FileResponse(file_path, filename="IBU_Schedule.xlsx")
+    # Schedules sheet
+    if get_all_schedules():
+        sched_sheet = wb.create_sheet("Schedules")
+        sched_sheet.append(["Week Start", "Employee ID", "Day", "Location", "Start Time", "End Time"])
+        for schedule in get_all_schedules():
+            for shift in schedule.shifts:
+                sched_sheet.append([
+                    schedule.week_start_date, shift.employee_id, shift.day_of_week,
+                    shift.floor.value if shift.floor else "", shift.start_time, shift.end_time
+                ])
     
-    raise HTTPException(status_code=404, detail="No Excel file configured")
+    # Config sheet
+    config_sheet = wb.create_sheet("Config")
+    config = get_system_config()
+    config_sheet.append(["Setting", "Value"])
+    for key, value in config.model_dump().items():
+        config_sheet.append([key, str(value)])
+    
+    # Save to buffer
+    buffer = io.BytesIO()
+    wb.save(buffer)
+    buffer.seek(0)
+    
+    return StreamingResponse(
+        buffer,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=IBU_Schedule.xlsx"}
+    )
 
 @app.post("/api/excel/create-new")
 async def create_new_excel(authorization: Optional[str] = Header(None)):
