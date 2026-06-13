@@ -2,8 +2,8 @@ import json
 import os
 import hashlib
 from typing import List, Optional, Dict
-from datetime import date
-from models import Employee, Availability, WeeklySchedule, SystemConfig
+from datetime import date, timedelta
+from models import Employee, Availability, WeeklySchedule, SystemConfig, AvailabilityRequest, Event
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
 
@@ -254,3 +254,61 @@ def manager_has_password(employee_id: str) -> bool:
     """Check if manager has password set"""
     passwords = _load_json("passwords.json")
     return any(p.get("employee_id") == employee_id for p in passwords)
+
+# ============ Availability Request Operations ============
+
+def get_availability_requests() -> List[AvailabilityRequest]:
+    """Get all availability requests"""
+    data = _load_json("availability_requests.json")
+    return [AvailabilityRequest(**item) for item in data]
+
+def save_availability_request(request: AvailabilityRequest) -> AvailabilityRequest:
+    """Save an availability request"""
+    requests = _load_json("availability_requests.json")
+    # Remove existing if updating
+    requests = [r for r in requests if r.get("id") != request.id]
+    requests.append(request.model_dump())
+    _save_json("availability_requests.json", requests)
+    return request
+
+# ============ Event Operations ============
+
+def get_events(week_start_date: Optional[date] = None) -> List[Event]:
+    """Get events, optionally filtered by week"""
+    data = _load_json("events.json")
+    events = [Event(**item) for item in data]
+    if week_start_date:
+        events = [e for e in events if e.date >= week_start_date and e.date < week_start_date + timedelta(days=7)]
+    return events
+
+def save_event(event: Event) -> Event:
+    """Save an event"""
+    events = _load_json("events.json")
+    # Remove existing if updating
+    events = [e for e in events if e.get("id") != event.id]
+    events.append(event.model_dump())
+    _save_json("events.json", events)
+    return event
+
+def delete_event(event_id: str) -> bool:
+    """Delete an event"""
+    events = _load_json("events.json")
+    original_count = len(events)
+    events = [e for e in events if e.get("id") != event_id]
+    if len(events) < original_count:
+        _save_json("events.json", events)
+        return True
+    return False
+
+# ============ Week Schedule Dates ============
+
+def get_all_week_schedule_dates() -> List[date]:
+    """Get all week start dates from schedules"""
+    schedules = _load_json("schedules.json")
+    dates = []
+    for s in schedules:
+        try:
+            dates.append(date.fromisoformat(s.get("week_start_date")))
+        except:
+            pass
+    return sorted(dates)
