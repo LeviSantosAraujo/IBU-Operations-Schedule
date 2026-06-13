@@ -38,7 +38,7 @@ def _init_vercel_blob():
     return False
 
 def blob_put(key: str, data: bytes, store_id: Optional[str] = None) -> bool:
-    """Put data to blob storage using REST API (works with private stores)"""
+    """Put data to blob storage using REST API for private stores"""
     if not BLOB_AVAILABLE or not os.getenv("BLOB_READ_WRITE_TOKEN"):
         print(f"blob_put: BLOB_AVAILABLE={BLOB_AVAILABLE}, TOKEN_SET={bool(os.getenv('BLOB_READ_WRITE_TOKEN'))}")
         return False
@@ -50,12 +50,11 @@ def blob_put(key: str, data: bytes, store_id: Optional[str] = None) -> bool:
         
         print(f"blob_put: Using REST API for private store, store_id={sid}")
         
-        # Use Vercel Blob REST API for private stores
-        url = f"https://blob.vercel-storage.com/{key}"
+        # Use Vercel Blob REST API with store_id in URL for private stores
+        url = f"https://blob.vercel-storage.com/{sid}/{key}"
         headers = {
             "Authorization": f"Bearer {token}",
-            "Content-Type": "application/octet-stream",
-            "x-blob-store-id": sid if sid else ""
+            "Content-Type": "application/octet-stream"
         }
         
         response = requests.put(url, data=data, headers=headers)
