@@ -13,16 +13,13 @@ EXCEL_DATA_STORE: Dict[str, bytes] = {}
 BLOB_STORAGE = None
 BLOB_AVAILABLE = False
 
-# Initialize blob storage on module load
-_init_vercel_blob()
-
 def _init_vercel_blob():
     """Initialize Vercel Blob storage"""
     global BLOB_STORAGE, BLOB_AVAILABLE
     # Enable blob storage for persistent Excel storage
     if os.getenv("BLOB_READ_WRITE_TOKEN"):
         try:
-            from vercel_blob import put, get
+            import vercel_blob  # noqa: F401
             BLOB_AVAILABLE = True
             print("Vercel Blob storage enabled")
             return True
@@ -37,13 +34,16 @@ def _init_vercel_blob():
     return False
 
 def blob_put(key: str, data: bytes) -> bool:
-    """Put data to blob storage"""
+    """Put data to blob storage (overwrites existing blob with same key)"""
     if not BLOB_AVAILABLE or not os.getenv("BLOB_READ_WRITE_TOKEN"):
         return False
 
     try:
-        from vercel_blob import put
-        put(key, data, { "addRandomSuffix": "false" })
+        import vercel_blob
+        vercel_blob.put(key, data, {
+            "addRandomSuffix": "false",
+            "allowOverwrite": "true",
+        })
         return True
     except Exception as e:
         print(f"Error putting to blob: {e}")
@@ -51,17 +51,46 @@ def blob_put(key: str, data: bytes) -> bool:
         return False
 
 def blob_get(key: str) -> Optional[bytes]:
-    """Get data from blob storage"""
+    """Get data from blob storage by pathname.
+
+    The vercel_blob package has no direct get-by-key, so we list blobs
+    filtered by the key prefix, find the exact pathname match, then
+    download the content from its public URL.
+    """
     if not BLOB_AVAILABLE or not os.getenv("BLOB_READ_WRITE_TOKEN"):
         return None
 
     try:
-        from vercel_blob import get
-        return get(key)
+        import vercel_blob
+        import requests
+
+        result = vercel_blob.list({"prefix": key})
+        blobs = result.get("blobs", []) if isinstance(result, dict) else []
+
+        # Find exact pathname match (prefix could match similar names)
+        target = None
+        for blob in blobs:
+            if blob.get("pathname") == key:
+                target = blob
+                break
+        if target is None:
+            return None
+
+        url = target.get("downloadUrl") or target.get("url")
+        if not url:
+            return None
+
+        resp = requests.get(url, timeout=10)
+        if resp.status_code == 200:
+            return resp.content
+        return None
     except Exception as e:
         print(f"Error getting from blob: {e}")
         # Don't let blob errors block operations
         return None
+
+# Initialize blob storage on module load (after functions are defined)
+_init_vercel_blob()
 
 def blob_exists(key: str) -> bool:
     """Check if blob exists"""
