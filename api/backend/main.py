@@ -20,7 +20,7 @@ from models import (
 from excel_store import (
     set_blob_key, _clear_workbook_cache
 )
-from data_store import (
+from data_store_excel import (
     get_all_employees, get_employee_by_id, save_employee, delete_employee,
     get_availabilities, get_availability_for_week, save_availability,
     get_all_schedules, get_schedule_by_week, save_schedule, delete_schedule,
@@ -31,6 +31,7 @@ from data_store import (
     set_manager_password, verify_manager_password, manager_has_password,
     get_coverage_requirements, save_coverage_requirement,
     get_notifications, save_notification, mark_notification_read,
+    initialize_sample_data,
 )
 from storage import store_excel_data, excel_file_exists, get_excel_data
 from scheduler import SchedulingEngine, generate_schedule

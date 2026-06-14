@@ -2036,3 +2036,28 @@ def delete_event(event_id: str) -> bool:
         print(f"Error deleting event: {e}")
         wb.close()
         return False
+
+def initialize_sample_data():
+    """Initialize Excel with sample data if empty"""
+    if not get_all_employees():
+        sample_employees = [
+            Employee(id="emp1", name="Fran", employee_type="manager", max_hours_per_week=80),
+            Employee(id="emp2", name="Aashima", employee_type="manager", max_hours_per_week=80),
+            Employee(id="emp3", name="Mickaela C", employee_type="employee", max_hours_per_week=24),
+            Employee(id="emp4", name="Kavya C", employee_type="employee", max_hours_per_week=24),
+            Employee(id="emp5", name="Pablo", employee_type="employee", max_hours_per_week=24),
+            Employee(id="emp6", name="Viviana", employee_type="employee", max_hours_per_week=24),
+            Employee(id="emp7", name="Anastasia", employee_type="employee", max_hours_per_week=24),
+            Employee(id="emp8", name="Meg", employee_type="employee", max_hours_per_week=24),
+            Employee(id="emp9", name="Achal", employee_type="employee", max_hours_per_week=24),
+            Employee(id="emp10", name="Priyanka", employee_type="employee", max_hours_per_week=24),
+            Employee(id="emp11", name="Arfa C", employee_type="employee", max_hours_per_week=24),
+            Employee(id="emp12", name="Taran C", employee_type="employee", max_hours_per_week=24),
+            Employee(id="emp13", name="Sagar C", employee_type="employee", max_hours_per_week=24),
+            Employee(id="emp14", name="Itohan", employee_type="employee", max_hours_per_week=24),
+            Employee(id="emp15", name="Arnob", employee_type="employee", max_hours_per_week=24),
+            Employee(id="emp16", name="Nahim", employee_type="employee", max_hours_per_week=30),
+        ]
+        for emp in sample_employees:
+            save_employee(emp)
+        print("[INIT] Initialized Excel with sample employees")
