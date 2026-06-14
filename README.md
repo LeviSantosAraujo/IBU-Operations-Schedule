@@ -242,7 +242,6 @@ Navigate to "Schedule" to:
    - Click trash icon on any shift to remove it
    - Click **Clear Schedule** to remove all shifts while preserving events (useful for starting fresh)
 8. Click **Save** to save changes
-9. Click **Publish** when finalized
 
 ### 4. Floor Coverage
 Navigate to "Floor Coverage" to:

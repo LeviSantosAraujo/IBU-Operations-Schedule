@@ -84,9 +84,6 @@ export const saveSchedule = (data: any) =>
 export const updateScheduleShifts = (weekStartDate: string, shifts: any[]) => 
   api.put(`/schedules/${weekStartDate}/shifts`, shifts).then(r => r.data)
 
-export const publishSchedule = (weekStartDate: string) => 
-  api.post(`/schedules/${weekStartDate}/publish`).then(r => r.data)
-
 export const deleteSchedule = (weekStartDate: string) => 
   api.delete(`/schedules/${weekStartDate}`).then(r => r.data)
 

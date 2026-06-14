@@ -4,7 +4,7 @@ import 'react-datepicker/dist/react-datepicker.css'
 import { format, startOfWeek, addDays } from 'date-fns'
 import {
   getSchedule, generateSchedule, saveSchedule,
-  getEmployees, updateEmployee, publishSchedule, getAvailabilityRequests,
+  getEmployees, updateEmployee, getAvailabilityRequests,
   approveAvailabilityRequest, rejectAvailabilityRequest,
   getEvents, createEvent, updateEvent, deleteEvent, clearSchedule,
   getStaffingTargets, updateStaffingTargets
@@ -484,18 +484,6 @@ export default function ScheduleManager() {
   const saveToHistory = () => {
     if (schedule) {
       setHistory([...history, { ...schedule }])
-    }
-  }
-
-  const handlePublish = async () => {
-    if (!weekStart || !schedule) return
-    try {
-      const formattedDate = format(weekStart, 'yyyy-MM-dd')
-      await publishSchedule(formattedDate)
-      alert('Schedule published!')
-      loadSchedule()
-    } catch (err) {
-      alert('Error publishing schedule')
     }
   }
 
@@ -1055,14 +1043,6 @@ export default function ScheduleManager() {
               >
                 <Eraser className="w-4 h-4" />
                 Clear Schedule
-              </button>
-              
-              <button
-                onClick={handlePublish}
-                className="flex items-center gap-2 bg-purple-600 text-white px-4 py-2 rounded hover:bg-purple-700"
-              >
-                <Check className="w-4 h-4" />
-                Publish
               </button>
             </>
           )}
