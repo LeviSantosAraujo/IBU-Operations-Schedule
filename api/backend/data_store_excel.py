@@ -24,11 +24,11 @@ from excel_store import (
     save_schedule as excel_save_schedule,
     get_system_config as excel_get_system_config,
     save_system_config as excel_save_system_config,
-    get_all_availabilities as excel_get_availabilities,
+    get_availabilities as excel_get_availabilities,
     save_availability as excel_save_availability,
-    get_all_availability_requests as excel_get_availability_requests,
+    get_availability_requests as excel_get_availability_requests,
     save_availability_request as excel_save_availability_request,
-    get_all_events as excel_get_events,
+    get_events as excel_get_events,
     save_event as excel_save_event
 )
 
