@@ -1,6 +1,7 @@
 import json
 import os
 import hashlib
+import time
 from typing import List, Optional, Dict
 from datetime import date, timedelta, datetime
 from models import Employee, Availability, WeeklySchedule, SystemConfig, AvailabilityRequest, Event, HourlyCoverageRequirement
@@ -9,6 +10,8 @@ DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
 
 # In-memory fallback for read-only filesystems (Vercel serverless)
 _MEMORY_STORE: Dict[str, List[Dict]] = {}
+_MEMORY_CACHE_TIME: Dict[str, float] = {}
+_CACHE_TTL_SECONDS = int(os.getenv("DATA_CACHE_TTL_SECONDS", "60"))
 _READ_ONLY = False
 
 # Try to ensure data directory exists
@@ -22,6 +25,12 @@ def _get_path(filename: str) -> str:
 
 def _load_json(filename: str) -> List[Dict]:
     print(f"[LOAD] Loading {filename}")
+    if filename in _MEMORY_STORE:
+        cache_age = time.time() - _MEMORY_CACHE_TIME.get(filename, 0)
+        if cache_age < _CACHE_TTL_SECONDS:
+            print(f"[LOAD] Loaded {filename} from memory cache ({len(_MEMORY_STORE[filename])} items, age={cache_age:.1f}s)")
+            return list(_MEMORY_STORE[filename])
+
     # Try blob storage first (for Vercel persistence)
     try:
         from storage import blob_get, BLOB_AVAILABLE
@@ -30,6 +39,7 @@ def _load_json(filename: str) -> List[Dict]:
         if blob_data:
             data = json.loads(blob_data.decode('utf-8'))
             _MEMORY_STORE[filename] = list(data)  # Cache in memory
+            _MEMORY_CACHE_TIME[filename] = time.time()
             print(f"[LOAD] Loaded {filename} from blob ({len(data)} items)")
             return data
         else:
@@ -41,7 +51,7 @@ def _load_json(filename: str) -> List[Dict]:
 
     # Check in-memory store
     if filename in _MEMORY_STORE:
-        print(f"[LOAD] Loaded {filename} from memory ({len(_MEMORY_STORE[filename])} items)")
+        print(f"[LOAD] Loaded {filename} from stale memory fallback ({len(_MEMORY_STORE[filename])} items)")
         return list(_MEMORY_STORE[filename])
 
     # Try disk
@@ -54,6 +64,7 @@ def _load_json(filename: str) -> List[Dict]:
         with open(path, 'r') as f:
             data = json.load(f)
             _MEMORY_STORE[filename] = list(data)  # Cache in memory
+            _MEMORY_CACHE_TIME[filename] = time.time()
             print(f"[LOAD] Loaded {filename} from disk ({len(data)} items)")
             return data
     except Exception as e:
@@ -64,6 +75,7 @@ def _save_json(filename: str, data: List[Dict]):
     print(f"[SAVE] Saving {filename} ({len(data)} items)")
     # Always update memory store
     _MEMORY_STORE[filename] = list(data)
+    _MEMORY_CACHE_TIME[filename] = time.time()
 
     # Try blob storage (for Vercel persistence)
     try:

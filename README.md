@@ -13,6 +13,7 @@ A comprehensive automated scheduling system built with Python (FastAPI) and Reac
 **Important for Vercel Deployment:**
 - Set `BLOB_READ_WRITE_TOKEN` environment variable in Vercel for persistent data storage
 - Set `JWT_SECRET` environment variable in Vercel for secure JWT token signing
+- Optional: set `DATA_CACHE_TTL_SECONDS` to control in-memory JSON cache duration (default: 60 seconds)
 - Without these, data is stored in-memory and lost between serverless function invocations
 - To set up Vercel Blob: https://vercel.com/docs/storage/vercel-blob
 
@@ -275,6 +276,8 @@ Data is stored in JSON files in `api/backend/data/` for Vercel serverless compat
 - notifications.json - System notifications
 
 **Note:** The system also supports Excel file storage for local development and portability. On Vercel, data is stored in-memory with JSON fallbacks due to the read-only filesystem.
+
+On Vercel, JSON reads use Vercel Blob for persistence and a short in-memory TTL cache to reduce Blob Advanced Requests. The default cache duration is 60 seconds and can be changed with the `DATA_CACHE_TTL_SECONDS` environment variable. JSON saves update Vercel Blob and refresh the in-memory cache immediately.
 
 ## Scheduling Algorithm
 
