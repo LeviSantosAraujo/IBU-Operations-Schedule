@@ -1247,6 +1247,49 @@ async def reset_manager_password(employee_id: str):
     
     return {"success": True, "message": f"Password reset for {employee.name}. Default password: admin123"}
 
+@app.get("/api/diagnostic/github-storage")
+async def diagnostic_github_storage():
+    """Diagnostic endpoint to verify GitHub storage connectivity"""
+    from github_storage import GITHUB_AVAILABLE, GITHUB_TOKEN, GITHUB_REPO, GITHUB_DATA_BRANCH, GITHUB_DATA_FILE
+    from github_storage import github_get_file
+    
+    result = {
+        "github_available": GITHUB_AVAILABLE,
+        "token_set": bool(GITHUB_TOKEN),
+        "repo": GITHUB_REPO,
+        "data_branch": GITHUB_DATA_BRANCH,
+        "data_file": GITHUB_DATA_FILE,
+        "read_test": None,
+        "write_test": None,
+    }
+    
+    if GITHUB_AVAILABLE:
+        # Test read
+        try:
+            data = github_get_file()
+            result["read_test"] = {
+                "success": data is not None,
+                "size_bytes": len(data) if data else 0,
+            }
+        except Exception as e:
+            result["read_test"] = {
+                "success": False,
+                "error": str(e),
+            }
+        
+        # Write test is a dry-run (we don't actually write)
+        result["write_test"] = {
+            "status": "skipped_dry_run",
+            "note": "Write test would require actual data modification. Read test validates connectivity.",
+        }
+    else:
+        result["read_test"] = {
+            "success": False,
+            "error": "GITHUB_TOKEN not set",
+        }
+    
+    return result
+
 if __name__ == "__main__":
     import uvicorn
     # Initialize blob storage for cloud deployment
