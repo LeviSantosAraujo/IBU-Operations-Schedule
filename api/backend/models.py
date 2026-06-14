@@ -54,7 +54,7 @@ class Employee(BaseModel):
     name: str
     email: Optional[str] = None
     employee_type: EmployeeType
-    max_hours_per_week: int = Field(..., description="Maximum hours per week")
+    max_hours_per_week: Optional[int] = Field(None, description="Maximum hours per week")
     preferences: Dict[str, int] = Field(default_factory=dict, description="Employee-submitted job preferences with weights 1-10")
     manager_preferences: Dict[str, int] = Field(default_factory=dict, description="Manager-set job preferences (overrides employee preferences)")
     active: bool = True
