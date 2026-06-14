@@ -172,9 +172,12 @@ def get_system_config() -> SystemConfig:
     if cache_key in _MEMORY_CACHE and _is_cache_valid(cache_key):
         return _MEMORY_CACHE[cache_key]
     
-    config = excel_get_system_config()
-    if not config:
+    config_dict = excel_get_system_config()
+    if not config_dict:
         config = SystemConfig()
+    else:
+        # Convert dict to Pydantic model
+        config = SystemConfig(**config_dict)
     _update_cache(cache_key, config)
     print(f"[LOAD] Loaded system config from Excel")
     return config
