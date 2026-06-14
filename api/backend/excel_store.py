@@ -84,7 +84,21 @@ def _get_workbook() -> Optional[Workbook]:
     if _workbook_cache:
         return _workbook_cache
 
-    # Always check local file first
+    # When GitHub storage is configured (production), it holds the freshest copy.
+    # Prefer it over the bundled local file so live edits are not shadowed.
+    try:
+        from github_storage import GITHUB_AVAILABLE
+    except Exception:
+        GITHUB_AVAILABLE = False
+
+    if GITHUB_AVAILABLE:
+        wb = get_workbook()  # storage module reads GitHub first
+        if wb:
+            _workbook_cache = wb
+            print("Loaded workbook from GitHub storage")
+            return wb
+
+    # Local file (used in local dev, or as a fallback seed in production)
     local_path = Path(__file__).parent / "uploads" / "ibu_schedule.xlsx"
     if local_path.exists():
         try:

@@ -133,14 +133,23 @@ def blob_exists(key: str) -> bool:
 
 def store_excel_data(data: bytes, filename: str = "ibu_schedule.xlsx") -> bool:
     """Store Excel data using best available method"""
-    # Store in memory first (always works)
+    # Store in memory first (always works and keeps the current instance fast)
     EXCEL_DATA_STORE["current"] = data
-    
-    # Try blob storage
+
+    # Primary persistence: GitHub (data branch). Fast and no production redeploy.
+    try:
+        from github_storage import github_put_file, GITHUB_AVAILABLE
+        if GITHUB_AVAILABLE:
+            if github_put_file(data, message="Update schedule data"):
+                return True
+    except Exception as e:
+        print(f"store_excel_data: GitHub write error: {e}")
+
+    # Try blob storage (legacy fallback)
     if blob_put(filename, data):
         return True
-    
-    # Try local storage
+
+    # Try local storage (works in local dev; read-only on Vercel)
     try:
         from pathlib import Path
         upload_dir = Path(__file__).parent / "uploads"
@@ -157,7 +166,18 @@ def store_excel_data(data: bytes, filename: str = "ibu_schedule.xlsx") -> bool:
 
 def get_excel_data(filename: str = "ibu_schedule.xlsx") -> Optional[bytes]:
     """Get Excel data from storage"""
-    # Try blob first
+    # Primary source: GitHub (data branch) for the freshest persisted copy
+    try:
+        from github_storage import github_get_file, GITHUB_AVAILABLE
+        if GITHUB_AVAILABLE:
+            gh_data = github_get_file()
+            if gh_data:
+                EXCEL_DATA_STORE["current"] = gh_data  # Cache in memory
+                return gh_data
+    except Exception as e:
+        print(f"get_excel_data: GitHub read error: {e}")
+
+    # Try blob (legacy fallback)
     data = blob_get(filename)
     if data:
         EXCEL_DATA_STORE["current"] = data  # Cache in memory
