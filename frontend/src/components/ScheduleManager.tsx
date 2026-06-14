@@ -90,6 +90,9 @@ export default function ScheduleManager() {
     description: ''
   })
   const [showAddShift, setShowAddShift] = useState(false)
+  const [isHourAdjustment, setIsHourAdjustment] = useState(false)
+  const [adjustmentHours, setAdjustmentHours] = useState(0)
+  const [adjustmentMinutes, setAdjustmentMinutes] = useState(0)
   const [newShift, setNewShift] = useState<Partial<Shift>>({
     day_of_week: 'monday',
     start_time: '09:00',
@@ -521,29 +524,54 @@ export default function ScheduleManager() {
   const handleAddShift = () => {
     if (!schedule) return
     
-    const startH = parseInt(newShift.start_time?.split(':')[0] || '9')
-    const startM = parseInt(newShift.start_time?.split(':')[1] || '0')
-    const endH = parseInt(newShift.end_time?.split(':')[0] || '17')
-    const endM = parseInt(newShift.end_time?.split(':')[1] || '0')
-    const hours = (endH + endM / 60) - (startH + startM / 60)
+    let hours: number
+    let shift: Shift
 
-    const shift: Shift = {
-      id: `shift_${Date.now()}`,
-      employee_id: newShift.employee_id || '',
-      day_of_week: newShift.day_of_week || 'monday',
-      start_time: newShift.start_time || '09:00',
-      end_time: newShift.end_time || '17:00',
-      job_type: newShift.job_type || 'ground_floor',
-      floor: newShift.floor as any,
-      location: newShift.location,
-      comment: newShift.description,
-      hours: Math.round(hours * 10) / 10
+    if (isHourAdjustment) {
+      if (!newShift.description?.trim()) {
+        alert('Justification is required for hour adjustments')
+        return
+      }
+      hours = adjustmentHours + adjustmentMinutes / 60
+      shift = {
+        id: `shift_${Date.now()}`,
+        employee_id: newShift.employee_id || '',
+        day_of_week: newShift.day_of_week || 'monday',
+        start_time: '',
+        end_time: '',
+        job_type: 'ibu_ops',
+        floor: undefined,
+        location: 'Hour Adjustment',
+        comment: newShift.description,
+        hours: Math.round(hours * 100) / 100
+      }
+    } else {
+      const startH = parseInt(newShift.start_time?.split(':')[0] || '9')
+      const startM = parseInt(newShift.start_time?.split(':')[1] || '0')
+      const endH = parseInt(newShift.end_time?.split(':')[0] || '17')
+      const endM = parseInt(newShift.end_time?.split(':')[1] || '0')
+      hours = (endH + endM / 60) - (startH + startM / 60)
+      shift = {
+        id: `shift_${Date.now()}`,
+        employee_id: newShift.employee_id || '',
+        day_of_week: newShift.day_of_week || 'monday',
+        start_time: newShift.start_time || '09:00',
+        end_time: newShift.end_time || '17:00',
+        job_type: newShift.job_type || 'ground_floor',
+        floor: newShift.floor as any,
+        location: newShift.location,
+        comment: newShift.description,
+        hours: Math.round(hours * 10) / 10
+      }
     }
 
     saveToHistory()
     const updatedShifts = [...schedule.shifts, shift]
     setSchedule({ ...schedule, shifts: updatedShifts, total_hours: recalculateHours(updatedShifts) })
     setShowAddShift(false)
+    setIsHourAdjustment(false)
+    setAdjustmentHours(0)
+    setAdjustmentMinutes(0)
   }
 
   const recalculateHours = (shifts: Shift[]) => {
@@ -1651,6 +1679,18 @@ export default function ScheduleManager() {
               <h3 className="text-lg font-bold mb-4">Add Shift</h3>
 
               <div className="space-y-3">
+                <div className="flex items-center gap-2 p-2 bg-gray-50 rounded">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={isHourAdjustment}
+                      onChange={(e) => setIsHourAdjustment(e.target.checked)}
+                      className="rounded"
+                    />
+                    <span className="text-sm font-medium">Hour Adjustment (owed hours)</span>
+                  </label>
+                </div>
+
                 <div>
                   <label className="block text-sm font-medium mb-1">Employee</label>
                   <select
@@ -1677,54 +1717,90 @@ export default function ScheduleManager() {
                     ))}
                   </select>
                 </div>
-                
-                <div className="grid grid-cols-2 gap-2">
+
+                {isHourAdjustment ? (
                   <div>
-                    <label className="block text-sm font-medium mb-1">Start</label>
-                    <input
-                      type="time"
-                      value={newShift.start_time}
-                      onChange={(e) => setNewShift({...newShift, start_time: e.target.value})}
-                      className="w-full border rounded px-3 py-2"
-                    />
+                    <label className="block text-sm font-medium mb-1">Hours / Minutes</label>
+                    <p className="text-xs text-gray-500 mb-2">Use negative for hours owed to IBU, positive for hours IBU owes</p>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="block text-xs text-gray-500 mb-1">Hours</label>
+                        <input
+                          type="number"
+                          value={adjustmentHours}
+                          onChange={(e) => setAdjustmentHours(parseInt(e.target.value) || 0)}
+                          className="w-full border rounded px-3 py-2"
+                          placeholder="0"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs text-gray-500 mb-1">Minutes</label>
+                        <input
+                          type="number"
+                          value={adjustmentMinutes}
+                          onChange={(e) => setAdjustmentMinutes(parseInt(e.target.value) || 0)}
+                          className="w-full border rounded px-3 py-2"
+                          min="-59"
+                          max="59"
+                          placeholder="0"
+                        />
+                      </div>
+                    </div>
                   </div>
-                  <div>
-                    <label className="block text-sm font-medium mb-1">End</label>
-                    <input
-                      type="time"
-                      value={newShift.end_time}
-                      onChange={(e) => setNewShift({...newShift, end_time: e.target.value})}
-                      className="w-full border rounded px-3 py-2"
-                    />
-                  </div>
-                </div>
+                ) : (
+                  <>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="block text-sm font-medium mb-1">Start</label>
+                        <input
+                          type="time"
+                          value={newShift.start_time}
+                          onChange={(e) => setNewShift({...newShift, start_time: e.target.value})}
+                          className="w-full border rounded px-3 py-2"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium mb-1">End</label>
+                        <input
+                          type="time"
+                          value={newShift.end_time}
+                          onChange={(e) => setNewShift({...newShift, end_time: e.target.value})}
+                          className="w-full border rounded px-3 py-2"
+                        />
+                      </div>
+                    </div>
+                    
+                    <div>
+                      <label className="block text-sm font-medium mb-1">Location</label>
+                      <select
+                        value={newShift.location}
+                        onChange={(e) => setNewShift({...newShift, location: e.target.value})}
+                        className="w-full border rounded px-3 py-2"
+                      >
+                        <option value="">Select...</option>
+                        <option value="Event">Event</option>
+                        <option value="Ground Floor">Ground Floor</option>
+                        <option value="2nd Floor">2nd Floor</option>
+                        <option value="6th Floor">6th Floor</option>
+                        <option value="Call Center">Call Center</option>
+                        <option value="80 Bloor">80 Bloor</option>
+                        <option value="Working from Home">Working from Home</option>
+                      </select>
+                    </div>
+                  </>
+                )}
                 
                 <div>
-                  <label className="block text-sm font-medium mb-1">Location</label>
-                  <select
-                    value={newShift.location}
-                    onChange={(e) => setNewShift({...newShift, location: e.target.value})}
-                    className="w-full border rounded px-3 py-2"
-                  >
-                    <option value="">Select...</option>
-                    <option value="Event">Event</option>
-                    <option value="Ground Floor">Ground Floor</option>
-                    <option value="2nd Floor">2nd Floor</option>
-                    <option value="6th Floor">6th Floor</option>
-                    <option value="Call Center">Call Center</option>
-                    <option value="80 Bloor">80 Bloor</option>
-                    <option value="Working from Home">Working from Home</option>
-                  </select>
-                </div>
-                
-                <div>
-                  <label className="block text-sm font-medium mb-1">Description</label>
+                  <label className="block text-sm font-medium mb-1">
+                    {isHourAdjustment ? 'Justification' : 'Description'}
+                    {isHourAdjustment && <span className="text-red-500 ml-1">*</span>}
+                  </label>
                   <textarea
                     value={newShift.description}
                     onChange={(e) => setNewShift({...newShift, description: e.target.value})}
                     className="w-full border rounded px-3 py-2"
                     rows={2}
-                    placeholder="Additional notes..."
+                    placeholder={isHourAdjustment ? "Reason for hour adjustment (required)..." : "Additional notes..."}
                   />
                 </div>
               </div>
@@ -1732,13 +1808,13 @@ export default function ScheduleManager() {
               <div className="flex gap-2 mt-6">
                 <button
                   onClick={handleAddShift}
-                  disabled={!newShift.employee_id}
+                  disabled={!newShift.employee_id || (isHourAdjustment && !newShift.description?.trim())}
                   className="flex-1 bg-blue-600 text-white py-2 rounded hover:bg-blue-700 disabled:opacity-50"
                 >
                   Add
                 </button>
                 <button
-                  onClick={() => setShowAddShift(false)}
+                  onClick={() => { setShowAddShift(false); setIsHourAdjustment(false); setAdjustmentHours(0); setAdjustmentMinutes(0); }}
                   className="flex-1 bg-gray-300 py-2 rounded hover:bg-gray-400"
                 >
                   Cancel
