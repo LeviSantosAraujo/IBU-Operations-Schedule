@@ -1291,30 +1291,38 @@ async def upload_excel_file(
             uploaded_schedules = uploaded_wb["Schedules"]
             current_schedules = current_wb["Schedules"]
             
-            # Clear current schedules (except header)
-            for row in list(current_schedules.iter_rows(min_row=2)):
-                for cell in row:
-                    cell.value = None
+            # Check if uploaded has data (rows beyond header)
+            has_data = any(cell.value for row in uploaded_schedules.iter_rows(min_row=2) for cell in row)
             
-            # Copy uploaded schedules
-            for row in uploaded_schedules.iter_rows(min_row=2):
-                for cell in row:
-                    current_schedules.cell(row=cell.row, column=cell.column, value=cell.value)
+            if has_data:
+                # Clear current schedules (except header)
+                for row in list(current_schedules.iter_rows(min_row=2)):
+                    for cell in row:
+                        cell.value = None
+                
+                # Copy uploaded schedules
+                for row in uploaded_schedules.iter_rows(min_row=2):
+                    for cell in row:
+                        current_schedules.cell(row=cell.row, column=cell.column, value=cell.value)
         
         # Merge Availabilities from uploaded file
         if "Availability" in uploaded_wb.sheetnames and "Availability" in current_wb.sheetnames:
             uploaded_avail = uploaded_wb["Availability"]
             current_avail = current_wb["Availability"]
             
-            # Clear current availability (except header)
-            for row in list(current_avail.iter_rows(min_row=2)):
-                for cell in row:
-                    cell.value = None
+            # Check if uploaded has data (rows beyond header)
+            has_data = any(cell.value for row in uploaded_avail.iter_rows(min_row=2) for cell in row)
             
-            # Copy uploaded availability
-            for row in uploaded_avail.iter_rows(min_row=2):
-                for cell in row:
-                    current_avail.cell(row=cell.row, column=cell.column, value=cell.value)
+            if has_data:
+                # Clear current availability (except header)
+                for row in list(current_avail.iter_rows(min_row=2)):
+                    for cell in row:
+                        cell.value = None
+                
+                # Copy uploaded availability
+                for row in uploaded_avail.iter_rows(min_row=2):
+                    for cell in row:
+                        current_avail.cell(row=cell.row, column=cell.column, value=cell.value)
         
         # Save merged workbook
         saved = _save_workbook(current_wb)
