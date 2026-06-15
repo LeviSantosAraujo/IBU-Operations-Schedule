@@ -1305,7 +1305,7 @@ async def diagnostic_password_check(employee_id: str, password: str):
     }
     return result
 
-@app.post("/api/diagnostic/reset-admin-password")
+@app.get("/api/diagnostic/reset-admin-password")
 async def reset_admin_password():
     """Reset admin password to admin123 (emergency fix)"""
     from excel_store import set_manager_password
