@@ -1399,7 +1399,7 @@ async def upload_excel_file(
 @app.get("/api/diagnostic/schedules-data")
 async def diagnostic_schedules_data():
     """Diagnostic endpoint to inspect schedules data in Excel"""
-    from excel_store import _get_workbook
+    from excel_store import _get_workbook, get_all_schedules
     
     wb = _get_workbook()
     if not wb:
@@ -1408,7 +1408,8 @@ async def diagnostic_schedules_data():
     result = {
         "sheet_names": wb.sheetnames,
         "schedules_data": [],
-        "schedule_sheets": {}
+        "schedule_sheets": {},
+        "parsed_schedules": []
     }
     
     # Check for Schedule_ sheets
@@ -1442,6 +1443,21 @@ async def diagnostic_schedules_data():
         result["total_cols"] = sheet.max_column
     
     wb.close()
+    
+    # Try to parse schedules
+    try:
+        schedules = get_all_schedules()
+        result["parsed_schedules"] = [
+            {
+                "week_start_date": str(s.week_start_date),
+                "shifts_count": len(s.shifts)
+            }
+            for s in schedules
+        ]
+        result["parsed_count"] = len(schedules)
+    except Exception as e:
+        result["parse_error"] = str(e)
+    
     return result
 
 @app.get("/api/diagnostic/github-storage")
