@@ -1306,7 +1306,10 @@ async def upload_excel_file(
                 for row in uploaded_schedules.iter_rows(min_row=2):
                     for cell in row:
                         current_schedules.cell(row=cell.row, column=cell.column, value=cell.value)
-        else:
+        
+        # Always process weekly sheets if they exist (takes precedence over Schedule_ sheets)
+        weekly_sheets = [s for s in uploaded_wb.sheetnames if not s.startswith('Schedule_') and s not in ['PWDs', 'Employees', 'Schedules', 'Availability']]
+        if weekly_sheets:
             # Handle weekly sheets format - convert to Schedule_YYYY-MM-DD format with proper parsing
             from datetime import datetime
             import re
@@ -1323,100 +1326,91 @@ async def upload_excel_file(
                     current_wb.remove(current_wb[sheet_name])
             
             # Convert weekly sheets from uploaded file
-            for sheet_name in uploaded_wb.sheetnames:
-                if sheet_name.startswith('Schedule_'):
-                    # Already in correct format, just copy
-                    if sheet_name not in current_wb.sheetnames:
-                        new_sheet = current_wb.create_sheet(sheet_name)
-                        uploaded_sheet = uploaded_wb[sheet_name]
-                        for row in uploaded_sheet.iter_rows(values_only=True):
-                            new_sheet.append(row)
-                elif sheet_name not in ['PWDs', 'Employees']:
-                    # Try to parse weekly sheet format
-                    try:
-                        # Extract week start date from sheet name
-                        year = 2026
-                        month_map = {
-                            'jan': 1, 'feb': 2, 'mar': 3, 'apr': 4, 'may': 5, 'jun': 6,
-                            'jul': 7, 'aug': 8, 'sep': 9, 'oct': 10, 'nov': 11, 'dec': 12
-                        }
-                        
-                        sheet_lower = sheet_name.lower()
-                        week_start = None
-                        
-                        for month_name, month_num in month_map.items():
-                            if month_name in sheet_lower:
-                                day_match = re.search(r'(\d{1,2})[-\s]+(\d{1,2})', sheet_name)
-                                if day_match:
-                                    start_day = int(day_match.group(1))
-                                    week_start = datetime(year, month_num, start_day).strftime('%Y-%m-%d')
-                                    break
-                        
-                        if not week_start:
+            for sheet_name in weekly_sheets:
+                try:
+                    # Extract week start date from sheet name
+                    year = 2026
+                    month_map = {
+                        'jan': 1, 'feb': 2, 'mar': 3, 'apr': 4, 'may': 5, 'jun': 6,
+                        'jul': 7, 'aug': 8, 'sep': 9, 'oct': 10, 'nov': 11, 'dec': 12
+                    }
+                    
+                    sheet_lower = sheet_name.lower()
+                    week_start = None
+                    
+                    for month_name, month_num in month_map.items():
+                        if month_name in sheet_lower:
+                            day_match = re.search(r'(\d{1,2})[-\s]+(\d{1,2})', sheet_name)
+                            if day_match:
+                                start_day = int(day_match.group(1))
+                                week_start = datetime(year, month_num, start_day).strftime('%Y-%m-%d')
+                                break
+                    
+                    if not week_start:
+                        continue
+                    
+                    schedule_sheet_name = f"Schedule_{week_start}"
+                    
+                    # Parse the weekly sheet and convert to Schedule_ format
+                    uploaded_sheet = uploaded_wb[sheet_name]
+                    
+                    # Create new Schedule_ sheet with proper headers
+                    new_sheet = current_wb.create_sheet(schedule_sheet_name)
+                    new_sheet.append([
+                        "Shift_ID", "Employee_ID", "Employee_Name", "Day", 
+                        "Start_Time", "End_Time", "Job_Type", "Floor", 
+                        "Hours", "Is_Event", "Event_Name", "Locked", 
+                        "Locked_Avail_Type", "Location"
+                    ])
+                    
+                    # Parse employee schedules from weekly format
+                    days = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']
+                    day_columns = [1, 3, 5, 7, 9, 11, 13]  # Column indices for each day
+                    hour_columns = [2, 4, 6, 8, 10, 12, 14]  # Hour columns
+                    
+                    for row_idx, row in enumerate(uploaded_sheet.iter_rows(min_row=3, values_only=True), start=3):
+                        employee_name = row[0]
+                        if not employee_name or employee_name == 'EVENTS':
                             continue
                         
-                        schedule_sheet_name = f"Schedule_{week_start}"
+                        employee_name = str(employee_name).strip()
+                        employee_id = name_to_id.get(employee_name.lower())
                         
-                        # Parse the weekly sheet and convert to Schedule_ format
-                        uploaded_sheet = uploaded_wb[sheet_name]
+                        if not employee_id:
+                            continue
                         
-                        # Create new Schedule_ sheet with proper headers
-                        new_sheet = current_wb.create_sheet(schedule_sheet_name)
-                        new_sheet.append([
-                            "Shift_ID", "Employee_ID", "Employee_Name", "Day", 
-                            "Start_Time", "End_Time", "Job_Type", "Floor", 
-                            "Hours", "Is_Event", "Event_Name", "Locked", 
-                            "Locked_Avail_Type", "Location"
-                        ])
-                        
-                        # Parse employee schedules from weekly format
-                        days = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']
-                        day_columns = [1, 3, 5, 7, 9, 11, 13]  # Column indices for each day
-                        hour_columns = [2, 4, 6, 8, 10, 12, 14]  # Hour columns
-                        
-                        for row_idx, row in enumerate(uploaded_sheet.iter_rows(min_row=3, values_only=True), start=3):
-                            employee_name = row[0]
-                            if not employee_name or employee_name == 'EVENTS':
-                                continue
+                        for day_idx, (col_idx, hour_col_idx) in enumerate(zip(day_columns, hour_columns)):
+                            shift_text = row[col_idx]
+                            hours = row[hour_col_idx]
                             
-                            employee_name = str(employee_name).strip()
-                            employee_id = name_to_id.get(employee_name.lower())
-                            
-                            if not employee_id:
-                                continue
-                            
-                            for day_idx, (col_idx, hour_col_idx) in enumerate(zip(day_columns, hour_columns)):
-                                shift_text = row[col_idx]
-                                hours = row[hour_col_idx]
+                            if shift_text and shift_text != 'OFF' and 'OFF' not in str(shift_text):
+                                shift_str = str(shift_text)
                                 
-                                if shift_text and shift_text != 'OFF' and 'OFF' not in str(shift_text):
-                                    shift_str = str(shift_text)
-                                    
-                                    # Parse shift time and location
-                                    start_time, end_time = parse_shift_time_from_string(shift_str)
-                                    location = parse_location_from_string(shift_str)
-                                    
-                                    if start_time and end_time:
-                                        shift_id = f"shift_{uuid.uuid4().hex[:8]}"
-                                        new_sheet.append([
-                                            shift_id,
-                                            employee_id,
-                                            employee_name,
-                                            days[day_idx],
-                                            start_time,
-                                            end_time,
-                                            'ibu_ops',
-                                            None,
-                                            float(hours) if hours else 0,
-                                            False,
-                                            None,
-                                            False,
-                                            None,
-                                            location
-                                        ])
-                    except Exception as e:
-                        print(f"Could not parse sheet {sheet_name}: {e}")
-                        continue
+                                # Parse shift time and location
+                                start_time, end_time = parse_shift_time_from_string(shift_str)
+                                location = parse_location_from_string(shift_str)
+                                
+                                if start_time and end_time:
+                                    shift_id = f"shift_{uuid.uuid4().hex[:8]}"
+                                    new_sheet.append([
+                                        shift_id,
+                                        employee_id,
+                                        employee_name,
+                                        days[day_idx],
+                                        start_time,
+                                        end_time,
+                                        'ibu_ops',
+                                        None,
+                                        float(hours) if hours else 0,
+                                        False,
+                                        None,
+                                        False,
+                                        None,
+                                        location
+                                    ])
+                except Exception as e:
+                    print(f"Could not parse sheet {sheet_name}: {e}")
+                    continue
         
         # Merge Availabilities from uploaded file
         if "Availability" in uploaded_wb.sheetnames and "Availability" in current_wb.sheetnames:
