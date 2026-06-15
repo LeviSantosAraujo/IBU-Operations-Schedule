@@ -1,3 +1,5 @@
+# IBU Operations Schedule API
+# GitHub persistence enabled - data stored in data branch
 from fastapi import FastAPI, HTTPException, Query, Header, Depends, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
