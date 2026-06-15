@@ -1287,6 +1287,7 @@ async def upload_excel_file(
             # Keep passwords as-is
         
         # Merge Schedules from uploaded file
+        # Handle both formats: weekly sheets (e.g., "June 15-21") and single "Schedules" sheet
         if "Schedules" in uploaded_wb.sheetnames and "Schedules" in current_wb.sheetnames:
             uploaded_schedules = uploaded_wb["Schedules"]
             current_schedules = current_wb["Schedules"]
@@ -1304,6 +1305,57 @@ async def upload_excel_file(
                 for row in uploaded_schedules.iter_rows(min_row=2):
                     for cell in row:
                         current_schedules.cell(row=cell.row, column=cell.column, value=cell.value)
+        else:
+            # Handle weekly sheets format - convert to Schedule_YYYY-MM-DD format
+            from datetime import datetime
+            from dateutil.parser import parse as parse_date
+            
+            # Remove existing Schedule_ sheets from current
+            for sheet_name in list(current_wb.sheetnames):
+                if sheet_name.startswith('Schedule_'):
+                    current_wb.remove(current_wb[sheet_name])
+            
+            # Convert weekly sheets from uploaded file
+            for sheet_name in uploaded_wb.sheetnames:
+                if sheet_name.startswith('Schedule_'):
+                    # Already in correct format, just copy
+                    if sheet_name not in current_wb.sheetnames:
+                        new_sheet = current_wb.create_sheet(sheet_name)
+                        uploaded_sheet = uploaded_wb[sheet_name]
+                        for row in uploaded_sheet.iter_rows(values_only=True):
+                            new_sheet.append(row)
+                else:
+                    # Try to parse date from sheet name (e.g., "June 15-21", "June 1-7")
+                    try:
+                        # Extract year from current date context (assume 2026)
+                        year = 2026
+                        month_map = {
+                            'jan': 1, 'feb': 2, 'mar': 3, 'apr': 4, 'may': 5, 'jun': 6,
+                            'jul': 7, 'aug': 8, 'sep': 9, 'oct': 10, 'nov': 11, 'dec': 12
+                        }
+                        
+                        # Parse month and day range
+                        sheet_lower = sheet_name.lower()
+                        for month_name, month_num in month_map.items():
+                            if month_name in sheet_lower:
+                                # Extract day range
+                                import re
+                                day_match = re.search(r'(\d{1,2})[-\s]+(\d{1,2})', sheet_name)
+                                if day_match:
+                                    start_day = int(day_match.group(1))
+                                    # Create schedule sheet name
+                                    week_start = datetime(year, month_num, start_day).strftime('%Y-%m-%d')
+                                    schedule_sheet_name = f"Schedule_{week_start}"
+                                    
+                                    if schedule_sheet_name not in current_wb.sheetnames:
+                                        new_sheet = current_wb.create_sheet(schedule_sheet_name)
+                                        uploaded_sheet = uploaded_wb[sheet_name]
+                                        for row in uploaded_sheet.iter_rows(values_only=True):
+                                            new_sheet.append(row)
+                                    break
+                    except Exception as e:
+                        print(f"Could not parse sheet name {sheet_name}: {e}")
+                        continue
         
         # Merge Availabilities from uploaded file
         if "Availability" in uploaded_wb.sheetnames and "Availability" in current_wb.sheetnames:
