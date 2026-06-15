@@ -1305,6 +1305,13 @@ async def diagnostic_password_check(employee_id: str, password: str):
     }
     return result
 
+@app.post("/api/diagnostic/reset-admin-password")
+async def reset_admin_password():
+    """Reset admin password to admin123 (emergency fix)"""
+    from excel_store import set_manager_password
+    set_manager_password('admin_001', 'System Admin', 'admin123')
+    return {"success": True, "message": "Admin password reset to admin123"}
+
 if __name__ == "__main__":
     import uvicorn
     # Initialize blob storage for cloud deployment
