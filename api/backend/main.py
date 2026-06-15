@@ -1399,7 +1399,7 @@ async def upload_excel_file(
 @app.get("/api/diagnostic/schedules-data")
 async def diagnostic_schedules_data():
     """Diagnostic endpoint to inspect schedules data in Excel"""
-    from excel_store import _get_workbook, get_all_schedules
+    from excel_store import _get_workbook, get_all_schedules, _invalidate_cache
     
     wb = _get_workbook()
     if not wb:
@@ -1444,7 +1444,8 @@ async def diagnostic_schedules_data():
     
     wb.close()
     
-    # Try to parse schedules
+    # Invalidate cache and try to parse schedules
+    _invalidate_cache()
     try:
         schedules = get_all_schedules()
         result["parsed_schedules"] = [
