@@ -3,8 +3,10 @@
 Minimal entrypoint for Vercel deployment on data branch.
 This branch only stores the Excel file, but Vercel requires a Python entrypoint.
 """
-import sys
+from fastapi import FastAPI
 
-print("[DATA BRANCH] This branch only stores the Excel data file.")
-print("[DATA BRANCH] No API functionality is available on this branch.")
-sys.exit(0)
+app = FastAPI()
+
+@app.get("/")
+async def root():
+    return {"message": "Data branch - only stores Excel file, no API functionality"}
