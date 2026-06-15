@@ -1,0 +1,8 @@
+{
+  "name": "ibu-operations-schedule-frontend",
+  "version": "1.0.0",
+  "description": "Minimal frontend for Vercel data branch",
+  "scripts": {
+    "build": "echo 'Data branch - no build needed'"
+  }
+}
