@@ -1290,6 +1290,21 @@ async def diagnostic_github_storage():
     
     return result
 
+@app.get("/api/diagnostic/password-check/{employee_id}/{password}")
+async def diagnostic_password_check(employee_id: str, password: str):
+    """Diagnostic endpoint to test password verification"""
+    from github_storage import GITHUB_AVAILABLE
+    from excel_store import verify_manager_password, manager_has_password, hash_password
+    
+    result = {
+        "github_available": GITHUB_AVAILABLE,
+        "employee_id": employee_id,
+        "has_password": manager_has_password(employee_id),
+        "password_hash": hash_password(password),
+        "verification_result": verify_manager_password(employee_id, password),
+    }
+    return result
+
 if __name__ == "__main__":
     import uvicorn
     # Initialize blob storage for cloud deployment
