@@ -1344,6 +1344,36 @@ async def upload_excel_file(
         uploaded_wb.close()
         raise HTTPException(status_code=500, detail=f"Merge failed: {str(e)}")
 
+@app.get("/api/diagnostic/schedules-data")
+async def diagnostic_schedules_data():
+    """Diagnostic endpoint to inspect schedules data in Excel"""
+    from excel_store import _get_workbook
+    
+    wb = _get_workbook()
+    if not wb:
+        return {"error": "Failed to load workbook"}
+    
+    result = {
+        "sheet_names": wb.sheetnames,
+        "schedules_data": []
+    }
+    
+    if "Schedules" in wb.sheetnames:
+        sheet = wb["Schedules"]
+        rows = []
+        for i, row in enumerate(sheet.iter_rows(values_only=True)):
+            if i < 10:  # First 10 rows
+                rows.append(list(row))
+            elif i == 10:
+                rows.append(["... (truncated)"])
+                break
+        result["schedules_data"] = rows
+        result["total_rows"] = sheet.max_row
+        result["total_cols"] = sheet.max_column
+    
+    wb.close()
+    return result
+
 @app.get("/api/diagnostic/github-storage")
 async def diagnostic_github_storage():
     """Diagnostic endpoint to verify GitHub storage connectivity"""
