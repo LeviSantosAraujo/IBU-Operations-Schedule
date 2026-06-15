@@ -1249,6 +1249,33 @@ async def reset_manager_password(employee_id: str):
     
     return {"success": True, "message": f"Password reset for {employee.name}. Default password: admin123"}
 
+@app.post("/api/database/upload-excel")
+async def upload_excel_file(
+    file: UploadFile = File(...),
+    user: Dict = Depends(require_manager)
+):
+    """Upload a new Excel file to replace all data (managers only)"""
+    from excel_store import _invalidate_cache
+    from storage import store_excel_data
+    
+    # Validate file type
+    if not file.filename.endswith('.xlsx'):
+        raise HTTPException(status_code=400, detail="Only .xlsx files are allowed")
+    
+    # Read file content
+    content = await file.read()
+    
+    # Store the Excel file (will write to GitHub)
+    success = store_excel_data(content, "ibu_schedule.xlsx")
+    
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to store Excel file")
+    
+    # Invalidate cache so new data is loaded
+    _invalidate_cache()
+    
+    return {"success": True, "message": "Excel file uploaded successfully. All data has been replaced."}
+
 @app.get("/api/diagnostic/github-storage")
 async def diagnostic_github_storage():
     """Diagnostic endpoint to verify GitHub storage connectivity"""
