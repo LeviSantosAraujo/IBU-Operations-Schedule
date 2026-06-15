@@ -146,13 +146,21 @@ def get_schedule_by_week(week_start_date: date) -> Optional[WeeklySchedule]:
 
 def save_schedule(schedule: WeeklySchedule) -> WeeklySchedule:
     """Save schedule to Excel and update cache"""
-    result = excel_save_schedule(schedule)
-    # Invalidate cache
-    if "schedules" in _MEMORY_CACHE:
-        del _MEMORY_CACHE["schedules"]
-        del _CACHE_TIME["schedules"]
-    print(f"[SAVE] Saved schedule for week {schedule.week_start_date} to Excel")
-    return result
+    print(f"[SAVE] Attempting to save schedule for week {schedule.week_start_date} with {len(schedule.shifts)} shifts")
+    try:
+        result = excel_save_schedule(schedule)
+        print(f"[SAVE] Excel save returned: {result}")
+        # Invalidate cache
+        if "schedules" in _MEMORY_CACHE:
+            del _MEMORY_CACHE["schedules"]
+            del _CACHE_TIME["schedules"]
+        print(f"[SAVE] Saved schedule for week {schedule.week_start_date} to Excel")
+        return result
+    except Exception as e:
+        print(f"[SAVE] Error saving schedule: {e}")
+        import traceback
+        traceback.print_exc()
+        raise
 
 def delete_schedule(week_start_date: date) -> bool:
     """Delete schedule from Excel"""
