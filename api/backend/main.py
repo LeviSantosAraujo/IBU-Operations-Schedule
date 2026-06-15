@@ -1312,6 +1312,27 @@ async def reset_admin_password():
     set_manager_password('admin_001', 'System Admin', 'admin123')
     return {"success": True, "message": "Admin password reset to admin123"}
 
+@app.get("/api/diagnostic/test-github-write")
+async def test_github_write():
+    """Test GitHub write by reading the current Excel file and writing it back"""
+    from excel_store import _get_workbook, _save_workbook
+    from openpyxl import load_workbook
+    import io
+    
+    try:
+        # Get current workbook
+        wb = _get_workbook()
+        if not wb:
+            return {"success": False, "error": "Failed to get workbook"}
+        
+        # Save it (this should trigger GitHub write)
+        result = _save_workbook(wb)
+        wb.close()
+        
+        return {"success": result, "message": "Test write completed"}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
 if __name__ == "__main__":
     import uvicorn
     # Initialize blob storage for cloud deployment
