@@ -1407,8 +1407,26 @@ async def diagnostic_schedules_data():
     
     result = {
         "sheet_names": wb.sheetnames,
-        "schedules_data": []
+        "schedules_data": [],
+        "schedule_sheets": {}
     }
+    
+    # Check for Schedule_ sheets
+    for sheet_name in wb.sheetnames:
+        if sheet_name.startswith('Schedule_'):
+            sheet = wb[sheet_name]
+            rows = []
+            for i, row in enumerate(sheet.iter_rows(values_only=True)):
+                if i < 5:  # First 5 rows
+                    rows.append(list(row))
+                elif i == 5:
+                    rows.append(["... (truncated)"])
+                    break
+            result["schedule_sheets"][sheet_name] = {
+                "rows": rows,
+                "total_rows": sheet.max_row,
+                "total_cols": sheet.max_column
+            }
     
     if "Schedules" in wb.sheetnames:
         sheet = wb["Schedules"]
