@@ -118,13 +118,16 @@ def _get_workbook() -> Optional[Workbook]:
 def _save_workbook(wb: Workbook) -> bool:
     """Save workbook to storage"""
     global _workbook_cache
+    print(f"[_SAVE_WORKBOOK] Starting save, calling storage.save_workbook")
     saved = save_workbook(wb)
+    print(f"[_SAVE_WORKBOOK] storage.save_workbook returned: {saved}")
     try:
         local_path = Path(__file__).parent / "uploads" / "ibu_schedule.xlsx"
         local_path.parent.mkdir(exist_ok=True)
         wb.save(local_path)
-    except OSError:
-        pass
+        print(f"[_SAVE_WORKBOOK] Also saved to local: {local_path}")
+    except OSError as e:
+        print(f"[_SAVE_WORKBOOK] Local save failed (expected on Vercel): {e}")
     _workbook_cache = None
     return saved
 
