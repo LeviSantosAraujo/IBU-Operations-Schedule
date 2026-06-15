@@ -1274,12 +1274,17 @@ async def upload_excel_file(
     if not current_wb:
         raise HTTPException(status_code=500, detail="Failed to load current workbook")
     
-    # Merge logic: preserve employees, merge schedules
+    # Merge logic: preserve employees and passwords, merge schedules
     try:
         # Preserve Employees sheet from current
         if "Employees" in current_wb.sheetnames:
             employees_sheet = current_wb["Employees"]
             # Keep employees as-is
+        
+        # Preserve PWDs sheet from current
+        if "PWDs" in current_wb.sheetnames:
+            pwds_sheet = current_wb["PWDs"]
+            # Keep passwords as-is
         
         # Merge Schedules from uploaded file
         if "Schedules" in uploaded_wb.sheetnames and "Schedules" in current_wb.sheetnames:
@@ -1324,7 +1329,7 @@ async def upload_excel_file(
         
         return {
             "success": True, 
-            "message": "Excel file merged successfully. Employees preserved, schedules and availability updated."
+            "message": "Excel file merged successfully. Employees and passwords preserved, schedules and availability updated."
         }
     except Exception as e:
         current_wb.close()
