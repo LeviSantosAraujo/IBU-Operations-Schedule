@@ -1409,6 +1409,7 @@ async def diagnostic_schedules_data():
         "sheet_names": wb.sheetnames,
         "schedules_data": [],
         "schedule_sheets": {},
+        "weekly_sheets": {},
         "parsed_schedules": []
     }
     
@@ -1424,6 +1425,23 @@ async def diagnostic_schedules_data():
                     rows.append(["... (truncated)"])
                     break
             result["schedule_sheets"][sheet_name] = {
+                "rows": rows,
+                "total_rows": sheet.max_row,
+                "total_cols": sheet.max_column
+            }
+    
+    # Check for weekly sheets (non-Schedule_, non-PWDs)
+    for sheet_name in wb.sheetnames:
+        if not sheet_name.startswith('Schedule_') and sheet_name != 'PWDs' and sheet_name != 'Employees':
+            sheet = wb[sheet_name]
+            rows = []
+            for i, row in enumerate(sheet.iter_rows(values_only=True)):
+                if i < 10:  # First 10 rows
+                    rows.append(list(row))
+                elif i == 10:
+                    rows.append(["... (truncated)"])
+                    break
+            result["weekly_sheets"][sheet_name] = {
                 "rows": rows,
                 "total_rows": sheet.max_row,
                 "total_cols": sheet.max_column
