@@ -58,13 +58,14 @@ export default function DatabaseManagement() {
       })
 
       if (!response.ok) {
-        throw new Error('Failed to upload Excel file')
+        const errorData = await response.json()
+        throw new Error(errorData.detail || 'Failed to upload Excel file')
       }
 
       const result = await response.json()
-      setSuccess(result.message || 'Excel file uploaded successfully')
+      setSuccess(result.message || 'Excel file merged successfully')
     } catch (err) {
-      setError('Failed to upload Excel file')
+      setError(err instanceof Error ? err.message : 'Failed to upload Excel file')
     } finally {
       setUploading(false)
       // Reset file input
@@ -134,7 +135,16 @@ export default function DatabaseManagement() {
             className="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:text-sm file:font-semibold file:bg-green-50 file:text-green-700 hover:file:bg-green-100 disabled:opacity-50"
           />
           {uploading && (
-            <p className="mt-2 text-sm text-gray-600">Uploading...</p>
+            <div className="mt-3">
+              <div className="flex items-center gap-2 text-sm text-gray-600 mb-2">
+                <div className="animate-spin w-4 h-4 border-2 border-green-600 border-t-transparent rounded-full"></div>
+                <span>Merging Excel file with existing data...</span>
+              </div>
+              <div className="w-full bg-gray-200 rounded-full h-2">
+                <div className="bg-green-600 h-2 rounded-full animate-pulse" style={{ width: '60%' }}></div>
+              </div>
+              <p className="mt-2 text-xs text-gray-500">This may take a few seconds. Employees will be preserved.</p>
+            </div>
           )}
         </div>
       </div>
