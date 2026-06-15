@@ -10,6 +10,7 @@ import uuid
 import os
 import shutil
 import io
+import re
 from pathlib import Path
 from pydantic import BaseModel
 
@@ -1306,9 +1307,15 @@ async def upload_excel_file(
                     for cell in row:
                         current_schedules.cell(row=cell.row, column=cell.column, value=cell.value)
         else:
-            # Handle weekly sheets format - convert to Schedule_YYYY-MM-DD format
+            # Handle weekly sheets format - convert to Schedule_YYYY-MM-DD format with proper parsing
             from datetime import datetime
-            from dateutil.parser import parse as parse_date
+            import re
+            import uuid
+            from data_store_excel import get_all_employees
+            
+            # Get employee name to ID mapping
+            employees = get_all_employees()
+            name_to_id = {emp.name.lower(): emp.id for emp in employees}
             
             # Remove existing Schedule_ sheets from current
             for sheet_name in list(current_wb.sheetnames):
@@ -1324,37 +1331,91 @@ async def upload_excel_file(
                         uploaded_sheet = uploaded_wb[sheet_name]
                         for row in uploaded_sheet.iter_rows(values_only=True):
                             new_sheet.append(row)
-                else:
-                    # Try to parse date from sheet name (e.g., "June 15-21", "June 1-7")
+                elif sheet_name not in ['PWDs', 'Employees']:
+                    # Try to parse weekly sheet format
                     try:
-                        # Extract year from current date context (assume 2026)
+                        # Extract week start date from sheet name
                         year = 2026
                         month_map = {
                             'jan': 1, 'feb': 2, 'mar': 3, 'apr': 4, 'may': 5, 'jun': 6,
                             'jul': 7, 'aug': 8, 'sep': 9, 'oct': 10, 'nov': 11, 'dec': 12
                         }
                         
-                        # Parse month and day range
                         sheet_lower = sheet_name.lower()
+                        week_start = None
+                        
                         for month_name, month_num in month_map.items():
                             if month_name in sheet_lower:
-                                # Extract day range
-                                import re
                                 day_match = re.search(r'(\d{1,2})[-\s]+(\d{1,2})', sheet_name)
                                 if day_match:
                                     start_day = int(day_match.group(1))
-                                    # Create schedule sheet name
                                     week_start = datetime(year, month_num, start_day).strftime('%Y-%m-%d')
-                                    schedule_sheet_name = f"Schedule_{week_start}"
-                                    
-                                    if schedule_sheet_name not in current_wb.sheetnames:
-                                        new_sheet = current_wb.create_sheet(schedule_sheet_name)
-                                        uploaded_sheet = uploaded_wb[sheet_name]
-                                        for row in uploaded_sheet.iter_rows(values_only=True):
-                                            new_sheet.append(row)
                                     break
+                        
+                        if not week_start:
+                            continue
+                        
+                        schedule_sheet_name = f"Schedule_{week_start}"
+                        
+                        # Parse the weekly sheet and convert to Schedule_ format
+                        uploaded_sheet = uploaded_wb[sheet_name]
+                        
+                        # Create new Schedule_ sheet with proper headers
+                        new_sheet = current_wb.create_sheet(schedule_sheet_name)
+                        new_sheet.append([
+                            "Shift_ID", "Employee_ID", "Employee_Name", "Day", 
+                            "Start_Time", "End_Time", "Job_Type", "Floor", 
+                            "Hours", "Is_Event", "Event_Name", "Locked", 
+                            "Locked_Avail_Type", "Location"
+                        ])
+                        
+                        # Parse employee schedules from weekly format
+                        days = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']
+                        day_columns = [1, 3, 5, 7, 9, 11, 13]  # Column indices for each day
+                        hour_columns = [2, 4, 6, 8, 10, 12, 14]  # Hour columns
+                        
+                        for row_idx, row in enumerate(uploaded_sheet.iter_rows(min_row=3, values_only=True), start=3):
+                            employee_name = row[0]
+                            if not employee_name or employee_name == 'EVENTS':
+                                continue
+                            
+                            employee_name = str(employee_name).strip()
+                            employee_id = name_to_id.get(employee_name.lower())
+                            
+                            if not employee_id:
+                                continue
+                            
+                            for day_idx, (col_idx, hour_col_idx) in enumerate(zip(day_columns, hour_columns)):
+                                shift_text = row[col_idx]
+                                hours = row[hour_col_idx]
+                                
+                                if shift_text and shift_text != 'OFF' and 'OFF' not in str(shift_text):
+                                    shift_str = str(shift_text)
+                                    
+                                    # Parse shift time and location
+                                    start_time, end_time = parse_shift_time_from_string(shift_str)
+                                    location = parse_location_from_string(shift_str)
+                                    
+                                    if start_time and end_time:
+                                        shift_id = f"shift_{uuid.uuid4().hex[:8]}"
+                                        new_sheet.append([
+                                            shift_id,
+                                            employee_id,
+                                            employee_name,
+                                            days[day_idx],
+                                            start_time,
+                                            end_time,
+                                            'ibu_ops',
+                                            None,
+                                            float(hours) if hours else 0,
+                                            False,
+                                            None,
+                                            False,
+                                            None,
+                                            location
+                                        ])
                     except Exception as e:
-                        print(f"Could not parse sheet name {sheet_name}: {e}")
+                        print(f"Could not parse sheet {sheet_name}: {e}")
                         continue
         
         # Merge Availabilities from uploaded file
@@ -1395,6 +1456,46 @@ async def upload_excel_file(
         current_wb.close()
         uploaded_wb.close()
         raise HTTPException(status_code=500, detail=f"Merge failed: {str(e)}")
+
+# Helper functions for parsing shift strings
+def parse_shift_time_from_string(shift_str: str) -> tuple:
+    """Parse shift time from string like '9a-5p' or '8a-3p'"""
+    try:
+        # Match patterns like "9a-5p", "8a-3p", "7:45a-4:15p"
+        match = re.search(r'(\d{1,2}(?::\d{2})?[ap])[-\s]+(\d{1,2}(?::\d{2})?[ap])', shift_str.lower())
+        if match:
+            start = match.group(1)
+            end = match.group(2)
+            
+            # Convert to 24-hour format
+            def to_24h(t):
+                t = t.replace('a', 'am').replace('p', 'pm')
+                return datetime.strptime(t, '%I:%M%p').strftime('%H:%M') if ':' in t else datetime.strptime(t, '%I%p').strftime('%H:%M')
+            
+            return to_24h(start), to_24h(end)
+    except:
+        pass
+    return None, None
+
+def parse_location_from_string(shift_str: str) -> str:
+    """Parse location from shift string like '8a-3p INVENTORY' or '12p-7p f6 CC'"""
+    shift_lower = shift_str.lower()
+    
+    # Check for common location patterns
+    if 'inventory' in shift_lower:
+        return 'inventory'
+    elif 'f6' in shift_lower:
+        return 'sixth_floor'
+    elif 'f2' in shift_lower:
+        return 'second_floor'
+    elif 'ground' in shift_lower or 'gf' in shift_lower:
+        return 'ground_floor'
+    elif 'cc' in shift_lower:
+        return 'call_center'
+    elif 'event' in shift_lower:
+        return 'event'
+    
+    return None
 
 @app.get("/api/diagnostic/schedules-data")
 async def diagnostic_schedules_data():
