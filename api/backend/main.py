@@ -1254,9 +1254,10 @@ async def upload_excel_file(
     file: UploadFile = File(...),
     user: Dict = Depends(require_manager)
 ):
-    """Upload a new Excel file to replace all data (managers only)"""
-    from excel_store import _invalidate_cache
-    from storage import store_excel_data
+    """Upload and merge Excel file with existing data (managers only)"""
+    from excel_store import _invalidate_cache, _get_workbook, _save_workbook
+    from openpyxl import load_workbook
+    import io
     
     # Validate file type
     if not file.filename.endswith('.xlsx'):
@@ -1265,16 +1266,70 @@ async def upload_excel_file(
     # Read file content
     content = await file.read()
     
-    # Store the Excel file (will write to GitHub)
-    success = store_excel_data(content, "ibu_schedule.xlsx")
+    # Load uploaded Excel file
+    uploaded_wb = load_workbook(io.BytesIO(content))
     
-    if not success:
-        raise HTTPException(status_code=500, detail="Failed to store Excel file")
+    # Get current workbook
+    current_wb = _get_workbook()
+    if not current_wb:
+        raise HTTPException(status_code=500, detail="Failed to load current workbook")
     
-    # Invalidate cache so new data is loaded
-    _invalidate_cache()
-    
-    return {"success": True, "message": "Excel file uploaded successfully. All data has been replaced."}
+    # Merge logic: preserve employees, merge schedules
+    try:
+        # Preserve Employees sheet from current
+        if "Employees" in current_wb.sheetnames:
+            employees_sheet = current_wb["Employees"]
+            # Keep employees as-is
+        
+        # Merge Schedules from uploaded file
+        if "Schedules" in uploaded_wb.sheetnames and "Schedules" in current_wb.sheetnames:
+            uploaded_schedules = uploaded_wb["Schedules"]
+            current_schedules = current_wb["Schedules"]
+            
+            # Clear current schedules (except header)
+            for row in list(current_schedules.iter_rows(min_row=2)):
+                for cell in row:
+                    cell.value = None
+            
+            # Copy uploaded schedules
+            for row in uploaded_schedules.iter_rows(min_row=2):
+                for cell in row:
+                    current_schedules.cell(row=cell.row, column=cell.column, value=cell.value)
+        
+        # Merge Availabilities from uploaded file
+        if "Availability" in uploaded_wb.sheetnames and "Availability" in current_wb.sheetnames:
+            uploaded_avail = uploaded_wb["Availability"]
+            current_avail = current_wb["Availability"]
+            
+            # Clear current availability (except header)
+            for row in list(current_avail.iter_rows(min_row=2)):
+                for cell in row:
+                    cell.value = None
+            
+            # Copy uploaded availability
+            for row in uploaded_avail.iter_rows(min_row=2):
+                for cell in row:
+                    current_avail.cell(row=cell.row, column=cell.column, value=cell.value)
+        
+        # Save merged workbook
+        saved = _save_workbook(current_wb)
+        current_wb.close()
+        uploaded_wb.close()
+        
+        if not saved:
+            raise HTTPException(status_code=500, detail="Failed to save merged workbook")
+        
+        # Invalidate cache
+        _invalidate_cache()
+        
+        return {
+            "success": True, 
+            "message": "Excel file merged successfully. Employees preserved, schedules and availability updated."
+        }
+    except Exception as e:
+        current_wb.close()
+        uploaded_wb.close()
+        raise HTTPException(status_code=500, detail=f"Merge failed: {str(e)}")
 
 @app.get("/api/diagnostic/github-storage")
 async def diagnostic_github_storage():
