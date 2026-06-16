@@ -1696,6 +1696,24 @@ async def diagnostic_schedules_data():
     
     wb.close()
     
+    # Test name matching with sample names from weekly sheets
+    from data_store_excel import get_all_employees
+    employees = get_all_employees()
+    exact_map, base_map = build_employee_lookup(employees)
+    test_names = ['Fran', 'Aashima', 'NAHIM ', 'Pablo 2', 'Kavya C', 'Mickaela  C', 'Viviana 3']
+    name_test_results = {}
+    for name in test_names:
+        matched_id = match_employee_id(name, exact_map, base_map)
+        norm = normalize_employee_name(name)
+        name_test_results[name] = {
+            'normalized': norm,
+            'matched_id': matched_id,
+            'in_exact': norm in exact_map or name.lower().strip() in exact_map,
+            'in_base': norm in base_map
+        }
+    result['name_matching_test'] = name_test_results
+    result['system_employees'] = [e.name for e in employees[:10]]  # First 10
+    
     # Invalidate cache and try to parse schedules
     _invalidate_cache()
     try:
