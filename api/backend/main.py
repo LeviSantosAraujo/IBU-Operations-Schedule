@@ -1453,41 +1453,80 @@ async def upload_excel_file(
 
 # Helper functions for parsing shift strings
 def parse_shift_time_from_string(shift_str: str) -> tuple:
-    """Parse shift time from string like '9a-5p' or '8a-3p'"""
+    """Parse shift time from string like '9a-5p', '10a-4pm', '7:45a-4:15p', '12-12:30'"""
     try:
-        # Match patterns like "9a-5p", "8a-3p", "7:45a-4:15p"
-        match = re.search(r'(\d{1,2}(?::\d{2})?[ap])[-\s]+(\d{1,2}(?::\d{2})?[ap])', shift_str.lower())
-        if match:
-            start = match.group(1)
-            end = match.group(2)
+        shift_lower = shift_str.lower().strip()
+        
+        # Remove common suffixes that aren't part of time
+        for suffix in ['offsite', 'lieu accrued', 'lieu', 'event', 'closing', 'f6', 'f2', 'gr', 'cc', 'cl']:
+            shift_lower = shift_lower.replace(suffix, '')
+        
+        # Match various time patterns
+        # Pattern 1: "9a-5p", "10a-4pm", "8a-3p"
+        # Pattern 2: "7:45a-4:15p", "9:30a-5:30p"
+        # Pattern 3: "12-12:30", "12:30-8"
+        # Pattern 4: "3p-7:30p"
+        
+        # Try to find start and end times
+        # Match: digits followed by optional colon and digits, optional am/pm
+        time_pattern = r'(\d{1,2})(?::(\d{2}))?(?:\s*)([ap]m?)'
+        matches = list(re.finditer(time_pattern, shift_lower))
+        
+        if len(matches) >= 2:
+            # Use first two time matches as start and end
+            start_match = matches[0]
+            end_match = matches[1]
             
-            # Convert to 24-hour format
-            def to_24h(t):
-                t = t.replace('a', 'am').replace('p', 'pm')
-                return datetime.strptime(t, '%I:%M%p').strftime('%H:%M') if ':' in t else datetime.strptime(t, '%I%p').strftime('%H:%M')
+            def to_24h(hour, minute, ampm):
+                hour = int(hour)
+                minute = int(minute) if minute else 0
+                if 'p' in ampm and hour != 12:
+                    hour += 12
+                elif 'a' in ampm and hour == 12:
+                    hour = 0
+                return f"{hour:02d}:{minute:02d}"
             
-            return to_24h(start), to_24h(end)
-    except:
-        pass
+            start_time = to_24h(start_match.group(1), start_match.group(2), start_match.group(3))
+            end_time = to_24h(end_match.group(1), end_match.group(2), end_match.group(3))
+            
+            return start_time, end_time
+        
+        # Fallback: try simple pattern without am/pm (assume 24h format like "12-12:30")
+        simple_match = re.search(r'(\d{1,2})(?::(\d{2}))?\s*-\s*(\d{1,2})(?::(\d{2}))?(?![ap])', shift_lower)
+        if simple_match:
+            start_h = int(simple_match.group(1))
+            start_m = int(simple_match.group(2)) if simple_match.group(2) else 0
+            end_h = int(simple_match.group(3))
+            end_m = int(simple_match.group(4)) if simple_match.group(4) else 0
+            return f"{start_h:02d}:{start_m:02d}", f"{end_h:02d}:{end_m:02d}"
+            
+    except Exception as e:
+        print(f"Error parsing shift '{shift_str}': {e}")
     return None, None
 
 def parse_location_from_string(shift_str: str) -> str:
     """Parse location from shift string like '8a-3p INVENTORY' or '12p-7p f6 CC'"""
     shift_lower = shift_str.lower()
     
-    # Check for common location patterns
-    if 'inventory' in shift_lower:
+    # Check for common location patterns (order matters - more specific first)
+    if 'offsite' in shift_lower:
+        return 'offsite'
+    elif 'inventory' in shift_lower:
         return 'inventory'
-    elif 'f6' in shift_lower:
+    elif 'f6' in shift_lower or '6th' in shift_lower or 'sixth' in shift_lower:
         return 'sixth_floor'
-    elif 'f2' in shift_lower:
+    elif 'f2' in shift_lower or '2nd' in shift_lower or 'second' in shift_lower:
         return 'second_floor'
-    elif 'ground' in shift_lower or 'gf' in shift_lower:
+    elif 'ground' in shift_lower or 'gr' in shift_lower or 'gf' in shift_lower:
         return 'ground_floor'
-    elif 'cc' in shift_lower:
+    elif 'cc' in shift_lower or 'call center' in shift_lower:
         return 'call_center'
+    elif 'cl' in shift_lower or 'closing' in shift_lower:
+        return 'closing'
     elif 'event' in shift_lower:
         return 'event'
+    elif 'ro' in shift_lower or 'requested off' in shift_lower:
+        return 'day_off'
     
     return None
 
