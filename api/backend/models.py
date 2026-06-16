@@ -154,6 +154,7 @@ class SystemConfig(BaseModel):
     default_weights: Dict[str, int] = Field(default_factory=dict)
     scheduling_rules: Dict[str, Any] = Field(default_factory=dict)
     floor_requirements: Dict[Floor, Dict[str, int]] = Field(default_factory=dict)
+    notifications: List[Dict] = Field(default_factory=list)
     staffing_targets: Dict[str, int] = Field(default_factory=dict)
 
 class AvailabilityRequestStatus(str, Enum):
