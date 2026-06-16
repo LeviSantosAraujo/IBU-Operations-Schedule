@@ -1316,9 +1316,11 @@ async def upload_excel_file(
             import uuid
             from data_store_excel import get_all_employees
             
-            # Get employee name to ID mapping
+            # Get employee name to ID mapping (exact + normalized fallback)
             employees = get_all_employees()
-            name_to_id = {emp.name.lower(): emp.id for emp in employees}
+            exact_map, base_map = build_employee_lookup(employees)
+            id_to_name = {emp.id: emp.name for emp in employees}
+            unmatched_names = set()
             
             # Remove existing Schedule_ sheets from current
             for sheet_name in list(current_wb.sheetnames):
@@ -1370,47 +1372,55 @@ async def upload_excel_file(
                     
                     for row_idx, row in enumerate(uploaded_sheet.iter_rows(min_row=3, values_only=True), start=3):
                         employee_name = row[0]
-                        if not employee_name or employee_name == 'EVENTS':
+                        if not employee_name or str(employee_name).strip().upper() == 'EVENTS':
                             continue
                         
                         employee_name = str(employee_name).strip()
-                        employee_id = name_to_id.get(employee_name.lower())
+                        employee_id = match_employee_id(employee_name, exact_map, base_map)
                         
                         if not employee_id:
+                            unmatched_names.add(employee_name)
                             continue
                         
+                        # Use the canonical system name
+                        canonical_name = id_to_name.get(employee_id, employee_name)
+                        
                         for day_idx, (col_idx, hour_col_idx) in enumerate(zip(day_columns, hour_columns)):
+                            if col_idx >= len(row):
+                                continue
                             shift_text = row[col_idx]
-                            hours = row[hour_col_idx]
+                            hours = row[hour_col_idx] if hour_col_idx < len(row) else None
                             
-                            if shift_text and shift_text != 'OFF' and 'OFF' not in str(shift_text):
-                                shift_str = str(shift_text)
-                                
-                                # Parse shift time and location
-                                start_time, end_time = parse_shift_time_from_string(shift_str)
-                                location = parse_location_from_string(shift_str)
-                                
-                                if start_time and end_time:
-                                    shift_id = f"shift_{uuid.uuid4().hex[:8]}"
-                                    new_sheet.append([
-                                        shift_id,
-                                        employee_id,
-                                        employee_name,
-                                        days[day_idx],
-                                        start_time,
-                                        end_time,
-                                        'ibu_ops',
-                                        None,
-                                        float(hours) if hours else 0,
-                                        False,
-                                        None,
-                                        False,
-                                        None,
-                                        location
-                                    ])
+                            if not shift_text:
+                                continue
+                            
+                            # Parse all shifts in this cell (may be multiple separated by '/')
+                            parsed_shifts = parse_shift_cell(shift_text, hours)
+                            
+                            for ps in parsed_shifts:
+                                shift_id = f"shift_{uuid.uuid4().hex[:8]}"
+                                new_sheet.append([
+                                    shift_id,
+                                    employee_id,
+                                    canonical_name,
+                                    days[day_idx],
+                                    ps['start'],
+                                    ps['end'],
+                                    'ibu_ops',
+                                    None,
+                                    ps['hours'],
+                                    False,
+                                    None,
+                                    False,
+                                    None,
+                                    ps['location']
+                                ])
                 except Exception as e:
                     print(f"Could not parse sheet {sheet_name}: {e}")
                     continue
+            
+            if unmatched_names:
+                print(f"[UPLOAD] Unmatched employee names (skipped): {sorted(unmatched_names)}")
         
         # Merge Availabilities from uploaded file
         if "Availability" in uploaded_wb.sheetnames and "Availability" in current_wb.sheetnames:
@@ -1452,57 +1462,149 @@ async def upload_excel_file(
         raise HTTPException(status_code=500, detail=f"Merge failed: {str(e)}")
 
 # Helper functions for parsing shift strings
-def parse_shift_time_from_string(shift_str: str) -> tuple:
-    """Parse shift time from string like '9a-5p', '10a-4pm', '7:45a-4:15p', '12-12:30'"""
+def normalize_employee_name(name: str) -> str:
+    """Normalize an employee name by stripping trailing suffixes (numbers, single letters)
+    and collapsing whitespace. e.g. 'Pablo 2' -> 'pablo', 'Sagar C' -> 'sagar'."""
+    if not name:
+        return ""
+    n = str(name).strip().lower()
+    # Collapse multiple spaces
+    n = re.sub(r'\s+', ' ', n)
+    # Strip common prefixes like 'intern -', 'inton-'
+    n = re.sub(r'^(intern|inton)\s*[-]?\s*', '', n)
+    # Strip trailing suffix: a single number or single letter token
+    n = re.sub(r'\s+(\d{1,2}|[a-z])$', '', n)
+    return n.strip()
+
+# Manual alias map for spelling differences between Excel and system
+EMPLOYEE_NAME_ALIASES = {
+    'arnab': 'arnob',
+}
+
+def build_employee_lookup(employees):
+    """Build exact and normalized name->id lookups from a list of Employee objects.
+    Exact match takes precedence; normalized (suffix-stripped) is the fallback."""
+    exact = {}
+    base = {}
+    for emp in employees:
+        ename = str(emp.name).strip().lower()
+        ename = re.sub(r'\s+', ' ', ename)
+        # Exact lookup
+        if ename not in exact:
+            exact[ename] = emp.id
+        # Base (normalized) lookup - prefer lower/original emp_ ids
+        norm = normalize_employee_name(emp.name)
+        if norm and (norm not in base or str(emp.id) < str(base[norm])):
+            base[norm] = emp.id
+    return exact, base
+
+def match_employee_id(excel_name: str, exact_map: dict, base_map: dict):
+    """Match an Excel employee name to a system employee id using multiple strategies."""
+    if not excel_name:
+        return None
+    raw = re.sub(r'\s+', ' ', str(excel_name).strip().lower())
+    # 1. Exact match
+    if raw in exact_map:
+        return exact_map[raw]
+    # 2. Normalized base match
+    norm = normalize_employee_name(excel_name)
+    norm = EMPLOYEE_NAME_ALIASES.get(norm, norm)
+    if norm in base_map:
+        return base_map[norm]
+    if norm in exact_map:
+        return exact_map[norm]
+    return None
+
+def _parse_one_time_range(segment: str):
+    """Parse a single time range like '9a-5p', '7:45a - 3p', '10a-4:30', '1-1:30'.
+    Returns (start_24, end_24, duration_minutes) or (None, None, 0)."""
+    seg = segment.lower()
+    # Strip break markers like 'b@11:30', '8@11:30', '@12'
+    seg = re.sub(r'\S*@\S*', ' ', seg)
+    # Find a start-end time range
+    m = re.search(
+        r'(\d{1,2})(?::(\d{2}))?\s*([ap])?m?\s*-\s*(\d{1,2})(?::(\d{2}))?\s*([ap])?m?',
+        seg,
+    )
+    if not m:
+        return None, None, 0
+    sh = int(m.group(1)); sm = int(m.group(2)) if m.group(2) else 0; sap = m.group(3)
+    eh = int(m.group(4)); em = int(m.group(5)) if m.group(5) else 0; eap = m.group(6)
+
+    def base_24(hour, ap, default_pm=False):
+        if ap == 'p':
+            return hour + 12 if hour != 12 else 12
+        if ap == 'a':
+            return 0 if hour == 12 else hour
+        # No marker - infer
+        if default_pm and hour < 12:
+            return hour + 12
+        # Heuristic: 1-6 -> pm, 7-11 -> am, 12 -> pm
+        if 1 <= hour <= 6:
+            return hour + 12
+        if hour == 12:
+            return 12
+        return hour
+
+    start_h = base_24(sh, sap)
+    # For end, if no marker, infer pm so that end > start
+    if eap:
+        end_h = base_24(eh, eap)
+    else:
+        end_h = base_24(eh, None)
+        # If end <= start, bump to pm
+        if (end_h * 60 + em) <= (start_h * 60 + sm) and eh < 12:
+            end_h = eh + 12
+    start_min = start_h * 60 + sm
+    end_min = end_h * 60 + em
+    duration = end_min - start_min
+    if duration <= 0:
+        return None, None, 0
+    return f"{start_h:02d}:{sm:02d}", f"{end_h:02d}:{em:02d}", duration
+
+def parse_shift_cell(cell_text: str, total_hours):
+    """Parse a cell that may contain one or more shifts separated by '/'.
+    Returns a list of dicts: {start, end, location, hours}.
+    Hours from total_hours are split proportionally by each shift's duration."""
+    if not cell_text:
+        return []
+    text = str(cell_text).strip()
+    # Skip non-working markers
+    upper = text.upper()
+    if upper in ('OFF', 'RO') or upper.startswith('OFF ') or 'LIEU' in upper or upper.startswith('RO '):
+        return []
+
+    segments = [s.strip() for s in text.split('/') if s.strip()]
+    shifts = []
+    for seg in segments:
+        start, end, duration = _parse_one_time_range(seg)
+        loc = parse_location_from_string(seg)
+        if start and end:
+            shifts.append({'start': start, 'end': end, 'location': loc, 'duration': duration})
+        else:
+            # No time in this segment - treat as location modifier for previous shift
+            if shifts and loc:
+                if not shifts[-1]['location']:
+                    shifts[-1]['location'] = loc
+
+    # Distribute total_hours proportionally by duration
     try:
-        shift_lower = shift_str.lower().strip()
-        
-        # Remove common suffixes that aren't part of time
-        for suffix in ['offsite', 'lieu accrued', 'lieu', 'event', 'closing', 'f6', 'f2', 'gr', 'cc', 'cl']:
-            shift_lower = shift_lower.replace(suffix, '')
-        
-        # Match various time patterns
-        # Pattern 1: "9a-5p", "10a-4pm", "8a-3p"
-        # Pattern 2: "7:45a-4:15p", "9:30a-5:30p"
-        # Pattern 3: "12-12:30", "12:30-8"
-        # Pattern 4: "3p-7:30p"
-        
-        # Try to find start and end times
-        # Match: digits followed by optional colon and digits, optional am/pm
-        time_pattern = r'(\d{1,2})(?::(\d{2}))?(?:\s*)([ap]m?)'
-        matches = list(re.finditer(time_pattern, shift_lower))
-        
-        if len(matches) >= 2:
-            # Use first two time matches as start and end
-            start_match = matches[0]
-            end_match = matches[1]
-            
-            def to_24h(hour, minute, ampm):
-                hour = int(hour)
-                minute = int(minute) if minute else 0
-                if 'p' in ampm and hour != 12:
-                    hour += 12
-                elif 'a' in ampm and hour == 12:
-                    hour = 0
-                return f"{hour:02d}:{minute:02d}"
-            
-            start_time = to_24h(start_match.group(1), start_match.group(2), start_match.group(3))
-            end_time = to_24h(end_match.group(1), end_match.group(2), end_match.group(3))
-            
-            return start_time, end_time
-        
-        # Fallback: try simple pattern without am/pm (assume 24h format like "12-12:30")
-        simple_match = re.search(r'(\d{1,2})(?::(\d{2}))?\s*-\s*(\d{1,2})(?::(\d{2}))?(?![ap])', shift_lower)
-        if simple_match:
-            start_h = int(simple_match.group(1))
-            start_m = int(simple_match.group(2)) if simple_match.group(2) else 0
-            end_h = int(simple_match.group(3))
-            end_m = int(simple_match.group(4)) if simple_match.group(4) else 0
-            return f"{start_h:02d}:{start_m:02d}", f"{end_h:02d}:{end_m:02d}"
-            
-    except Exception as e:
-        print(f"Error parsing shift '{shift_str}': {e}")
-    return None, None
+        total = float(total_hours) if total_hours not in (None, '') else None
+    except (ValueError, TypeError):
+        total = None
+
+    total_duration = sum(s['duration'] for s in shifts) or 0
+    for s in shifts:
+        if total is not None and total_duration > 0:
+            s['hours'] = round(total * (s['duration'] / total_duration), 2)
+        else:
+            s['hours'] = round(s['duration'] / 60.0, 2)
+    return shifts
+
+def parse_shift_time_from_string(shift_str: str) -> tuple:
+    """Backward-compatible single-range parser."""
+    start, end, _ = _parse_one_time_range(str(shift_str))
+    return start, end
 
 def parse_location_from_string(shift_str: str) -> str:
     """Parse location from shift string like '8a-3p INVENTORY' or '12p-7p f6 CC'"""
@@ -1517,7 +1619,7 @@ def parse_location_from_string(shift_str: str) -> str:
         return 'sixth_floor'
     elif 'f2' in shift_lower or '2nd' in shift_lower or 'second' in shift_lower:
         return 'second_floor'
-    elif 'ground' in shift_lower or 'gr' in shift_lower or 'gf' in shift_lower:
+    elif 'ground' in shift_lower or re.search(r'\bgr\b', shift_lower) or 'gf' in shift_lower:
         return 'ground_floor'
     elif 'cc' in shift_lower or 'call center' in shift_lower:
         return 'call_center'
@@ -1525,8 +1627,6 @@ def parse_location_from_string(shift_str: str) -> str:
         return 'closing'
     elif 'event' in shift_lower:
         return 'event'
-    elif 'ro' in shift_lower or 'requested off' in shift_lower:
-        return 'day_off'
     
     return None
 
