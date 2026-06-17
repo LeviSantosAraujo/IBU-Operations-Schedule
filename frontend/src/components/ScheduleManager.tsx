@@ -1536,7 +1536,7 @@ export default function ScheduleManager() {
                     <div>
                       <h5 className="text-sm font-medium mb-2 text-gray-600">Job Preferences</h5>
                       <div className="space-y-2">
-                        {['ground_floor', 'second_floor', 'sixth_floor', 'call_center', '80_bloor', 'working_from_home', 'event'].map(jobType => (
+                        {['ground_floor', 'second_floor', 'sixth_floor', 'call_center', '80_bloor', 'event'].map(jobType => (
                           <div key={jobType} className="flex items-center gap-3">
                             <span className="flex-1 text-sm capitalize">{jobType.replace('_', ' ')}</span>
                             <div className="flex items-center gap-1">
