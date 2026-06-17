@@ -393,7 +393,11 @@ def get_all_employees() -> List[Employee]:
             
             # Handle preferences - can be string or dict
             if isinstance(emp_preferences, str):
-                preferences_value = emp_preferences
+                # Try to parse JSON string
+                try:
+                    preferences_value = json.loads(emp_preferences)
+                except:
+                    preferences_value = {}
             elif isinstance(emp_preferences, dict):
                 preferences_value = emp_preferences
             else:
