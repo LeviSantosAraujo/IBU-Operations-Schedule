@@ -34,8 +34,20 @@ from excel_store import (
 
 # In-memory cache for Excel data to improve performance
 _MEMORY_CACHE: Dict[str, Any] = {}
-_CACHE_TTL_SECONDS = int(os.getenv("DATA_CACHE_TTL_SECONDS", "60"))
+# DISABLE CACHING for employees to prevent stale data from reappearing
+_CACHE_TTL_SECONDS = 0  # Force fresh load from GitHub every time
 _CACHE_TIME: Dict[str, float] = {}
+
+def clear_all_caches():
+    """Clear all memory caches"""
+    global _MEMORY_CACHE, _CACHE_TIME
+    _MEMORY_CACHE.clear()
+    _CACHE_TIME.clear()
+    print("[CACHE] Cleared all data_store_excel caches")
+
+# Clear cache on module load to force fresh data from GitHub
+clear_all_caches()
+print("[INIT] Cleared data_store_excel cache on startup")
 
 def _is_cache_valid(key: str) -> bool:
     """Check if cache entry is still valid"""
@@ -88,6 +100,8 @@ def delete_employee(employee_id: str) -> bool:
         if "employees" in _MEMORY_CACHE:
             del _MEMORY_CACHE["employees"]
             del _CACHE_TIME["employees"]
+        # Clear all caches to ensure fresh load
+        clear_all_caches()
     return result
 
 # Availability operations
@@ -192,7 +206,7 @@ def get_system_config() -> SystemConfig:
 
 def save_system_config(config: SystemConfig) -> SystemConfig:
     """Save system config to Excel and update cache"""
-    result = excel_save_system_config(config)
+    result = excel_save_system_config(config.model_dump())
     # Invalidate cache
     if "config" in _MEMORY_CACHE:
         del _MEMORY_CACHE["config"]
