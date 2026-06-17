@@ -1720,7 +1720,7 @@ async def diagnostic_schedules_data():
     from data_store_excel import get_all_employees
     employees = get_all_employees()
     exact_map, base_map = build_employee_lookup(employees)
-    test_names = ['Fran', 'Aashima', 'NAHIM ', 'Pablo 2', 'Kavya C', 'Mickaela  C', 'Viviana 3']
+    test_names = ['Fran', 'Aashima', 'NAHIM ', 'Pablo 2', 'Kavya C', 'Mickaela  C', 'Viviana 3', 'Fran SManager', 'Aashima Supervisor', 'Sagar C', 'Daria C', 'Chinnesha C', 'Anastasia B', 'Iqra B', 'Viviana B', 'Osmaro last day']
     name_test_results = {}
     for name in test_names:
         matched_id = match_employee_id(name, exact_map, base_map)
