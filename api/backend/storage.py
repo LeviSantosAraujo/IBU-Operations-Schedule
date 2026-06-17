@@ -16,25 +16,10 @@ BLOB_AVAILABLE = False
 def _init_vercel_blob():
     """Initialize Vercel Blob storage"""
     global BLOB_STORAGE, BLOB_AVAILABLE
-    print(f"[INIT] BLOB_READ_WRITE_TOKEN set: {bool(os.getenv('BLOB_READ_WRITE_TOKEN'))}")
-    print(f"[INIT] BLOB_READ_WRITE_TOKEN_STORE_ID: {os.getenv('BLOB_READ_WRITE_TOKEN_STORE_ID')}")
-    # Enable blob storage for persistent Excel storage
-    if os.getenv("BLOB_READ_WRITE_TOKEN"):
-        try:
-            import vercel_blob  # noqa: F401
-            BLOB_AVAILABLE = True
-            print("[INIT] Vercel Blob storage enabled")
-            return True
-        except Exception as e:
-            print(f"[INIT] Failed to initialize Vercel Blob: {e}")
-            import traceback
-            traceback.print_exc()
-            BLOB_AVAILABLE = False
-            BLOB_STORAGE = None
-    else:
-        print("[INIT] BLOB_READ_WRITE_TOKEN not set, using memory storage")
-        BLOB_AVAILABLE = False
-        BLOB_STORAGE = None
+    # DISABLED: Blob storage is suspended, use GitHub-only storage
+    BLOB_AVAILABLE = False
+    BLOB_STORAGE = None
+    print("[INIT] Blob storage disabled - using GitHub-only storage")
     return False
 
 def blob_put(key: str, data: bytes, store_id: Optional[str] = None) -> bool:
@@ -238,3 +223,7 @@ def save_workbook(wb: Workbook, filename: str = "ibu_schedule.xlsx") -> bool:
 
 # Initialize on import
 _init_vercel_blob()
+
+# Clear in-memory cache on startup to force fresh load from GitHub
+EXCEL_DATA_STORE.clear()
+print("[INIT] Cleared in-memory cache on startup - will load from GitHub")
