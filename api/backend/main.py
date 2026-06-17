@@ -46,6 +46,11 @@ class LoginRequest(BaseModel):
     employee_id: str
     password: Optional[str] = None
 
+class AdminLoginRequest(BaseModel):
+    employee_id: str
+    password: Optional[str] = None
+    secret_key: str
+
 class SetPasswordRequest(BaseModel):
     employee_id: str
     password: str
@@ -288,10 +293,10 @@ async def login(request: LoginRequest):
         raise HTTPException(status_code=400, detail="No employees configured. Please initialize the system first.")
 
     employee = get_employee_by_id(request.employee_id)
-    
+
     if not employee:
         raise HTTPException(status_code=404, detail="Employee not found")
-    
+
     # Managers need password verification
     if employee.employee_type == EmployeeType.MANAGER:
         if manager_has_password(request.employee_id):
@@ -300,14 +305,46 @@ async def login(request: LoginRequest):
             if not verify_manager_password(request.employee_id, request.password):
                 raise HTTPException(status_code=401, detail="Invalid password")
         # If no password set yet, allow login (first time setup)
-    
+
     token = AuthManager.login(request.employee_id, request.password, get_employee_by_id)
-    
+
     return {
         "token": token,
         "employee": employee,
         "role": employee.employee_type,
         "requires_password_setup": employee.employee_type == EmployeeType.MANAGER and not manager_has_password(request.employee_id)
+    }
+
+@app.post("/api/admin-login")
+async def admin_login(request: AdminLoginRequest):
+    """Secret admin login endpoint - requires secret key"""
+    ADMIN_SECRET_KEY = os.getenv("ADMIN_SECRET_KEY", "ibu-admin-secret-2026")
+
+    if request.secret_key != ADMIN_SECRET_KEY:
+        raise HTTPException(status_code=403, detail="Invalid secret key")
+
+    # Check if system has employees configured
+    has_employees = len(get_all_employees()) > 0
+    if not has_employees:
+        raise HTTPException(status_code=400, detail="No employees configured. Please initialize the system first.")
+
+    employee = get_employee_by_id(request.employee_id)
+
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+
+    # Force manager role for admin login
+    if employee.employee_type != EmployeeType.MANAGER:
+        raise HTTPException(status_code=403, detail="Admin login only available for managers")
+
+    # Bypass password verification for admin login
+    token = AuthManager.login(request.employee_id, request.password, get_employee_by_id)
+
+    return {
+        "token": token,
+        "employee": employee,
+        "role": "admin",  # Force admin role
+        "requires_password_setup": False
     }
 
 @app.post("/api/logout")
