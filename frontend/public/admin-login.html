@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Login - IBU Operations Schedule</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-900 min-h-screen flex items-center justify-center">
+    <div class="bg-gray-800 p-8 rounded-lg shadow-lg max-w-md w-full">
+        <h1 class="text-2xl font-bold text-white mb-6 text-center">Admin Login</h1>
+        <form id="adminLoginForm">
+            <div class="mb-4">
+                <label class="block text-gray-300 text-sm font-bold mb-2" for="employeeId">
+                    Employee ID
+                </label>
+                <input 
+                    class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" 
+                    id="employeeId" 
+                    type="text" 
+                    placeholder="Enter employee ID"
+                    required
+                >
+            </div>
+            <div class="mb-4">
+                <label class="block text-gray-300 text-sm font-bold mb-2" for="secretKey">
+                    Secret Key
+                </label>
+                <input 
+                    class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" 
+                    id="secretKey" 
+                    type="password" 
+                    placeholder="Enter secret key"
+                    required
+                >
+            </div>
+            <div class="mb-6">
+                <label class="block text-gray-300 text-sm font-bold mb-2" for="password">
+                    Password (optional)
+                </label>
+                <input 
+                    class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" 
+                    id="password" 
+                    type="password" 
+                    placeholder="Enter password if set"
+                >
+            </div>
+            <div class="flex items-center justify-between">
+                <button 
+                    class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline w-full" 
+                    type="submit"
+                >
+                    Login as Admin
+                </button>
+            </div>
+        </form>
+        <div id="message" class="mt-4 text-center text-sm"></div>
+    </div>
+
+    <script>
+        const API_URL = 'https://ibu-operations-schedule.vercel.app/api';
+        
+        document.getElementById('adminLoginForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const employeeId = document.getElementById('employeeId').value;
+            const secretKey = document.getElementById('secretKey').value;
+            const password = document.getElementById('password').value;
+            const messageDiv = document.getElementById('message');
+            
+            messageDiv.textContent = 'Logging in...';
+            messageDiv.className = 'mt-4 text-center text-sm text-yellow-400';
+            
+            try {
+                const response = await fetch(`${API_URL}/admin-login`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        employee_id: employeeId,
+                        password: password,
+                        secret_key: secretKey
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    // Store token and redirect to main app
+                    localStorage.setItem('token', data.token);
+                    localStorage.setItem('employee', JSON.stringify(data.employee));
+                    localStorage.setItem('role', data.role);
+                    
+                    messageDiv.textContent = 'Login successful! Redirecting...';
+                    messageDiv.className = 'mt-4 text-center text-sm text-green-400';
+                    
+                    setTimeout(() => {
+                        window.location.href = '/';
+                    }, 1000);
+                } else {
+                    messageDiv.textContent = data.detail || 'Login failed';
+                    messageDiv.className = 'mt-4 text-center text-sm text-red-400';
+                }
+            } catch (error) {
+                messageDiv.textContent = 'Error: ' + error.message;
+                messageDiv.className = 'mt-4 text-center text-sm text-red-400';
+            }
+        });
+    </script>
+</body>
+</html>
