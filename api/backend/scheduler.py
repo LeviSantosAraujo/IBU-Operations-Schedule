@@ -25,6 +25,15 @@ class SchedulingEngine:
             '80 bloor': ('08:30', '18:00'),
             'working from home': ('08:00', '18:00')
         }
+
+    def get_employee_max_hours(self, employee: Employee) -> int:
+        if employee.max_hours_per_week is not None:
+            return employee.max_hours_per_week
+        if employee.employee_type == EmployeeType.MANAGER:
+            return 40
+        if employee.employee_type == EmployeeType.INTERN:
+            return 15
+        return 24
         
     def parse_availability_hours(self, avail_type: AvailabilityType) -> Tuple[str, str]:
         """Convert availability type to start/end time range"""
@@ -217,8 +226,9 @@ class SchedulingEngine:
         
         # Priority 1: Check max hours
         current_hours = self.get_employee_weekly_hours(schedule, employee.id)
-        if current_hours + shift.hours > employee.max_hours_per_week:
-            return False, f"Exceeds max hours ({employee.max_hours_per_week})"
+        max_hours = self.get_employee_max_hours(employee)
+        if current_hours + shift.hours > max_hours:
+            return False, f"Exceeds max hours ({max_hours})"
         
         # Priority 2: Check Day Off constraints (approved requests)
         if approved_requests and employee.id in approved_requests:
@@ -287,7 +297,8 @@ class SchedulingEngine:
         # Reduce preference weight as employee gets more hours assigned
         # First shifts: strong preference (100% weight)
         # Later shifts: more flexible (down to 50% weight at max hours)
-        hours_ratio = current_hours / employee.max_hours_per_week if employee.max_hours_per_week > 0 else 0
+        max_hours = self.get_employee_max_hours(employee)
+        hours_ratio = current_hours / max_hours if max_hours > 0 else 0
         preference_multiplier = 1.0 - (hours_ratio * 0.5)  # 1.0 at 0 hours, 0.5 at max hours
         score += pref_weight * 10 * preference_multiplier
         
@@ -755,10 +766,11 @@ class SchedulingEngine:
                 
                 for total_load, emp, current_hours in employees_with_hours:
                     # Skip if employee already at max hours
-                    if current_hours >= emp.max_hours_per_week:
+                    max_hours = self.get_employee_max_hours(emp)
+                    if current_hours >= max_hours:
                         continue
                     
-                    hours_remaining = emp.max_hours_per_week - current_hours
+                    hours_remaining = max_hours - current_hours
                     if hours_remaining <= 0:
                         continue
                     
@@ -777,7 +789,7 @@ class SchedulingEngine:
                     if historical_patterns and day in historical_patterns:
                         # Use historical shifts for this day as priority
                         for hist_shift in historical_patterns[day]:
-                            hours_remaining = emp.max_hours_per_week - self.get_employee_weekly_hours(schedule, emp.id)
+                            hours_remaining = self.get_employee_max_hours(emp) - self.get_employee_weekly_hours(schedule, emp.id)
                             if hours_remaining <= 0:
                                 break
                             
@@ -799,7 +811,7 @@ class SchedulingEngine:
                                 if test_shift.location in employee_locations.get(emp.id, set()):
                                     # Only assign if they really need the hours (less than 80% of max)
                                     current_hours = self.get_employee_weekly_hours(schedule, emp.id)
-                                    if current_hours >= emp.max_hours_per_week * 0.8:
+                                    if current_hours >= self.get_employee_max_hours(emp) * 0.8:
                                         continue
                                 
                                 test_shift.id = str(uuid.uuid4())
@@ -819,7 +831,7 @@ class SchedulingEngine:
                     # Then fill remaining hours with standard patterns
                     for start, end, hours in shift_patterns:
                         # Re-check hours remaining before each shift
-                        hours_remaining = emp.max_hours_per_week - self.get_employee_weekly_hours(schedule, emp.id)
+                        hours_remaining = self.get_employee_max_hours(emp) - self.get_employee_weekly_hours(schedule, emp.id)
                         if hours_remaining <= 0:
                             break
                         
@@ -852,7 +864,7 @@ class SchedulingEngine:
                                 if location in employee_locations.get(emp.id, set()):
                                     # Only assign if they really need the hours (less than 80% of max)
                                     current_hours = self.get_employee_weekly_hours(schedule, emp.id)
-                                    if current_hours >= emp.max_hours_per_week * 0.8:
+                                    if current_hours >= self.get_employee_max_hours(emp) * 0.8:
                                         continue
                                 
                                 # Assign the shift
@@ -874,16 +886,17 @@ class SchedulingEngine:
         weekday_order = ["monday", "tuesday", "wednesday", "thursday", "friday"]
         for manager in managers:
             current_hours = self.get_employee_weekly_hours(schedule, manager.id)
-            hours_remaining = manager.max_hours_per_week - current_hours
+            manager_max_hours = self.get_employee_max_hours(manager)
+            hours_remaining = manager_max_hours - current_hours
             
             if hours_remaining <= 0:
                 continue
             
-            print(f"[SCHEDULER] Processing manager {manager.name}: max_hours={manager.max_hours_per_week}, current={current_hours}, remaining={hours_remaining}")
+            print(f"[SCHEDULER] Processing manager {manager.name}: max_hours={manager_max_hours}, current={current_hours}, remaining={hours_remaining}")
             
             # Assign one 8-hour shift per weekday
             for day in weekday_order:
-                hours_remaining = manager.max_hours_per_week - self.get_employee_weekly_hours(schedule, manager.id)
+                hours_remaining = manager_max_hours - self.get_employee_weekly_hours(schedule, manager.id)
                 if hours_remaining < 8:
                     break
                 
