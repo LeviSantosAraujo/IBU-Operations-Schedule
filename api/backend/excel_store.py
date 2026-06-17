@@ -391,13 +391,35 @@ def get_all_employees() -> List[Employee]:
             else:
                 emp_type = EmployeeType.EMPLOYEE
             
+            # Handle preferences - can be string or dict
+            if isinstance(emp_preferences, str):
+                preferences_value = emp_preferences
+            elif isinstance(emp_preferences, dict):
+                preferences_value = emp_preferences
+            else:
+                preferences_value = {}
+            
+            # Handle created_at - convert string to datetime if needed
+            if isinstance(emp_created_at, str):
+                try:
+                    # Try parsing with T separator
+                    if 'T' in emp_created_at:
+                        emp_created_at = datetime.fromisoformat(emp_created_at)
+                    else:
+                        # Try parsing date only
+                        emp_created_at = datetime.strptime(emp_created_at, '%Y-%m-%d')
+                except:
+                    emp_created_at = datetime.now()
+            elif emp_created_at is None:
+                emp_created_at = datetime.now()
+            
             employee = Employee(
                 id=str(emp_id),
                 name=str(emp_name) if emp_name else '',
                 email=str(emp_email) if emp_email else '',
                 employee_type=emp_type,
                 max_hours_per_week=int(emp_max_hours) if emp_max_hours else 40,
-                preferences=str(emp_preferences) if emp_preferences else '',
+                preferences=preferences_value,
                 active=bool(emp_active) if emp_active is not None else True,
                 created_at=emp_created_at
             )
