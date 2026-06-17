@@ -1309,6 +1309,7 @@ async def upload_excel_file(
         
         # Always process weekly sheets if they exist (takes precedence over Schedule_ sheets)
         weekly_sheets = [s for s in uploaded_wb.sheetnames if not s.startswith('Schedule_') and s not in ['PWDs', 'Employees', 'Schedules', 'Availability']]
+        print(f"[MERGE] Found {len(weekly_sheets)} weekly sheets to process: {weekly_sheets[:5]}...")
         if weekly_sheets:
             # Handle weekly sheets format - convert to Schedule_YYYY-MM-DD format with proper parsing
             from datetime import datetime
@@ -1318,6 +1319,7 @@ async def upload_excel_file(
             
             # Get employee name to ID mapping (exact + normalized fallback)
             employees = get_all_employees()
+            print(f"[MERGE] Loaded {len(employees)} employees from system")
             exact_map, base_map = build_employee_lookup(employees)
             id_to_name = {emp.id: emp.name for emp in employees}
             unmatched_names = set()
@@ -1329,6 +1331,7 @@ async def upload_excel_file(
             
             # Convert weekly sheets from uploaded file
             for sheet_name in weekly_sheets:
+                print(f"[MERGE] Processing sheet: {sheet_name}")
                 try:
                     # Extract week start date from sheet name
                     year = 2026
@@ -1352,6 +1355,7 @@ async def upload_excel_file(
                         continue
                     
                     schedule_sheet_name = f"Schedule_{week_start}"
+                    print(f"[MERGE] Creating Schedule sheet: {schedule_sheet_name}")
                     
                     # Parse the weekly sheet and convert to Schedule_ format
                     uploaded_sheet = uploaded_wb[sheet_name]
@@ -1384,6 +1388,7 @@ async def upload_excel_file(
                         
                         # Use the canonical system name
                         canonical_name = id_to_name.get(employee_id, employee_name)
+                        shift_count_for_employee = 0
                         
                         for day_idx, (col_idx, hour_col_idx) in enumerate(zip(day_columns, hour_columns)):
                             if col_idx >= len(row):
@@ -1415,6 +1420,8 @@ async def upload_excel_file(
                                     None,
                                     ps['location']
                                 ])
+                                shift_count_for_employee += 1
+                    print(f"[MERGE] Created {new_sheet.max_row - 1} shifts in {schedule_sheet_name}")
                 except Exception as e:
                     print(f"Could not parse sheet {sheet_name}: {e}")
                     continue
