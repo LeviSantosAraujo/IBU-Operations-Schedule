@@ -396,7 +396,9 @@ def get_all_employees() -> List[Employee]:
                 # Try to parse JSON string
                 try:
                     preferences_value = json.loads(emp_preferences)
-                except:
+                    print(f"[EXCEL] Parsed preferences for {emp_name}: {type(preferences_value)}")
+                except Exception as e:
+                    print(f"[EXCEL] Failed to parse preferences for {emp_name}: {e}, using empty dict")
                     preferences_value = {}
             elif isinstance(emp_preferences, dict):
                 preferences_value = emp_preferences
