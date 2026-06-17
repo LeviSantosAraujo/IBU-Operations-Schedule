@@ -20,6 +20,7 @@ yarn-error.log*
 
 # Excel files (uploaded)
 backend/uploads/*.xlsx
+api/backend/uploads/*.xlsx
 !backend/uploads/.gitkeep
 
 # Logs
