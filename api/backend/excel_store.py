@@ -351,16 +351,14 @@ def get_all_employees() -> List[Employee]:
     """Get all employees from Excel Employees sheet"""
     wb = _get_workbook()
     if not wb:
-        # Fallback to JSON if Excel not available
-        from data_store import get_all_employees as get_employees_from_json
-        return get_employees_from_json()
+        print("[EXCEL] ERROR: Workbook not available - cannot load employees")
+        return []
     
     try:
         if 'Employees' not in wb.sheetnames:
             wb.close()
-            # Fallback to JSON if Employees sheet not found
-            from data_store import get_all_employees as get_employees_from_json
-            return get_employees_from_json()
+            print("[EXCEL] ERROR: Employees sheet not found in workbook")
+            return []
         
         sheet = wb['Employees']
         employees = []
@@ -453,9 +451,8 @@ def save_employee(employee: Employee) -> Employee:
     """Save or update employee in Excel Employees sheet"""
     wb = _get_workbook()
     if not wb:
-        # Fallback to JSON if Excel not available
-        from data_store import save_employee as save_employee_to_json
-        return save_employee_to_json(employee)
+        print("[EXCEL] ERROR: Workbook not available - cannot save employee")
+        raise ValueError("Excel database not available. Please contact your manager.")
     
     try:
         if 'Employees' not in wb.sheetnames:
@@ -499,27 +496,21 @@ def save_employee(employee: Employee) -> Employee:
     except Exception as e:
         print(f"[EXCEL] Error saving employee to Excel: {e}")
         wb.close()
-        # Fallback to JSON on error
-        from data_store import save_employee as save_employee_to_json
-        return save_employee_to_json(employee)
+        raise ValueError(f"Failed to save employee to Excel: {e}")
 
 def delete_employee(employee_id: str) -> bool:
-    """Delete employee from JSON data store and Excel"""
-    from data_store import delete_employee as delete_employee_from_json
+    """Delete employee from Excel Employees sheet"""
+    wb = _get_workbook()
+    if not wb:
+        print("[EXCEL] ERROR: Workbook not available - cannot delete employee")
+        return False
     
-    # Delete from JSON first
-    json_result = delete_employee_from_json(employee_id)
+    if 'Employees' not in wb.sheetnames:
+        wb.close()
+        print("[EXCEL] ERROR: Employees sheet not found")
+        return False
     
-    # Also delete from Excel Employees sheet
     try:
-        wb = _get_workbook()
-        if not wb:
-            return json_result
-        
-        if 'Employees' not in wb.sheetnames:
-            wb.close()
-            return json_result
-        
         sheet = wb['Employees']
         
         # Find and delete the employee row
@@ -538,10 +529,12 @@ def delete_employee(employee_id: str) -> bool:
                 return True
         
         wb.close()
+        print(f"[EXCEL] Employee {employee_id} not found in Excel Employees sheet")
+        return False
     except Exception as e:
         print(f"[EXCEL] Error deleting employee from Excel: {e}")
-    
-    return json_result
+        wb.close()
+        return False
 
 # ============ Hourly Coverage Requirements Operations ============
 

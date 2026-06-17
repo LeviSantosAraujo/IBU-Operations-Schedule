@@ -1280,7 +1280,6 @@ async def reset_blob_data(authorization: str = Header(None)):
 @app.post("/api/admin/reset-manager-password")
 async def reset_manager_password(employee_id: str):
     """TEMPORARY: Reset manager password without authentication (for recovery)"""
-    from data_store import set_manager_password
     from models import EmployeeType
 
     employee = get_employee_by_id(employee_id)
@@ -1290,7 +1289,7 @@ async def reset_manager_password(employee_id: str):
     if employee.employee_type != EmployeeType.MANAGER:
         raise HTTPException(status_code=400, detail="Employee is not a manager")
     
-    # Set a default password "admin123"
+    # Set a default password "admin123" using Excel version
     set_manager_password(employee_id, "admin123")
     
     return {"success": True, "message": f"Password reset for {employee.name}. Default password: admin123"}
