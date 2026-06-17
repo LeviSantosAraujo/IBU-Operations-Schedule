@@ -87,10 +87,14 @@
                 const data = await response.json();
                 
                 if (response.ok) {
-                    // Store token and redirect to main app
-                    localStorage.setItem('token', data.token);
-                    localStorage.setItem('employee', JSON.stringify(data.employee));
-                    localStorage.setItem('role', data.role);
+                    // Store token and redirect to main app using same keys as auth.ts
+                    localStorage.setItem('ibu_schedule_token', data.token);
+                    const user = {
+                        employee_id: data.employee.id,
+                        employee_name: data.employee.name,
+                        role: data.role
+                    };
+                    localStorage.setItem('ibu_schedule_user', JSON.stringify(user));
                     
                     messageDiv.textContent = 'Login successful! Redirecting...';
                     messageDiv.className = 'mt-4 text-center text-sm text-green-400';
