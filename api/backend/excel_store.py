@@ -388,7 +388,9 @@ def delete_employee(employee_id: str) -> bool:
                 sheet.delete_rows(row)
                 _save_workbook(wb)
                 wb.close()
-                print(f"[EXCEL] Deleted employee {employee_id} from Excel Employees sheet")
+                # Clear workbook cache to force reload from GitHub
+                _clear_workbook_cache()
+                print(f"[EXCEL] Deleted employee {employee_id} from Excel Employees sheet and cleared cache")
                 return True
         
         wb.close()
