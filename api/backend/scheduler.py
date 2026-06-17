@@ -10,6 +10,7 @@ from data_store import (
     save_schedule, get_system_config, get_availability_requests, get_events,
     get_all_week_schedule_dates, get_schedule_by_week
 )
+from excel_store import get_location_color
 
 class SchedulingEngine:
     def __init__(self):
@@ -79,48 +80,60 @@ class SchedulingEngine:
         """Get total hours for an employee in a schedule"""
         return schedule.total_hours.get(employee_id, 0)
     
-    def get_employee_historical_hours(self, employee_id: str, current_week_start: date) -> float:
+    def get_employee_historical_hours(self, employee_id: str, current_week_start: date, schedule_cache: Optional[Dict] = None) -> float:
         """Get total hours for an employee over the last 4 weeks"""
         total_hours = 0
         week_count = 0
-        
+
         # Get the last 4 weeks before the current week
         for i in range(1, 5):
             week_date = current_week_date = current_week_start - timedelta(weeks=i)
-            
+
             try:
-                schedule = get_schedule_by_week(week_date)
+                if schedule_cache:
+                    week_str = week_date.isoformat()
+                    if week_str not in schedule_cache:
+                        schedule_cache[week_str] = get_schedule_by_week(week_date)
+                    schedule = schedule_cache[week_str]
+                else:
+                    schedule = get_schedule_by_week(week_date)
                 if schedule:
                     total_hours += schedule.total_hours.get(employee_id, 0)
                     week_count += 1
             except Exception:
                 # Week might not exist or have no schedule
                 pass
-        
+
         return total_hours
     
-    def get_all_employee_historical_hours(self, employees: List[Employee], current_week_start: date) -> Dict[str, float]:
+    def get_all_employee_historical_hours(self, employees: List[Employee], current_week_start: date, schedule_cache: Optional[Dict] = None) -> Dict[str, float]:
         """Get historical hours for all employees over the last 4 weeks"""
         historical_hours = {}
         for emp in employees:
-            historical_hours[emp.id] = self.get_employee_historical_hours(emp.id, current_week_start)
+            historical_hours[emp.id] = self.get_employee_historical_hours(emp.id, current_week_start, schedule_cache)
         return historical_hours
     
-    def get_historical_shift_patterns(self, employee_id: str, current_week_start: date) -> Optional[Dict[str, List[Shift]]]:
+    def get_historical_shift_patterns(self, employee_id: str, current_week_start: date, schedule_cache: Optional[Dict] = None) -> Optional[Dict[str, List[Shift]]]:
         """Get shift patterns from the last 4 weeks for an employee, return the week with most hours"""
         best_week_shifts = None
         best_week_hours = 0
         best_week_date = None
-        
+
         for i in range(1, 5):
             week_date = current_week_start - timedelta(weeks=i)
             try:
-                schedule = get_schedule_by_week(week_date)
+                if schedule_cache:
+                    week_str = week_date.isoformat()
+                    if week_str not in schedule_cache:
+                        schedule_cache[week_str] = get_schedule_by_week(week_date)
+                    schedule = schedule_cache[week_str]
+                else:
+                    schedule = get_schedule_by_week(week_date)
                 if schedule:
                     # Get shifts for this employee
                     emp_shifts = [s for s in schedule.shifts if s.employee_id == employee_id]
                     emp_hours = schedule.total_hours.get(employee_id, 0)
-                    
+
                     # If this week has more hours than previous best, use it
                     if emp_hours > best_week_hours:
                         best_week_hours = emp_hours
@@ -140,15 +153,21 @@ class SchedulingEngine:
         
         return None
     
-    def get_historical_job_preferences(self, employee_id: str, current_week_start: date) -> Dict[JobType, int]:
+    def get_historical_job_preferences(self, employee_id: str, current_week_start: date, schedule_cache: Optional[Dict] = None) -> Dict[JobType, int]:
         """Analyze last 4 weeks to infer job preferences based on actual assignments"""
         job_type_counts = {}
         total_shifts = 0
-        
+
         for i in range(1, 5):
             week_date = current_week_start - timedelta(weeks=i)
             try:
-                schedule = get_schedule_by_week(week_date)
+                if schedule_cache:
+                    week_str = week_date.isoformat()
+                    if week_str not in schedule_cache:
+                        schedule_cache[week_str] = get_schedule_by_week(week_date)
+                    schedule = schedule_cache[week_str]
+                else:
+                    schedule = get_schedule_by_week(week_date)
                 if schedule:
                     emp_shifts = [s for s in schedule.shifts if s.employee_id == employee_id]
                     for shift in emp_shifts:
@@ -287,16 +306,26 @@ class SchedulingEngine:
         
         return score
     
-    def generate_auto_schedule(self, week_start_date: date, 
+    def generate_auto_schedule(self, week_start_date: date,
                                location_requirements: Optional[Dict] = None,
                                event_staffing: Optional[Dict[str, int]] = None,
                                call_center_target: int = 0) -> WeeklySchedule:
         """Generate an automatic schedule based on availability, preferences, and location requirements"""
         import time
         start_time = time.time()
-        
+
         print(f"[SCHEDULER] Starting auto-schedule generation for week {week_start_date}")
-        
+
+        # Cache for schedules to avoid repeated loading
+        schedule_cache = {}
+
+        def get_cached_schedule(week_date: date) -> Optional[WeeklySchedule]:
+            """Get schedule with caching to avoid repeated loading"""
+            week_str = week_date.isoformat()
+            if week_str not in schedule_cache:
+                schedule_cache[week_str] = get_schedule_by_week(week_date)
+            return schedule_cache[week_str]
+
         employees = [e for e in get_all_employees() if e.active]
         availabilities = {a.employee_id: a for a in get_availabilities(week_start_date)}
         
@@ -381,7 +410,7 @@ class SchedulingEngine:
             print(f"Warning: could not load approved availability requests: {e}")
 
         # Load existing schedule to get preferences from locked shifts
-        existing_schedule = get_schedule_by_week(week_start_date)
+        existing_schedule = get_cached_schedule(week_start_date)
         if existing_schedule:
             for shift in existing_schedule.shifts:
                 if shift.locked and shift.preferences and shift.employee_id not in employee_preferences:
@@ -393,7 +422,7 @@ class SchedulingEngine:
         # Calculate historical job preferences for all employees
         historical_job_preferences = {}
         for emp in employees:
-            hist_prefs = self.get_historical_job_preferences(emp.id, week_start_date)
+            hist_prefs = self.get_historical_job_preferences(emp.id, week_start_date, schedule_cache)
             if hist_prefs:
                 historical_job_preferences[emp.id] = hist_prefs
         
@@ -496,7 +525,8 @@ class SchedulingEngine:
                         location=event.location,
                         hours=event_hours,
                         is_event=True,
-                        event_name=event.name
+                        event_name=event.name,
+                        color=get_location_color(event.location)
                     )
                     
                     can_assign, reason = self.can_assign_shift(emp, test_shift, schedule, avail, approved_requests)
@@ -623,7 +653,8 @@ class SchedulingEngine:
                             end_time=end,
                             job_type=job_type,
                             location=location,
-                            hours=hours
+                            hours=hours,
+                            color=get_location_color(location)
                         )
                         
                         can_assign, reason = self.can_assign_shift(emp, test_shift, schedule, avail, approved_requests)
@@ -707,7 +738,7 @@ class SchedulingEngine:
         else:
             print(f"[SCHEDULER] Phase 4: Fairness Phase - ensuring all employees reach max hours")
             # Get historical hours for all employees (last 4 weeks)
-            historical_hours = self.get_all_employee_historical_hours(employees, week_start_date)
+            historical_hours = self.get_all_employee_historical_hours(employees, week_start_date, schedule_cache)
             
             # Process regular employees first (distribute across days)
             for day in self.day_order:
@@ -742,7 +773,7 @@ class SchedulingEngine:
                         )
                     
                     # Try to mirror historical patterns first
-                    historical_patterns = self.get_historical_shift_patterns(emp.id, week_start_date)
+                    historical_patterns = self.get_historical_shift_patterns(emp.id, week_start_date, schedule_cache)
                     if historical_patterns and day in historical_patterns:
                         # Use historical shifts for this day as priority
                         for hist_shift in historical_patterns[day]:
@@ -758,7 +789,8 @@ class SchedulingEngine:
                                 end_time=hist_shift.end_time,
                                 job_type=hist_shift.job_type,
                                 location=hist_shift.location,
-                                hours=hist_shift.hours
+                                hours=hist_shift.hours,
+                                color=get_location_color(hist_shift.location)
                             )
                             
                             can_assign, reason = self.can_assign_shift(emp, test_shift, schedule, avail, approved_requests)
@@ -810,7 +842,8 @@ class SchedulingEngine:
                                 end_time=end,
                                 job_type=job_type,
                                 location=location,
-                                hours=hours
+                                hours=hours,
+                                color=get_location_color(location)
                             )
                             
                             can_assign, reason = self.can_assign_shift(emp, test_shift, schedule, avail, approved_requests)
@@ -872,7 +905,8 @@ class SchedulingEngine:
                     end_time="17:00",
                     job_type=JobType.MANAGEMENT,
                     location="manager activities",
-                    hours=8.0
+                    hours=8.0,
+                    color=None
                 )
                 
                 can_assign, reason = self.can_assign_shift(manager, test_shift, schedule, avail, approved_requests)
