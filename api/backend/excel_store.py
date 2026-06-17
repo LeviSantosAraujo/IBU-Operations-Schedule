@@ -365,81 +365,84 @@ def get_all_employees() -> List[Employee]:
         sheet = wb['Employees']
         employees = []
         
+        from models import EmployeeType
         for row in range(2, sheet.max_row + 1):
-            emp_id = sheet.cell(row=row, column=1).value
-            if not emp_id:
-                continue
-            
-            emp_name = sheet.cell(row=row, column=2).value
-            emp_email = sheet.cell(row=row, column=3).value
-            emp_type = sheet.cell(row=row, column=4).value
-            emp_max_hours = sheet.cell(row=row, column=5).value
-            emp_preferences = sheet.cell(row=row, column=6).value
-            emp_active = sheet.cell(row=row, column=7).value
-            emp_created_at = sheet.cell(row=row, column=8).value
-            
-            # Convert employee type string to enum
-            from models import EmployeeType
-            if isinstance(emp_type, str):
-                emp_type = emp_type.lower()
-                if 'manager' in emp_type:
-                    emp_type = EmployeeType.MANAGER
-                elif 'intern' in emp_type:
-                    emp_type = EmployeeType.INTERN
+            try:
+                emp_id = sheet.cell(row=row, column=1).value
+                if not emp_id:
+                    continue
+                
+                emp_name = sheet.cell(row=row, column=2).value
+                emp_email = sheet.cell(row=row, column=3).value
+                emp_type = sheet.cell(row=row, column=4).value
+                emp_max_hours = sheet.cell(row=row, column=5).value
+                emp_preferences = sheet.cell(row=row, column=6).value
+                emp_active = sheet.cell(row=row, column=7).value
+                emp_created_at = sheet.cell(row=row, column=8).value
+                
+                # Convert employee type string to enum
+                if isinstance(emp_type, str):
+                    emp_type = emp_type.lower()
+                    if 'manager' in emp_type:
+                        emp_type = EmployeeType.MANAGER
+                    elif 'intern' in emp_type:
+                        emp_type = EmployeeType.INTERN
+                    else:
+                        emp_type = EmployeeType.EMPLOYEE
                 else:
                     emp_type = EmployeeType.EMPLOYEE
-            else:
-                emp_type = EmployeeType.EMPLOYEE
-            
-            # Handle preferences - can be string or dict
-            if isinstance(emp_preferences, str):
-                # Try to parse JSON string
-                try:
-                    preferences_value = json.loads(emp_preferences)
-                    print(f"[EXCEL] Parsed preferences for {emp_name}: {type(preferences_value)}")
-                except Exception as e:
-                    print(f"[EXCEL] Failed to parse preferences for {emp_name}: {e}, using empty dict")
-                    preferences_value = {}
-            elif isinstance(emp_preferences, dict):
-                preferences_value = emp_preferences
-            else:
+                
+                # Handle preferences - must be Dict[str, int]
                 preferences_value = {}
-            
-            # Handle created_at - convert string to datetime if needed
-            if isinstance(emp_created_at, str):
-                try:
-                    # Try parsing with T separator
-                    if 'T' in emp_created_at:
-                        emp_created_at = datetime.fromisoformat(emp_created_at)
-                    else:
-                        # Try parsing date only
-                        emp_created_at = datetime.strptime(emp_created_at, '%Y-%m-%d')
-                except:
+                if isinstance(emp_preferences, str) and emp_preferences.strip():
+                    try:
+                        parsed = json.loads(emp_preferences)
+                        if isinstance(parsed, dict):
+                            preferences_value = {str(k): int(v) for k, v in parsed.items()}
+                    except Exception:
+                        preferences_value = {}
+                elif isinstance(emp_preferences, dict):
+                    preferences_value = {str(k): int(v) for k, v in emp_preferences.items()}
+                
+                # Handle created_at - convert to datetime
+                if isinstance(emp_created_at, str):
+                    try:
+                        if 'T' in emp_created_at:
+                            emp_created_at = datetime.fromisoformat(emp_created_at)
+                        elif ' ' in emp_created_at:
+                            emp_created_at = datetime.fromisoformat(emp_created_at)
+                        else:
+                            emp_created_at = datetime.strptime(emp_created_at, '%Y-%m-%d')
+                    except Exception:
+                        emp_created_at = datetime.now()
+                elif emp_created_at is None:
                     emp_created_at = datetime.now()
-            elif emp_created_at is None:
-                emp_created_at = datetime.now()
-            
-            employee = Employee(
-                id=str(emp_id),
-                name=str(emp_name) if emp_name else '',
-                email=str(emp_email) if emp_email else '',
-                employee_type=emp_type,
-                max_hours_per_week=int(emp_max_hours) if emp_max_hours else 40,
-                preferences=preferences_value,
-                active=bool(emp_active) if emp_active is not None else True,
-                created_at=emp_created_at
-            )
-            employees.append(employee)
+                
+                employee = Employee(
+                    id=str(emp_id),
+                    name=str(emp_name) if emp_name else '',
+                    email=str(emp_email) if emp_email else None,
+                    employee_type=emp_type,
+                    max_hours_per_week=int(emp_max_hours) if emp_max_hours else 40,
+                    preferences=preferences_value,
+                    manager_preferences={},
+                    active=bool(emp_active) if emp_active is not None else True,
+                    created_at=emp_created_at
+                )
+                employees.append(employee)
+            except Exception as e:
+                print(f"[EXCEL] Skipping row {row} due to error: {e}")
+                continue
         
         wb.close()
         print(f"[EXCEL] Loaded {len(employees)} employees from Excel Employees sheet")
         return employees
     except Exception as e:
         print(f"[EXCEL] Error loading employees from Excel: {e}")
+        import traceback
+        traceback.print_exc()
         wb.close()
-        # Fallback to JSON on error
-        from data_store import get_all_employees as get_employees_from_json
-        return get_employees_from_json()
+        return []  # Return empty instead of falling back to stale JSON
 
 def get_employee_by_id(employee_id: str) -> Optional[Employee]:
     """Get employee by ID"""
