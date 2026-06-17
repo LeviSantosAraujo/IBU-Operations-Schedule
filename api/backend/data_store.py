@@ -11,6 +11,16 @@ DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
 _MEMORY_STORE: Dict[str, List[Dict]] = {}
 _READ_ONLY = False
 
+def clear_memory_store():
+    """Clear the in-memory JSON store"""
+    global _MEMORY_STORE
+    _MEMORY_STORE.clear()
+    print("[MEMORY] Cleared data_store memory store")
+
+# Clear memory store on startup to force fresh load
+clear_memory_store()
+print("[INIT] Cleared data_store memory on startup")
+
 # Try to ensure data directory exists
 try:
     os.makedirs(DATA_DIR, exist_ok=True)
@@ -22,6 +32,11 @@ def _get_path(filename: str) -> str:
 
 def _load_json(filename: str) -> List[Dict]:
     print(f"[LOAD] Loading {filename}")
+    # DISABLED: Don't use memory store to prevent stale data
+    # Clear memory store before loading to ensure fresh data
+    if filename in _MEMORY_STORE:
+        del _MEMORY_STORE[filename]
+    
     # Try blob storage first (for Vercel persistence)
     try:
         from storage import blob_get, BLOB_AVAILABLE
@@ -39,7 +54,7 @@ def _load_json(filename: str) -> List[Dict]:
         import traceback
         traceback.print_exc()
 
-    # Check in-memory store
+    # Check in-memory store (only if not cleared above)
     if filename in _MEMORY_STORE:
         print(f"[LOAD] Loaded {filename} from memory ({len(_MEMORY_STORE[filename])} items)")
         return list(_MEMORY_STORE[filename])
@@ -121,6 +136,8 @@ def delete_employee(employee_id: str) -> bool:
     employees = [e for e in employees if e.get("id") != employee_id]
     if len(employees) < original_count:
         _save_json("employees.json", employees)
+        # Clear memory store to force fresh load
+        clear_memory_store()
         return True
     return False
 
