@@ -666,7 +666,10 @@ async def auto_generate_schedule(
     try:
         # Get staffing targets from config
         config = get_system_config()
-        staffing_targets = config.get('staffing_targets', {})
+        # Try multiple possible keys for staffing targets
+        staffing_targets = config.get('staffing_targets', config.get('floor_requirements', {}))
+        print(f"[API] Config keys: {list(config.keys()) if hasattr(config, 'keys') else 'N/A'}")
+        print(f"[API] Staffing targets: {staffing_targets}")
 
         # Convert staffing targets to location_requirements format
         # staffing_targets is simple dict like {'ground_floor': 2, 'call_center': 4}
