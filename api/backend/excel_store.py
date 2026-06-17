@@ -363,9 +363,39 @@ def save_employee(employee: Employee) -> Employee:
     return save_employee_to_json(employee)
 
 def delete_employee(employee_id: str) -> bool:
-    """Delete employee from JSON data store"""
+    """Delete employee from JSON data store and Excel"""
     from data_store import delete_employee as delete_employee_from_json
-    return delete_employee_from_json(employee_id)
+    
+    # Delete from JSON first
+    json_result = delete_employee_from_json(employee_id)
+    
+    # Also delete from Excel Employees sheet
+    try:
+        wb = _get_workbook()
+        if not wb:
+            return json_result
+        
+        if 'Employees' not in wb.sheetnames:
+            wb.close()
+            return json_result
+        
+        sheet = wb['Employees']
+        
+        # Find and delete the employee row
+        for row in range(2, sheet.max_row + 1):
+            emp_id = sheet.cell(row=row, column=1).value
+            if emp_id and str(emp_id) == employee_id:
+                sheet.delete_rows(row)
+                _save_workbook(wb)
+                wb.close()
+                print(f"[EXCEL] Deleted employee {employee_id} from Excel Employees sheet")
+                return True
+        
+        wb.close()
+    except Exception as e:
+        print(f"[EXCEL] Error deleting employee from Excel: {e}")
+    
+    return json_result
 
 # ============ Hourly Coverage Requirements Operations ============
 
