@@ -1279,7 +1279,7 @@ def get_schedule_by_week(week_start_date: date) -> Optional[WeeklySchedule]:
                 # Skip Availabilities entry
                 if emp.name.lower().strip() in ['availabilities', 'availability']:
                     continue
-                
+
                 name_lower = emp.name.lower().strip()
                 emp_name_to_id[name_lower] = emp.id
                 # Also add variations with spaces removed
@@ -1294,6 +1294,12 @@ def get_schedule_by_week(week_start_date: date) -> Optional[WeeklySchedule]:
                     emp_name_to_id[name_no_number.replace(' ', '')] = emp.id
                     emp_name_to_id[name_no_number.replace('-', ' ')] = emp.id
                     emp_name_to_id[name_no_number.replace('-', '')] = emp.id
+                # Add version with single letter/number suffix removed (e.g., "sagar c" -> "sagar", "pablo 2" -> "pablo")
+                parts = name_lower.rsplit(' ', 1)
+                if len(parts) == 2 and len(parts[1]) == 1:
+                    name_base = parts[0].strip()
+                    emp_name_to_id[name_base] = emp.id
+                    emp_name_to_id[name_base.replace(' ', '')] = emp.id
             
             for row in range(start_row, sheet.max_row + 1):
                 emp_name = sheet.cell(row=row, column=1).value
