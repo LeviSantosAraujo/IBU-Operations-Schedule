@@ -21,6 +21,7 @@ const jobTypes = [
   { id: 'second_floor', name: '2nd Floor' },
   { id: 'sixth_floor', name: '6th Floor' },
   { id: 'call_center', name: 'Call Center' },
+  { id: '80_bloor', name: '80 Bloor' },
   { id: 'event', name: 'Event' },
 ]
 

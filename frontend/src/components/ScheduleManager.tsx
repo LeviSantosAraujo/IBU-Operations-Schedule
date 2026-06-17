@@ -45,7 +45,6 @@ const baseLocations = [
   { id: '6th floor', name: '6th Floor', dotColor: '#EAB308' },
   { id: 'call center', name: 'Call Center', dotColor: '#6B7280' },
   { id: '80 bloor', name: '80 Bloor', dotColor: '#8B5CF6' },
-  { id: 'working from home', name: 'Working from Home', dotColor: '#EF4444' },
   { id: 'day off', name: 'Day Off', dotColor: '#000000' },
 ]
 
