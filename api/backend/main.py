@@ -890,7 +890,7 @@ async def update_staffing_targets(targets: Dict[str, int], user: Dict = Depends(
             continue
         cleaned_targets[normalized_key] = value
     
-    config['staffing_targets'] = cleaned_targets
+    config.staffing_targets = cleaned_targets
     return save_system_config(config)
 
 # ============ Availability Requests ============
