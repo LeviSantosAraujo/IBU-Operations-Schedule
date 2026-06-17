@@ -64,7 +64,8 @@ export const auth = {
   
   isManager: (): boolean => {
     const user = auth.getUser()
-    return user?.role?.toLowerCase() === 'manager'
+    const role = user?.role?.toLowerCase()
+    return role === 'manager' || role === 'admin'
   },
   
   getAuthHeaders: (): Record<string, string> => {
