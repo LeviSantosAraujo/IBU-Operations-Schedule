@@ -1473,8 +1473,8 @@ async def upload_excel_file(
 
 # Helper functions for parsing shift strings
 def normalize_employee_name(name: str) -> str:
-    """Normalize an employee name by stripping trailing suffixes (numbers, single letters)
-    and collapsing whitespace. e.g. 'Pablo 2' -> 'pablo', 'Sagar C' -> 'sagar'."""
+    """Normalize an employee name by stripping trailing suffixes (numbers, single letters, role titles)
+    and collapsing whitespace. e.g. 'Pablo 2' -> 'pablo', 'Sagar C' -> 'sagar', 'Fran SManager' -> 'fran'."""
     if not name:
         return ""
     n = str(name).strip().lower()
@@ -1482,8 +1482,18 @@ def normalize_employee_name(name: str) -> str:
     n = re.sub(r'\s+', ' ', n)
     # Strip common prefixes like 'intern -', 'inton-'
     n = re.sub(r'^(intern|inton)\s*[-]?\s*', '', n)
-    # Strip trailing suffix: a single number or single letter token
-    n = re.sub(r'\s+(\d{1,2}|[a-z])$', '', n)
+    # Strip common role suffixes
+    suffixes_to_strip = [
+        r'\s+smanager$',
+        r'\s+supervisor$',
+        r'\s+last\s+day$',
+        r'\s+b$',
+        r'\s+c$',
+        r'\s+\d{1,2}$',
+        r'\s+[a-z]$',
+    ]
+    for suffix in suffixes_to_strip:
+        n = re.sub(suffix, '', n)
     return n.strip()
 
 # Manual alias map for spelling differences between Excel and system
