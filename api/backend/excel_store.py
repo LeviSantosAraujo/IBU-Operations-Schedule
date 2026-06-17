@@ -390,7 +390,10 @@ def delete_employee(employee_id: str) -> bool:
                 wb.close()
                 # Clear workbook cache to force reload from GitHub
                 _clear_workbook_cache()
-                print(f"[EXCEL] Deleted employee {employee_id} from Excel Employees sheet and cleared cache")
+                # Clear in-memory storage cache
+                from storage import clear_storage_cache
+                clear_storage_cache()
+                print(f"[EXCEL] Deleted employee {employee_id} from Excel Employees sheet and cleared all caches")
                 return True
         
         wb.close()

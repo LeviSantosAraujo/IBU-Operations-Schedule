@@ -223,6 +223,12 @@ def get_workbook(filename: str = "ibu_schedule.xlsx") -> Optional[Workbook]:
         return load_workbook(io.BytesIO(data))
     return None
 
+def clear_storage_cache():
+    """Clear the in-memory storage cache"""
+    global EXCEL_DATA_STORE
+    EXCEL_DATA_STORE.clear()
+    print("[STORAGE] Cleared in-memory storage cache")
+
 def save_workbook(wb: Workbook, filename: str = "ibu_schedule.xlsx") -> bool:
     """Save workbook to storage"""
     buffer = io.BytesIO()
