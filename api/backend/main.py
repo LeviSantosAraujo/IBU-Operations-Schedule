@@ -663,55 +663,61 @@ async def auto_generate_schedule(
     """Auto-generate a schedule for a week (managers only)"""
     from scheduler import SchedulingEngine
 
-    # Get staffing targets from config
-    config = get_system_config()
-    staffing_targets = config.get('staffing_targets', {})
+    try:
+        # Get staffing targets from config
+        config = get_system_config()
+        staffing_targets = config.get('staffing_targets', {})
 
-    # Convert staffing targets to location_requirements format
-    # staffing_targets is simple dict like {'ground_floor': 2, 'call_center': 4}
-    # location_requirements needs to be {'location': {'monday': 2, 'tuesday': 2, ...}}
-    location_requirements = {}
-    event_staffing = {}  # event_id -> people_needed
-    call_center_target = 0  # Number of people to assign call center role for the week
-    days = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday']  # Sunday excluded - only for events
+        # Convert staffing targets to location_requirements format
+        # staffing_targets is simple dict like {'ground_floor': 2, 'call_center': 4}
+        # location_requirements needs to be {'location': {'monday': 2, 'tuesday': 2, ...}}
+        location_requirements = {}
+        event_staffing = {}  # event_id -> people_needed
+        call_center_target = 0  # Number of people to assign call center role for the week
+        days = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday']  # Sunday excluded - only for events
 
-    # Map staffing target keys to location names
-    # Note: call_center is now a role/flag, not a physical location
-    location_map = {
-        'ground_floor': 'ground floor',
-        'second_floor': '2nd floor',
-        'sixth_floor': '6th floor',
-        '80_bloor': '80 bloor',
-        'working_from_home': 'working from home'
-    }
+        # Map staffing target keys to location names
+        # Note: call_center is now a role/flag, not a physical location
+        location_map = {
+            'ground_floor': 'ground floor',
+            'second_floor': '2nd floor',
+            'sixth_floor': '6th floor',
+            '80_bloor': '80 bloor',
+            'working_from_home': 'working from home'
+        }
 
-    for key, target in staffing_targets.items():
-        if key.startswith('event_'):
-            # Event staffing target - handle both old (event_event_...) and new (event_...) formats
-            # Strip double prefix if present
-            event_id = key.replace('event_event_', 'event_')
-            event_staffing[event_id] = target
-            print(f"[API] Event staffing: {key} -> {event_id} = {target}")
-        elif key == 'call_center':
-            # Call center is now a role/flag, not a location - pass separately to scheduler
-            # Target is people per day (applies to every day)
-            call_center_target = target
-            print(f"[API] Call center role target: {target} people per day")
-        else:
-            # Regular location staffing target - target is people per day (applies to every day)
-            # Skip working_from_home - manager assigns manually on-demand
-            if key == 'working_from_home':
-                continue
-            location_name = location_map.get(key, key.replace('_', ' '))
-            location_requirements[location_name] = {day: target for day in days}
-            print(f"[API] Location staffing: {key} -> {location_name} = {target} people per day")
+        for key, target in staffing_targets.items():
+            if key.startswith('event_'):
+                # Event staffing target - handle both old (event_event_...) and new (event_...) formats
+                # Strip double prefix if present
+                event_id = key.replace('event_event_', 'event_')
+                event_staffing[event_id] = target
+                print(f"[API] Event staffing: {key} -> {event_id} = {target}")
+            elif key == 'call_center':
+                # Call center is now a role/flag, not a location - pass separately to scheduler
+                # Target is people per day (applies to every day)
+                call_center_target = target
+                print(f"[API] Call center role target: {target} people per day")
+            else:
+                # Regular location staffing target - target is people per day (applies to every day)
+                # Skip working_from_home - manager assigns manually on-demand
+                if key == 'working_from_home':
+                    continue
+                location_name = location_map.get(key, key.replace('_', ' '))
+                location_requirements[location_name] = {day: target for day in days}
+                print(f"[API] Location staffing: {key} -> {location_name} = {target} people per day")
 
-    print(f"[API] Total event staffing entries: {len(event_staffing)}")
-    print(f"[API] Call center target: {call_center_target}")
-    print(f"[API] Location requirements passed to scheduler: {location_requirements}")
-    engine = SchedulingEngine()
-    schedule = engine.generate_auto_schedule(week_start_date, location_requirements, event_staffing, call_center_target)
-    return save_schedule(schedule)
+        print(f"[API] Total event staffing entries: {len(event_staffing)}")
+        print(f"[API] Call center target: {call_center_target}")
+        print(f"[API] Location requirements passed to scheduler: {location_requirements}")
+        engine = SchedulingEngine()
+        schedule = engine.generate_auto_schedule(week_start_date, location_requirements, event_staffing, call_center_target)
+        return save_schedule(schedule)
+    except Exception as e:
+        import traceback
+        print(f"[API] Error in auto_generate_schedule: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Schedule generation failed: {str(e)}")
 
 @app.post("/api/schedules", response_model=WeeklySchedule)
 async def create_or_update_schedule(
