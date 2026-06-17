@@ -1428,6 +1428,7 @@ async def upload_excel_file(
             
             if unmatched_names:
                 print(f"[UPLOAD] Unmatched employee names (skipped): {sorted(unmatched_names)}")
+            print(f"[MERGE] Weekly sheet processing complete. Total Schedule_ sheets now: {len([s for s in current_wb.sheetnames if s.startswith('Schedule_')])}")
         
         # Merge Availabilities from uploaded file
         if "Availability" in uploaded_wb.sheetnames and "Availability" in current_wb.sheetnames:
@@ -1449,12 +1450,14 @@ async def upload_excel_file(
                         current_avail.cell(row=cell.row, column=cell.column, value=cell.value)
         
         # Save merged workbook
+        print(f"[MERGE] Saving workbook with sheets: {current_wb.sheetnames[:10]}...")
         saved = _save_workbook(current_wb)
         current_wb.close()
         uploaded_wb.close()
         
         if not saved:
             raise HTTPException(status_code=500, detail="Failed to save merged workbook")
+        print(f"[MERGE] Workbook saved successfully")
         
         # Invalidate cache
         _invalidate_cache()
