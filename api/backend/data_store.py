@@ -54,10 +54,13 @@ def _load_json(filename: str) -> List[Dict]:
         import traceback
         traceback.print_exc()
 
+    # DISABLED: Don't use memory store to prevent stale data
     # Check in-memory store (only if not cleared above)
-    if filename in _MEMORY_STORE:
-        print(f"[LOAD] Loaded {filename} from memory ({len(_MEMORY_STORE[filename])} items)")
-        return list(_MEMORY_STORE[filename])
+    # if filename in _MEMORY_STORE:
+    #     print(f"[LOAD] Loaded {filename} from memory ({len(_MEMORY_STORE[filename])} items)")
+    #     return list(_MEMORY_STORE[filename])
+    
+    print(f"[LOAD] Memory store disabled for {filename}, skipping")
 
     # Try disk
     path = _get_path(filename)
