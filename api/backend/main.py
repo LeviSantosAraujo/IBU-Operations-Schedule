@@ -666,9 +666,8 @@ async def auto_generate_schedule(
     try:
         # Get staffing targets from config
         config = get_system_config()
-        # Try multiple possible keys for staffing targets
-        staffing_targets = config.get('staffing_targets', config.get('floor_requirements', {}))
-        print(f"[API] Config keys: {list(config.keys()) if hasattr(config, 'keys') else 'N/A'}")
+        # SystemConfig is a Pydantic model, access attributes directly
+        staffing_targets = getattr(config, 'staffing_targets', None) or getattr(config, 'floor_requirements', {}) or {}
         print(f"[API] Staffing targets: {staffing_targets}")
 
         # Convert staffing targets to location_requirements format
