@@ -131,11 +131,10 @@ async def excel_status():
 
 @app.get("/api/excel/download")
 async def download_excel():
-    """Export current JSON data to Excel file for viewing"""
+    """Export current Excel data to Excel file for viewing"""
     from fastapi.responses import StreamingResponse
     import io
     from openpyxl import Workbook
-    from data_store import get_all_employees, get_all_schedules, get_system_config
 
     # Create Excel workbook
     wb = Workbook()
