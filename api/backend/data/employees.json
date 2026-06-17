@@ -2,10 +2,11 @@
   {
     "id": "emp_001",
     "name": "Fran",
-    "email": "",
+    "email": null,
     "employee_type": "manager",
     "max_hours_per_week": 40,
     "preferences": {},
+    "manager_preferences": {},
     "active": true,
     "created_at": "2026-06-06 09:45:48.044925"
   },
@@ -16,8 +17,31 @@
     "employee_type": "manager",
     "max_hours_per_week": 40,
     "preferences": {},
+    "manager_preferences": {},
     "active": true,
-    "created_at": "2026-06-06T09:45:48.044939"
+    "created_at": "2026-06-06 09:45:48.044925"
+  },
+  {
+    "id": "emp_003",
+    "name": "NAHIM",
+    "email": null,
+    "employee_type": "employee",
+    "max_hours_per_week": 24,
+    "preferences": {"ground_floor": 5, "second_floor": 5, "sixth_floor": 5, "call_center": 5, "80_bloor": 5, "event": 5},
+    "manager_preferences": {},
+    "active": true,
+    "created_at": "2026-06-06 09:45:48.044925"
+  },
+  {
+    "id": "emp_004",
+    "name": "Pablo",
+    "email": null,
+    "employee_type": "employee",
+    "max_hours_per_week": 24,
+    "preferences": {"ground_floor": 5, "second_floor": 5, "sixth_floor": 5, "call_center": 5, "80_bloor": 5, "event": 5},
+    "manager_preferences": {},
+    "active": true,
+    "created_at": "2026-06-06 09:45:48.044925"
   },
   {
     "id": "emp_005",
@@ -25,35 +49,76 @@
     "email": null,
     "employee_type": "employee",
     "max_hours_per_week": 24,
-    "preferences": {
-      "call_center": 10,
-      "80_bloor": 1,
-      "event": 1,
-      "sixth_floor": 9,
-      "second_floor": 6,
-      "ground_floor": 1
-    },
+    "preferences": {"call_center": 10, "80_bloor": 1, "event": 1, "sixth_floor": 9, "second_floor": 6, "ground_floor": 1},
     "manager_preferences": {},
     "active": true,
-    "created_at": "2026-06-06 09:45:48.044963"
+    "created_at": "2026-06-06 09:45:48.044925"
   },
   {
     "id": "emp_006",
-    "name": "Mickaela  C",
+    "name": "Mickaela C",
     "email": null,
     "employee_type": "employee",
     "max_hours_per_week": 24,
-    "preferences": {
-      "call_center": 9,
-      "80_bloor": 1,
-      "event": 5,
-      "sixth_floor": 4,
-      "second_floor": 6,
-      "ground_floor": 7
-    },
+    "preferences": {"call_center": 9, "80_bloor": 1, "event": 5, "sixth_floor": 4, "second_floor": 6, "ground_floor": 7},
     "manager_preferences": {},
     "active": true,
-    "created_at": "2026-06-06 09:45:48.044970"
+    "created_at": "2026-06-06 09:45:48.044925"
+  },
+  {
+    "id": "emp_007",
+    "name": "Viviana",
+    "email": null,
+    "employee_type": "employee",
+    "max_hours_per_week": 24,
+    "preferences": {"ground_floor": 5, "second_floor": 5, "sixth_floor": 5, "call_center": 5, "80_bloor": 5, "event": 5},
+    "manager_preferences": {},
+    "active": true,
+    "created_at": "2026-06-06 09:45:48.044925"
+  },
+  {
+    "id": "emp_008",
+    "name": "Anastasia",
+    "email": null,
+    "employee_type": "employee",
+    "max_hours_per_week": 24,
+    "preferences": {"ground_floor": 5, "second_floor": 5, "sixth_floor": 5, "call_center": 5, "80_bloor": 5, "event": 5},
+    "manager_preferences": {},
+    "active": true,
+    "created_at": "2026-06-06 09:45:48.044925"
+  },
+  {
+    "id": "emp_009",
+    "name": "MEG",
+    "email": null,
+    "employee_type": "employee",
+    "max_hours_per_week": 24,
+    "preferences": {"ground_floor": 5, "second_floor": 5, "sixth_floor": 5, "call_center": 5, "80_bloor": 5, "event": 5},
+    "manager_preferences": {},
+    "active": true,
+    "created_at": "2026-06-06 09:45:48.044925"
+  },
+  {
+    "id": "emp_010",
+    "name": "Achal",
+    "email": null,
+    "employee_type": "employee",
+    "max_hours_per_week": 24,
+    "preferences": {"ground_floor": 5, "second_floor": 5, "sixth_floor": 5, "call_center": 5, "80_bloor": 5, "event": 5},
+    "manager_preferences": {},
+    "active": true,
+    "created_at": "2026-06-06 09:45:48.044925"
+  },
+  {
+    "id": "emp_011",
+    "name": "PRIYANKA",
+    "email": null,
+    "employee_type": "employee",
+    "max_hours_per_week": 24,
+    "preferences": {"ground_floor": 5, "second_floor": 5, "sixth_floor": 5, "call_center": 5, "80_bloor": 5, "event": 5},
+    "manager_preferences": {},
+    "active": true,
+    "created_at": "2026-06-06 09:45:48.044925"
   },
   {
     "id": "emp_012",
@@ -61,17 +126,10 @@
     "email": null,
     "employee_type": "employee",
     "max_hours_per_week": 24,
-    "preferences": {
-      "ground_floor": 3,
-      "second_floor": 10,
-      "sixth_floor": 9,
-      "call_center": 8,
-      "80_bloor": 1,
-      "event": 7
-    },
+    "preferences": {"ground_floor": 3, "second_floor": 10, "sixth_floor": 9, "call_center": 8, "80_bloor": 1, "event": 7},
     "manager_preferences": {},
     "active": true,
-    "created_at": "2026-06-06 09:45:48.045015"
+    "created_at": "2026-06-06 09:45:48.044925"
   },
   {
     "id": "emp_013",
@@ -79,16 +137,64 @@
     "email": null,
     "employee_type": "employee",
     "max_hours_per_week": 24,
-    "preferences": {
-      "ground_floor": 1,
-      "second_floor": 10,
-      "sixth_floor": 7,
-      "call_center": 7,
-      "80_bloor": 1,
-      "event": 6
-    },
+    "preferences": {"ground_floor": 1, "second_floor": 10, "sixth_floor": 7, "call_center": 7, "80_bloor": 1, "event": 6},
     "manager_preferences": {},
     "active": true,
-    "created_at": "2026-06-06 09:45:48.045024"
+    "created_at": "2026-06-06 09:45:48.044925"
+  },
+  {
+    "id": "emp_014",
+    "name": "Sagar C",
+    "email": null,
+    "employee_type": "employee",
+    "max_hours_per_week": 24,
+    "preferences": {"ground_floor": 5, "second_floor": 5, "sixth_floor": 5, "call_center": 5, "80_bloor": 5, "event": 5},
+    "manager_preferences": {},
+    "active": true,
+    "created_at": "2026-06-06 09:45:48.044925"
+  },
+  {
+    "id": "emp_015",
+    "name": "Itohan",
+    "email": null,
+    "employee_type": "employee",
+    "max_hours_per_week": 24,
+    "preferences": {"ground_floor": 5, "second_floor": 5, "sixth_floor": 5, "call_center": 5, "80_bloor": 5, "event": 5},
+    "manager_preferences": {},
+    "active": true,
+    "created_at": "2026-06-06 09:45:48.044925"
+  },
+  {
+    "id": "emp_016",
+    "name": "Arnob",
+    "email": null,
+    "employee_type": "employee",
+    "max_hours_per_week": 24,
+    "preferences": {"ground_floor": 5, "second_floor": 5, "sixth_floor": 5, "call_center": 5, "80_bloor": 5, "event": 5},
+    "manager_preferences": {},
+    "active": true,
+    "created_at": "2026-06-06 09:45:48.044925"
+  },
+  {
+    "id": "emp_017",
+    "name": "Intern Chidera",
+    "email": null,
+    "employee_type": "intern",
+    "max_hours_per_week": 15,
+    "preferences": {},
+    "manager_preferences": {},
+    "active": true,
+    "created_at": "2026-06-06 09:45:48.044925"
+  },
+  {
+    "id": "emp_018",
+    "name": "Intern Heena",
+    "email": null,
+    "employee_type": "intern",
+    "max_hours_per_week": 15,
+    "preferences": {},
+    "manager_preferences": {},
+    "active": true,
+    "created_at": "2026-06-06 09:45:48.044925"
   }
 ]
