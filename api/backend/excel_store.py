@@ -348,9 +348,70 @@ def manager_has_password(employee_id: str) -> bool:
 # ============ Employee Operations ============
 
 def get_all_employees() -> List[Employee]:
-    """Get all employees from JSON data store"""
-    from data_store import get_all_employees as get_employees_from_json
-    return get_employees_from_json()
+    """Get all employees from Excel Employees sheet"""
+    wb = _get_workbook()
+    if not wb:
+        # Fallback to JSON if Excel not available
+        from data_store import get_all_employees as get_employees_from_json
+        return get_employees_from_json()
+    
+    try:
+        if 'Employees' not in wb.sheetnames:
+            wb.close()
+            # Fallback to JSON if Employees sheet not found
+            from data_store import get_all_employees as get_employees_from_json
+            return get_employees_from_json()
+        
+        sheet = wb['Employees']
+        employees = []
+        
+        for row in range(2, sheet.max_row + 1):
+            emp_id = sheet.cell(row=row, column=1).value
+            if not emp_id:
+                continue
+            
+            emp_name = sheet.cell(row=row, column=2).value
+            emp_email = sheet.cell(row=row, column=3).value
+            emp_type = sheet.cell(row=row, column=4).value
+            emp_max_hours = sheet.cell(row=row, column=5).value
+            emp_preferences = sheet.cell(row=row, column=6).value
+            emp_active = sheet.cell(row=row, column=7).value
+            emp_created_at = sheet.cell(row=row, column=8).value
+            
+            # Convert employee type string to enum
+            from models import EmployeeType
+            if isinstance(emp_type, str):
+                emp_type = emp_type.lower()
+                if 'manager' in emp_type:
+                    emp_type = EmployeeType.MANAGER
+                elif 'intern' in emp_type:
+                    emp_type = EmployeeType.INTERN
+                else:
+                    emp_type = EmployeeType.EMPLOYEE
+            else:
+                emp_type = EmployeeType.EMPLOYEE
+            
+            employee = Employee(
+                id=str(emp_id),
+                name=str(emp_name) if emp_name else '',
+                email=str(emp_email) if emp_email else '',
+                employee_type=emp_type,
+                max_hours_per_week=int(emp_max_hours) if emp_max_hours else 40,
+                preferences=str(emp_preferences) if emp_preferences else '',
+                active=bool(emp_active) if emp_active is not None else True,
+                created_at=emp_created_at
+            )
+            employees.append(employee)
+        
+        wb.close()
+        print(f"[EXCEL] Loaded {len(employees)} employees from Excel Employees sheet")
+        return employees
+    except Exception as e:
+        print(f"[EXCEL] Error loading employees from Excel: {e}")
+        wb.close()
+        # Fallback to JSON on error
+        from data_store import get_all_employees as get_employees_from_json
+        return get_employees_from_json()
 
 def get_employee_by_id(employee_id: str) -> Optional[Employee]:
     """Get employee by ID"""
@@ -358,9 +419,58 @@ def get_employee_by_id(employee_id: str) -> Optional[Employee]:
     return next((e for e in employees if e.id == employee_id), None)
 
 def save_employee(employee: Employee) -> Employee:
-    """Save or update employee in JSON data store"""
-    from data_store import save_employee as save_employee_to_json
-    return save_employee_to_json(employee)
+    """Save or update employee in Excel Employees sheet"""
+    wb = _get_workbook()
+    if not wb:
+        # Fallback to JSON if Excel not available
+        from data_store import save_employee as save_employee_to_json
+        return save_employee_to_json(employee)
+    
+    try:
+        if 'Employees' not in wb.sheetnames:
+            # Create Employees sheet if it doesn't exist
+            wb.create_sheet('Employees', 2)
+            _init_employees_sheet(wb['Employees'])
+        
+        sheet = wb['Employees']
+        
+        # Find if employee already exists
+        existing_row = None
+        for row in range(2, sheet.max_row + 1):
+            emp_id = sheet.cell(row=row, column=1).value
+            if emp_id and str(emp_id) == employee.id:
+                existing_row = row
+                break
+        
+        # Update or add employee
+        if existing_row:
+            row = existing_row
+        else:
+            row = sheet.max_row + 1
+        
+        sheet.cell(row=row, column=1, value=employee.id)
+        sheet.cell(row=row, column=2, value=employee.name)
+        sheet.cell(row=row, column=3, value=employee.email)
+        sheet.cell(row=row, column=4, value=employee.employee_type.value)
+        sheet.cell(row=row, column=5, value=employee.max_hours_per_week)
+        sheet.cell(row=row, column=6, value=employee.preferences)
+        sheet.cell(row=row, column=7, value=employee.active)
+        sheet.cell(row=row, column=8, value=employee.created_at)
+        
+        _save_workbook(wb)
+        wb.close()
+        # Clear caches
+        _clear_workbook_cache()
+        from storage import clear_storage_cache
+        clear_storage_cache()
+        print(f"[EXCEL] Saved employee {employee.name} to Excel Employees sheet")
+        return employee
+    except Exception as e:
+        print(f"[EXCEL] Error saving employee to Excel: {e}")
+        wb.close()
+        # Fallback to JSON on error
+        from data_store import save_employee as save_employee_to_json
+        return save_employee_to_json(employee)
 
 def delete_employee(employee_id: str) -> bool:
     """Delete employee from JSON data store and Excel"""
