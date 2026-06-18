@@ -68,14 +68,24 @@ def github_get_file() -> Optional[bytes]:
 
         content = data.get("content")
         if content:
-            return base64.b64decode(content)
+            decoded = base64.b64decode(content)
+            # Validate the decoded data is a valid Excel file
+            if len(decoded) < 1000:  # Excel files should be at least 1KB
+                print(f"[GH] Decoded data too small: {len(decoded)} bytes")
+                return None
+            return decoded
 
         # Large files (>1MB) come back without inline content; use download_url
         download_url = data.get("download_url")
         if download_url:
             dl = requests.get(download_url, timeout=10)
             if dl.status_code == 200:
-                return dl.content
+                content = dl.content
+                # Validate the downloaded data
+                if len(content) < 1000:
+                    print(f"[GH] Downloaded data too small: {len(content)} bytes")
+                    return None
+                return content
         print("[GH] No content returned")
         return None
     except Exception as e:
