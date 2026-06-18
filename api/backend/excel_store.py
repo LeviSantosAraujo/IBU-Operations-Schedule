@@ -351,14 +351,16 @@ def get_all_employees() -> List[Employee]:
     """Get all employees from Excel Employees sheet"""
     wb = _get_workbook()
     if not wb:
-        print("[EXCEL] ERROR: Workbook not available - cannot load employees")
-        return []
+        print("[EXCEL] Workbook not available, falling back to JSON")
+        from data_store import get_all_employees as get_employees_from_json
+        return get_employees_from_json()
     
     try:
         if 'Employees' not in wb.sheetnames:
             wb.close()
-            print("[EXCEL] ERROR: Employees sheet not found in workbook")
-            return []
+            print("[EXCEL] Employees sheet not found, falling back to JSON")
+            from data_store import get_all_employees as get_employees_from_json
+            return get_employees_from_json()
         
         sheet = wb['Employees']
         employees = []
@@ -451,8 +453,9 @@ def save_employee(employee: Employee) -> Employee:
     """Save or update employee in Excel Employees sheet"""
     wb = _get_workbook()
     if not wb:
-        print("[EXCEL] ERROR: Workbook not available - cannot save employee")
-        raise ValueError("Excel database not available. Please contact your manager.")
+        print("[EXCEL] Workbook not available, falling back to JSON")
+        from data_store import save_employee as save_employee_to_json
+        return save_employee_to_json(employee)
     
     try:
         if 'Employees' not in wb.sheetnames:
@@ -494,9 +497,10 @@ def save_employee(employee: Employee) -> Employee:
         print(f"[EXCEL] Saved employee {employee.name} to Excel Employees sheet")
         return employee
     except Exception as e:
-        print(f"[EXCEL] Error saving employee to Excel: {e}")
+        print(f"[EXCEL] Error saving employee to Excel: {e}, falling back to JSON")
         wb.close()
-        raise ValueError(f"Failed to save employee to Excel: {e}")
+        from data_store import save_employee as save_employee_to_json
+        return save_employee_to_json(employee)
 
 def delete_employee(employee_id: str) -> bool:
     """Delete employee from Excel Employees sheet"""
