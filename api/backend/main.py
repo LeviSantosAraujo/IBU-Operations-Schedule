@@ -375,6 +375,7 @@ async def list_employees(active_only: bool = False, authorization: str = Header(
     """List all employees (managers see manager_preferences, employees do not)"""
     try:
         employees = get_all_employees()
+        print(f"[DEBUG] Loaded {len(employees)} employees")
         if active_only:
             employees = [e for e in employees if e.active]
         
