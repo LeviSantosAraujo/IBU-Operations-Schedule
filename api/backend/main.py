@@ -83,7 +83,13 @@ app = FastAPI(title="IBU Operations team schedule", version="2.0.0", lifespan=li
 # We use allow_credentials=False and handle auth via Bearer token headers instead
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "*",
+        "https://ibu-operations-schedule-frontend-2dbzrj86d.vercel.app",
+        "https://ibu-operations-schedule.vercel.app",
+        "http://localhost:3000",
+        "http://localhost:5173"
+    ],
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
