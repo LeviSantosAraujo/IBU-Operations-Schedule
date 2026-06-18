@@ -476,19 +476,26 @@ def save_employee(employee: Employee) -> Employee:
         # Update or add employee
         if existing_row:
             row = existing_row
+            print(f"[EXCEL] Updating existing employee {employee.id} at row {row}")
         else:
             row = sheet.max_row + 1
+            print(f"[EXCEL] Adding new employee {employee.id} at row {row}")
         
         sheet.cell(row=row, column=1, value=employee.id)
         sheet.cell(row=row, column=2, value=employee.name)
         sheet.cell(row=row, column=3, value=employee.email)
         sheet.cell(row=row, column=4, value=employee.employee_type.value)
         sheet.cell(row=row, column=5, value=employee.max_hours_per_week)
-        sheet.cell(row=row, column=6, value=employee.preferences)
+        # Convert dict to JSON string for Excel storage
+        import json
+        preferences_str = json.dumps(employee.preferences) if employee.preferences else "{}"
+        sheet.cell(row=row, column=6, value=preferences_str)
         sheet.cell(row=row, column=7, value=employee.active)
         sheet.cell(row=row, column=8, value=employee.created_at)
         
-        _save_workbook(wb)
+        print(f"[EXCEL] Saving workbook to storage...")
+        save_result = _save_workbook(wb)
+        print(f"[EXCEL] Workbook save result: {save_result}")
         wb.close()
         # Clear caches
         _clear_workbook_cache()
@@ -498,6 +505,8 @@ def save_employee(employee: Employee) -> Employee:
         return employee
     except Exception as e:
         print(f"[EXCEL] Error saving employee to Excel: {e}, falling back to JSON")
+        import traceback
+        traceback.print_exc()
         wb.close()
         from data_store import save_employee as save_employee_to_json
         return save_employee_to_json(employee)
