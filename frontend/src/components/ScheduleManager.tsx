@@ -598,6 +598,13 @@ export default function ScheduleManager() {
       const shiftLocs = shift.location.split(',').map((l: string) => l.toLowerCase().trim())
       if (shiftLocs.includes(selectedLocation.toLowerCase())) return true
     }
+    // Check by floor for WFH
+    if (selectedLocation === 'wfh' && shift.floor) {
+      const floorLower = shift.floor.toLowerCase().trim()
+      if (floorLower === 'wfh' || floorLower === 'working from home' || floorLower === 'working_from_home') {
+        return true
+      }
+    }
     // Check by call center role
     if (selectedLocation === 'call center' && shift.is_call_center) {
       return true

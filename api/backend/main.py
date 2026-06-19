@@ -433,11 +433,6 @@ async def update_employee(
     if user.get('employee_type') != 'MANAGER' and 'manager_preferences' in update_data:
         del update_data['manager_preferences']
     
-    # Managers cannot modify employee-submitted preferences (they can only view them)
-    # Employees can modify their own preferences
-    if user.get('employee_type') == 'MANAGER' and 'preferences' in update_data:
-        del update_data['preferences']
-    
     # Create updated employee object
     updated_employee = Employee(
         id=employee_id,
