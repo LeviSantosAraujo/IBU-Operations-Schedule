@@ -484,9 +484,23 @@ class SchedulingEngine:
                 print(f"[SCHEDULER] Skipping event '{event.name}' - day '{event_day}' not in schedule")
                 continue
             
-            # Get people needed from event_staffing (if provided) or use event default
-            people_needed = event_staffing.get(event.id, event.people_needed) if event_staffing else event.people_needed
-            print(f"[SCHEDULER] Event '{event.name}' people_needed={people_needed} (from staffing: {event_staffing.get(event.id) if event_staffing else 'N/A'}, default: {event.people_needed})")
+            event_keys = [
+                event.id,
+                f"event_{event.id}" if not str(event.id).startswith('event_') else str(event.id).replace('event_', 'event_event_', 1),
+                f"event_{event.name.lower().replace(' ', '_')}",
+                event.name.lower().replace(' ', '_')
+            ]
+            staffing_value = None
+            if event_staffing:
+                for key in event_keys:
+                    if key in event_staffing:
+                        staffing_value = event_staffing[key]
+                        break
+            try:
+                people_needed = int(staffing_value if staffing_value is not None else event.people_needed or 0)
+            except (TypeError, ValueError):
+                people_needed = 0
+            print(f"[SCHEDULER] Event '{event.name}' people_needed={people_needed} (from staffing: {staffing_value}, default: {event.people_needed})")
             
             # Skip if no staffing required (0 people needed)
             if people_needed <= 0:

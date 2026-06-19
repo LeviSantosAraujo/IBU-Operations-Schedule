@@ -126,8 +126,8 @@ def _save_workbook(wb: Workbook) -> bool:
         local_path.parent.mkdir(exist_ok=True)
         wb.save(local_path)
         print(f"[_SAVE_WORKBOOK] Also saved to local: {local_path}")
-    except OSError as e:
-        print(f"[_SAVE_WORKBOOK] Local save failed (expected on Vercel): {e}")
+    except OSError:
+        print("[_SAVE_WORKBOOK] GitHub save succeeded; skipped local cache write on read-only filesystem")
     _workbook_cache = None
     return saved
 

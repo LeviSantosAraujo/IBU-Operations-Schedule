@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, type DragEvent } from 'react'
 import DatePicker from 'react-datepicker'
 import 'react-datepicker/dist/react-datepicker.css'
 import { format, startOfWeek, addDays } from 'date-fns'
@@ -627,13 +627,14 @@ export default function ScheduleManager() {
     return 'text-gray-900'
   }
 
-  const handleDragStart = (e: React.DragEvent, shift: Shift) => {
+  const handleDragStart = (e: DragEvent<HTMLDivElement>, shift: Shift) => {
+    e.stopPropagation()
     e.dataTransfer.effectAllowed = 'move'
     e.dataTransfer.setData('text/plain', shift.id)
     setDraggedShift(shift)
   }
 
-  const handleDragOver = (e: React.DragEvent) => {
+  const handleDragOver = (e: DragEvent<HTMLTableCellElement>) => {
     e.preventDefault()
     e.dataTransfer.dropEffect = 'move'
   }
@@ -643,9 +644,12 @@ export default function ScheduleManager() {
     return schedule.shifts.some((s: Shift) => s.locked && s.employee_id === employeeId && s.day_of_week === day)
   }
 
-  const handleDrop = (targetEmployeeId: string, targetDay: string) => {
-    if (!draggedShift || !schedule) return
-    if (draggedShift.locked) return
+  const handleDrop = (e: DragEvent<HTMLTableCellElement>, targetEmployeeId: string, targetDay: string) => {
+    e.preventDefault()
+    const draggedShiftId = e.dataTransfer.getData('text/plain')
+    const shiftToMove = draggedShift || schedule?.shifts.find((s: Shift) => s.id === draggedShiftId)
+    if (!shiftToMove || !schedule) return
+    if (shiftToMove.locked) return
 
     // Allow managers to override locked shifts by removing them first
     const lockedShiftsToRemove = schedule.shifts.filter((s: Shift) =>
@@ -664,11 +668,11 @@ export default function ScheduleManager() {
     }
 
     // Remove the original shift from the schedule (this is a move operation)
-    const shiftsWithoutOriginal = shiftsWithoutLocked.filter((s: Shift) => s.id !== draggedShift.id)
+    const shiftsWithoutOriginal = shiftsWithoutLocked.filter((s: Shift) => s.id !== shiftToMove.id)
 
     // Create a new shift with the target employee and day, preserving all other data
     const updatedShift = {
-      ...draggedShift,
+      ...shiftToMove,
       employee_id: targetEmployeeId,
       day_of_week: targetDay,
       id: `${targetEmployeeId}-${targetDay}-${Date.now()}` // Generate new ID for the moved shift
@@ -1267,7 +1271,7 @@ export default function ScheduleManager() {
                               className="p-1 schedule-cell align-top cursor-pointer"
                               style={isLockedCell(emp.id, day) ? { background: 'repeating-linear-gradient(45deg, #f3f4f6, #f3f4f6 4px, #e5e7eb 4px, #e5e7eb 8px)' } : {}}
                               onDragOver={handleDragOver}
-                              onDrop={() => handleDrop(emp.id, day)}
+                              onDrop={(e) => handleDrop(e, emp.id, day)}
                               onDoubleClick={() => {
                                 setNewShift({
                                   employee_id: emp.id,
