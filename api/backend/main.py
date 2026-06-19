@@ -68,6 +68,12 @@ class ExcelPathRequest(BaseModel):
 
 # Global state
 CURRENT_EXCEL_FILE: Optional[str] = None
+
+def is_manager_user(user: Optional[Dict]) -> bool:
+    if not user:
+        return False
+    return str(user.get('employee_type') or user.get('role') or '').lower() == EmployeeType.MANAGER.value
+
 UPLOAD_DIR = Path(__file__).parent / "uploads"
 try:
     UPLOAD_DIR.mkdir(exist_ok=True)
@@ -388,7 +394,7 @@ async def list_employees(active_only: bool = False, authorization: str = Header(
                 pass  # If auth fails, just return employees without manager_preferences
         
         # Hide manager_preferences if user is not a manager (or if auth failed)
-        if not user or user.get('employee_type') != 'MANAGER':
+        if not is_manager_user(user):
             for emp in employees:
                 emp.manager_preferences = {}
         
@@ -430,7 +436,7 @@ async def update_employee(
     update_data = employee_update.model_dump(exclude_unset=True)
     
     # Only managers can update manager_preferences
-    if user.get('employee_type') != 'MANAGER' and 'manager_preferences' in update_data:
+    if not is_manager_user(user) and 'manager_preferences' in update_data:
         del update_data['manager_preferences']
     
     # Create updated employee object
@@ -638,7 +644,7 @@ async def get_schedule(
     approved_availabilities = [a for a in all_availabilities if a.approved and a.week_start_date == week_start_date]
     
     # Filter: managers see all, employees see only their own
-    if user.get('employee_type') != 'MANAGER':
+    if not is_manager_user(user):
         approved_availabilities = [a for a in approved_availabilities if a.employee_id == user.get('employee_id')]
     
     # Add availability requests to the schedule response
@@ -646,7 +652,7 @@ async def get_schedule(
     # Filter by week start date
     week_requests = [r for r in all_requests if r.get('week_start_date') == week_start_date]
     # Filter: managers see all, employees see only their own
-    if user.get('employee_type') != 'MANAGER':
+    if not is_manager_user(user):
         week_requests = [r for r in week_requests if r.get('employee_id') == user.get('employee_id')]
     
     # Add availabilities and requests to schedule (this is a dynamic field, not in the model)

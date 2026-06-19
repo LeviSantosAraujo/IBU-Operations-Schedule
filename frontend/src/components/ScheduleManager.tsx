@@ -591,19 +591,21 @@ export default function ScheduleManager() {
     return locationColors[firstLoc] || locationColors[loc.toLowerCase().trim()] || 'loc-ground'
   }
 
+  const isWfhShift = (shift: Shift) => {
+    const values = [shift.location, shift.floor, shift.job_type]
+      .filter(Boolean)
+      .flatMap((value) => String(value).split(','))
+      .map((value) => value.toLowerCase().trim().replace(/_/g, ' '))
+    return values.some((value) => value === 'wfh' || value === 'working from home' || value === 'working home')
+  }
+
   const isShiftHighlighted = (shift: Shift) => {
     if (selectedLocation === 'all') return true
+    if (selectedLocation === 'wfh' && isWfhShift(shift)) return true
     // Check by location
     if (shift.location) {
       const shiftLocs = shift.location.split(',').map((l: string) => l.toLowerCase().trim())
       if (shiftLocs.includes(selectedLocation.toLowerCase())) return true
-    }
-    // Check by floor for WFH
-    if (selectedLocation === 'wfh' && shift.floor) {
-      const floorLower = shift.floor.toLowerCase().trim()
-      if (floorLower === 'wfh' || floorLower === 'working from home' || floorLower === 'working_from_home') {
-        return true
-      }
     }
     // Check by call center role
     if (selectedLocation === 'call center' && shift.is_call_center) {
@@ -625,12 +627,15 @@ export default function ScheduleManager() {
     return 'text-gray-900'
   }
 
-  const handleDragStart = (shift: Shift) => {
+  const handleDragStart = (e: React.DragEvent, shift: Shift) => {
+    e.dataTransfer.effectAllowed = 'move'
+    e.dataTransfer.setData('text/plain', shift.id)
     setDraggedShift(shift)
   }
 
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault()
+    e.dataTransfer.dropEffect = 'move'
   }
 
   const isLockedCell = (employeeId: string, day: string) => {
@@ -1158,21 +1163,7 @@ export default function ScheduleManager() {
           {/* Focused Location Panel */}
           {schedule && selectedLocation !== 'all' && (() => {
             const locLabel = locations.find(l => l.id === selectedLocation)?.name || selectedLocation
-            const filteredShifts = schedule.shifts.filter((s: Shift) => {
-              // Check by location
-              if (s.location && s.location.split(',').map((l: string) => l.toLowerCase().trim()).includes(selectedLocation.toLowerCase())) {
-                return true
-              }
-              // Check by call center role
-              if (selectedLocation === 'call center' && s.is_call_center) {
-                return true
-              }
-              // Check by event name for event shifts
-              if (s.is_event && s.event_name && s.event_name.toLowerCase().replace(/\s+/g, '_') === selectedLocation.toLowerCase()) {
-                return true
-              }
-              return false
-            })
+            const filteredShifts = schedule.shifts.filter((s: Shift) => isShiftHighlighted(s))
             const byDay: Record<string, Shift[]> = {}
             days.forEach(d => { byDay[d] = [] })
             filteredShifts.forEach((s: Shift) => { byDay[s.day_of_week]?.push(s) })
@@ -1313,7 +1304,7 @@ export default function ScheduleManager() {
                                 <div 
                                   key={shift.id} 
                                   draggable
-                                  onDragStart={() => handleDragStart(shift)}
+                                  onDragStart={(e) => handleDragStart(e, shift)}
                                   onClick={(e) => e.stopPropagation()}
                                   onDoubleClick={(e) => { e.stopPropagation(); handleCellDoubleClick(shift.id) }}
                                   className={`shift-card p-2 rounded mb-1 text-xs border relative group cursor-move ${getShiftColorClass(shift)} ${!isShiftHighlighted(shift) ? 'opacity-30' : ''}`}

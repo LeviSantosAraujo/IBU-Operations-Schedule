@@ -224,14 +224,14 @@ def _init_pwds_sheet(sheet):
 
 def _init_employees_sheet(sheet):
     """Initialize Employees sheet"""
-    headers = ['ID', 'Name', 'Email', 'Type', 'Max_Hours', 'Preferences', 'Active', 'Created_At']
+    headers = ['ID', 'Name', 'Email', 'Type', 'Max_Hours', 'Preferences', 'Active', 'Created_At', 'Manager_Preferences']
     for col, header in enumerate(headers, 1):
         cell = sheet.cell(row=1, column=col, value=header)
         cell.font = Font(bold=True)
         cell.fill = PatternFill(start_color='9BBB59', end_color='9BBB59', fill_type='solid')
         cell.font = Font(bold=True, color='FFFFFF')
     
-    for col_letter in ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H']:
+    for col_letter in ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I']:
         sheet.column_dimensions[col_letter].width = 20
 
 def _init_availability_sheet(sheet):
@@ -379,6 +379,7 @@ def get_all_employees() -> List[Employee]:
                 emp_preferences = sheet.cell(row=row, column=6).value
                 emp_active = sheet.cell(row=row, column=7).value
                 emp_created_at = sheet.cell(row=row, column=8).value
+                emp_manager_preferences = sheet.cell(row=row, column=9).value
                 
                 # Convert employee type string to enum
                 if isinstance(emp_type, str):
@@ -404,6 +405,17 @@ def get_all_employees() -> List[Employee]:
                 elif isinstance(emp_preferences, dict):
                     preferences_value = {str(k): int(v) for k, v in emp_preferences.items()}
                 
+                manager_preferences_value = {}
+                if isinstance(emp_manager_preferences, str) and emp_manager_preferences.strip():
+                    try:
+                        parsed = json.loads(emp_manager_preferences)
+                        if isinstance(parsed, dict):
+                            manager_preferences_value = {str(k): int(v) for k, v in parsed.items()}
+                    except Exception:
+                        manager_preferences_value = {}
+                elif isinstance(emp_manager_preferences, dict):
+                    manager_preferences_value = {str(k): int(v) for k, v in emp_manager_preferences.items()}
+                
                 # Handle created_at - convert to datetime
                 if isinstance(emp_created_at, str):
                     try:
@@ -425,7 +437,7 @@ def get_all_employees() -> List[Employee]:
                     employee_type=emp_type,
                     max_hours_per_week=int(emp_max_hours) if emp_max_hours else 40,
                     preferences=preferences_value,
-                    manager_preferences={},
+                    manager_preferences=manager_preferences_value,
                     active=bool(emp_active) if emp_active is not None else True,
                     created_at=emp_created_at
                 )
@@ -486,12 +498,12 @@ def save_employee(employee: Employee) -> Employee:
         sheet.cell(row=row, column=3, value=employee.email)
         sheet.cell(row=row, column=4, value=employee.employee_type.value)
         sheet.cell(row=row, column=5, value=employee.max_hours_per_week)
-        # Convert dict to JSON string for Excel storage
-        import json
         preferences_str = json.dumps(employee.preferences) if employee.preferences else "{}"
+        manager_preferences_str = json.dumps(employee.manager_preferences) if employee.manager_preferences else "{}"
         sheet.cell(row=row, column=6, value=preferences_str)
         sheet.cell(row=row, column=7, value=employee.active)
         sheet.cell(row=row, column=8, value=employee.created_at)
+        sheet.cell(row=row, column=9, value=manager_preferences_str)
         
         print(f"[EXCEL] Saving workbook to storage...")
         save_result = _save_workbook(wb)
