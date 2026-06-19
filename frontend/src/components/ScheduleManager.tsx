@@ -45,6 +45,7 @@ const baseLocations = [
   { id: '6th floor', name: '6th Floor', dotColor: '#EAB308' },
   { id: 'call center', name: 'Call Center', dotColor: '#6B7280' },
   { id: '80 bloor', name: '80 Bloor', dotColor: '#8B5CF6' },
+  { id: 'wfh', name: 'Working From Home', dotColor: '#EC4899' },
   { id: 'day off', name: 'Day Off', dotColor: '#000000' },
 ]
 
@@ -102,6 +103,7 @@ export default function ScheduleManager() {
     description: ''
   })
   const [saved, setSaved] = useState(false)
+  const [saving, setSaving] = useState(false)
   const [showApprovalModal, setShowApprovalModal] = useState(false)
   const [selectedRequest, setSelectedRequest] = useState<any>(null)
   const [managerComment, setManagerComment] = useState('')
@@ -468,11 +470,14 @@ export default function ScheduleManager() {
   const handleSave = async () => {
     if (!schedule) return
     try {
+      setSaving(true)
       await saveSchedule(schedule)
       setSaved(true)
       setTimeout(() => setSaved(false), 3000)
     } catch (err) {
       alert('Error saving schedule')
+    } finally {
+      setSaving(false)
     }
   }
 
@@ -1059,10 +1064,20 @@ export default function ScheduleManager() {
               
               <button
                 onClick={handleSave}
-                className="flex items-center gap-2 bg-gray-600 text-white px-4 py-2 rounded hover:bg-gray-700"
+                disabled={saving}
+                className="flex items-center gap-2 bg-gray-600 text-white px-4 py-2 rounded hover:bg-gray-700 disabled:opacity-50"
               >
-                <Save className="w-4 h-4" />
-                Save
+                {saving ? (
+                  <>
+                    <Clock className="w-4 h-4 animate-spin" />
+                    Saving...
+                  </>
+                ) : (
+                  <>
+                    <Save className="w-4 h-4" />
+                    Save
+                  </>
+                )}
               </button>
               
               <button
