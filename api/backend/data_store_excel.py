@@ -193,11 +193,14 @@ def get_system_config() -> SystemConfig:
     cache_key = "config"
     if cache_key in _MEMORY_CACHE and _is_cache_valid(cache_key):
         return _MEMORY_CACHE[cache_key]
-    
+
     config_dict = excel_get_system_config()
     if not config_dict:
         config = SystemConfig()
     else:
+        # Ensure notifications is a list, not None
+        if config_dict.get('notifications') is None:
+            config_dict['notifications'] = []
         # Convert dict to Pydantic model
         config = SystemConfig(**config_dict)
     _update_cache(cache_key, config)
@@ -382,8 +385,13 @@ def save_notification(notification: Dict) -> bool:
     config = get_system_config()
     if not config.notifications:
         config.notifications = []
-    
-    config.notifications.append(notification)
+
+    # Convert datetime fields to ISO strings for JSON serialization
+    notification_copy = notification.copy()
+    if isinstance(notification_copy.get('created_at'), datetime):
+        notification_copy['created_at'] = notification_copy['created_at'].isoformat()
+
+    config.notifications.append(notification_copy)
     save_system_config(config)
     print(f"[SAVE] Saved notification for {notification.get('employee_id')} to Excel")
     return True

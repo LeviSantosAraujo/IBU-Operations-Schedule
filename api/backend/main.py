@@ -94,6 +94,7 @@ app.add_middleware(
         "https://ibu-operations-schedule-frontend-2dbzrj86d.vercel.app",
         "https://ibu-operations-schedule-frontend-ju3it15eq.vercel.app",
         "https://ibu-operations-schedule-frontend-jcrrl3bmx.vercel.app",
+        "https://ibu-operations-schedule-frontend-rbrfsfadd.vercel.app",
         "https://ibu-operations-schedule.vercel.app",
         "http://localhost:3000",
         "http://localhost:5173"
