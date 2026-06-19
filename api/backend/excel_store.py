@@ -2021,7 +2021,10 @@ def save_availability_request(request: Dict) -> bool:
         wb.close()
         return True
     except Exception as e:
-        print(f"Error saving availability request: {e}")
+        import traceback
+        print(f"[EXCEL] Error saving availability request: {e}")
+        print(f"[EXCEL] Request data: {request}")
+        traceback.print_exc()
         wb.close()
         return False
 

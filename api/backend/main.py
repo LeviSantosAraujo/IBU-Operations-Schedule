@@ -971,18 +971,34 @@ async def get_my_availability_requests(authorization: str = Header(None)):
 @app.post("/api/availability-requests")
 async def create_availability_request(request: Dict, authorization: str = Header(None)):
     """Create an availability request"""
-    user = AuthManager.get_current_user(authorization)
-    if not user:
-        raise HTTPException(status_code=401, detail="Unauthorized")
-    
-    request['id'] = str(uuid.uuid4())
-    request['employee_id'] = user['employee_id']
-    request['status'] = AvailabilityRequestStatus.PENDING
-    request['created_at'] = datetime.now()
-    
-    if save_availability_request(request):
-        return request
-    raise HTTPException(status_code=500, detail="Failed to save request")
+    try:
+        user = AuthManager.get_current_user(authorization)
+        if not user:
+            raise HTTPException(status_code=401, detail="Unauthorized")
+        
+        request['id'] = str(uuid.uuid4())
+        request['employee_id'] = user['employee_id']
+        request['status'] = AvailabilityRequestStatus.PENDING
+        request['created_at'] = datetime.now()
+        
+        if save_availability_request(request):
+            # Ensure response is JSON-serializable
+            response = request.copy()
+            if isinstance(response.get('created_at'), datetime):
+                response['created_at'] = response['created_at'].isoformat()
+            if isinstance(response.get('updated_at'), datetime):
+                response['updated_at'] = response['updated_at'].isoformat()
+            if isinstance(response.get('approved_at'), datetime):
+                response['approved_at'] = response['approved_at'].isoformat()
+            return response
+        raise HTTPException(status_code=500, detail="Failed to save request")
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        print(f"[API] Error creating availability request: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Error creating request: {str(e)}")
 
 @app.put("/api/availability-requests/{request_id}/approve")
 async def approve_availability_request(request_id: str, body: Dict = {}, authorization: str = Header(None)):
