@@ -1003,23 +1003,26 @@ async def create_availability_request(request: Dict, authorization: str = Header
 @app.put("/api/availability-requests/{request_id}/approve")
 async def approve_availability_request(request_id: str, body: Dict = {}, authorization: str = Header(None)):
     """Approve an availability request"""
-    user = AuthManager.get_current_user(authorization)
-    if not user or user.get('role') not in ['manager', 'admin']:
-        raise HTTPException(status_code=403, detail="Manager access required")
+    try:
+        user = AuthManager.get_current_user(authorization)
+        if not user or user.get('role') not in ['manager', 'admin']:
+            raise HTTPException(status_code=403, detail="Manager access required")
 
-    requests = get_availability_requests()
-    request_data = next((r for r in requests if r['id'] == request_id), None)
+        requests = get_availability_requests()
+        request_data = next((r for r in requests if r['id'] == request_id), None)
 
-    if not request_data:
-        raise HTTPException(status_code=404, detail="Request not found")
+        if not request_data:
+            raise HTTPException(status_code=404, detail="Request not found")
 
-    request_data['status'] = AvailabilityRequestStatus.APPROVED
-    request_data['manager_comment'] = body.get('comment')
-    request_data['updated_at'] = datetime.now()
-    request_data['approved_by'] = user.get('employee_id')
-    request_data['approved_at'] = datetime.now()
+        request_data['status'] = AvailabilityRequestStatus.APPROVED
+        request_data['manager_comment'] = body.get('comment')
+        request_data['updated_at'] = datetime.now()
+        request_data['approved_by'] = user.get('employee_id')
+        request_data['approved_at'] = datetime.now()
 
-    if save_availability_request(request_data):
+        if not save_availability_request(request_data):
+            raise HTTPException(status_code=500, detail="Failed to save request to Excel")
+
         # Add locked shifts for each day in the date range
         try:
             from datetime import timedelta
@@ -1095,61 +1098,104 @@ async def approve_availability_request(request_id: str, body: Dict = {}, authori
                 current_date += timedelta(days=1)
         except Exception as e:
             import traceback
-            print(f"Warning: could not add locked shift: {e}")
+            print(f"[API] Warning: could not add locked shift: {e}")
             traceback.print_exc()
 
         # Send notification to employee
-        comment_part = f" Manager note: {body.get('comment')}" if body.get('comment') else ""
-        notification = {
-            'id': str(uuid.uuid4()),
-            'employee_id': request_data['employee_id'],
-            'type': NotificationType.AVAILABILITY_APPROVED,
-            'message': f"Your {request_type} request ({start_date} to {end_date}) has been approved.{comment_part}",
-            'created_at': datetime.now(),
-            'read': False
-        }
-        save_notification(notification)
-        return request_data
+        try:
+            comment_part = f" Manager note: {body.get('comment')}" if body.get('comment') else ""
+            notification = {
+                'id': str(uuid.uuid4()),
+                'employee_id': request_data['employee_id'],
+                'type': NotificationType.AVAILABILITY_APPROVED,
+                'message': f"Your {request_type} request ({start_date} to {end_date}) has been approved.{comment_part}",
+                'created_at': datetime.now(),
+                'read': False
+            }
+            save_notification(notification)
+        except Exception as e:
+            import traceback
+            print(f"[API] Warning: could not send notification: {e}")
+            traceback.print_exc()
 
-    raise HTTPException(status_code=500, detail="Failed to approve request")
+        # Ensure response is JSON-serializable
+        response = request_data.copy()
+        if isinstance(response.get('created_at'), datetime):
+            response['created_at'] = response['created_at'].isoformat()
+        if isinstance(response.get('updated_at'), datetime):
+            response['updated_at'] = response['updated_at'].isoformat()
+        if isinstance(response.get('approved_at'), datetime):
+            response['approved_at'] = response['approved_at'].isoformat()
+        return response
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        print(f"[API] Error approving availability request: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Error approving request: {str(e)}")
 
 @app.put("/api/availability-requests/{request_id}/reject")
 async def reject_availability_request(request_id: str, body: Dict = {}, authorization: str = Header(None)):
     """Reject an availability request"""
-    user = AuthManager.get_current_user(authorization)
-    if not user or user.get('role') not in ['manager', 'admin']:
-        raise HTTPException(status_code=403, detail="Manager access required")
+    try:
+        user = AuthManager.get_current_user(authorization)
+        if not user or user.get('role') not in ['manager', 'admin']:
+            raise HTTPException(status_code=403, detail="Manager access required")
 
-    requests = get_availability_requests()
-    request_data = next((r for r in requests if r['id'] == request_id), None)
+        requests = get_availability_requests()
+        request_data = next((r for r in requests if r['id'] == request_id), None)
 
-    if not request_data:
-        raise HTTPException(status_code=404, detail="Request not found")
+        if not request_data:
+            raise HTTPException(status_code=404, detail="Request not found")
 
-    request_data['status'] = AvailabilityRequestStatus.REJECTED
-    request_data['manager_comment'] = body.get('comment', '')
-    request_data['updated_at'] = datetime.now()
+        request_data['status'] = AvailabilityRequestStatus.REJECTED
+        request_data['manager_comment'] = body.get('comment', '')
+        request_data['updated_at'] = datetime.now()
 
-    if save_availability_request(request_data):
+        if not save_availability_request(request_data):
+            raise HTTPException(status_code=500, detail="Failed to save request to Excel")
+
         # Support both old and new model for notification message
         request_type = request_data.get('request_type', 'availability')
         start_date = request_data.get('start_date', request_data.get('week_start_date', ''))
         end_date = request_data.get('end_date', start_date)
 
         # Send notification to employee
-        comment_part = f" Reason: {body.get('comment')}" if body.get('comment') else ""
-        notification = {
-            'id': str(uuid.uuid4()),
-            'employee_id': request_data['employee_id'],
-            'type': NotificationType.AVAILABILITY_REJECTED,
-            'message': f"Your {request_type} request ({start_date} to {end_date}) was not approved.{comment_part}",
-            'created_at': datetime.now(),
-            'read': False
-        }
-        save_notification(notification)
-        return request_data
-    
-    raise HTTPException(status_code=500, detail="Failed to reject request")
+        try:
+            comment_part = f" Reason: {body.get('comment')}" if body.get('comment') else ""
+            notification = {
+                'id': str(uuid.uuid4()),
+                'employee_id': request_data['employee_id'],
+                'type': NotificationType.AVAILABILITY_REJECTED,
+                'message': f"Your {request_type} request ({start_date} to {end_date}) was not approved.{comment_part}",
+                'created_at': datetime.now(),
+                'read': False
+            }
+            save_notification(notification)
+        except Exception as e:
+            import traceback
+            print(f"[API] Warning: could not send notification: {e}")
+            traceback.print_exc()
+
+        # Ensure response is JSON-serializable
+        response = request_data.copy()
+        if isinstance(response.get('created_at'), datetime):
+            response['created_at'] = response['created_at'].isoformat()
+        if isinstance(response.get('updated_at'), datetime):
+            response['updated_at'] = response['updated_at'].isoformat()
+        if isinstance(response.get('approved_at'), datetime):
+            response['approved_at'] = response['approved_at'].isoformat()
+        return response
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        print(f"[API] Error rejecting availability request: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Error rejecting request: {str(e)}")
 
 # ============ Notifications ============
 
