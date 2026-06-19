@@ -293,14 +293,15 @@ def get_availability_requests() -> List[AvailabilityRequest]:
     _update_cache(cache_key, requests)
     return requests
 
-def save_availability_request(request: AvailabilityRequest) -> AvailabilityRequest:
+def save_availability_request(request) -> bool:
     """Save availability request to Excel and update cache"""
     result = excel_save_availability_request(request)
     # Invalidate cache
     if "availability_requests" in _MEMORY_CACHE:
         del _MEMORY_CACHE["availability_requests"]
         del _CACHE_TIME["availability_requests"]
-    print(f"[SAVE] Saved availability request {request.id} to Excel")
+    request_id = request.id if hasattr(request, 'id') else request.get('id')
+    print(f"[SAVE] Saved availability request {request_id} to Excel")
     return result
 
 # Event Operations
