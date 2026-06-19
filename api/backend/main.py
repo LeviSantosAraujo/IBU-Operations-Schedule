@@ -93,6 +93,7 @@ app.add_middleware(
         "*",
         "https://ibu-operations-schedule-frontend-2dbzrj86d.vercel.app",
         "https://ibu-operations-schedule-frontend-ju3it15eq.vercel.app",
+        "https://ibu-operations-schedule-frontend-jcrrl3bmx.vercel.app",
         "https://ibu-operations-schedule.vercel.app",
         "http://localhost:3000",
         "http://localhost:5173"
@@ -975,22 +976,37 @@ async def create_availability_request(request: Dict, authorization: str = Header
         user = AuthManager.get_current_user(authorization)
         if not user:
             raise HTTPException(status_code=401, detail="Unauthorized")
-        
+
         request['id'] = str(uuid.uuid4())
         request['employee_id'] = user['employee_id']
         request['status'] = AvailabilityRequestStatus.PENDING
         request['created_at'] = datetime.now()
-        
-        if save_availability_request(request):
+
+        save_result = save_availability_request(request)
+        print(f"[API] save_availability_request returned: {save_result}")
+
+        if save_result:
             # Ensure response is JSON-serializable
-            response = request.copy()
-            if isinstance(response.get('created_at'), datetime):
-                response['created_at'] = response['created_at'].isoformat()
-            if isinstance(response.get('updated_at'), datetime):
-                response['updated_at'] = response['updated_at'].isoformat()
-            if isinstance(response.get('approved_at'), datetime):
-                response['approved_at'] = response['approved_at'].isoformat()
-            return response
+            try:
+                response = dict(request)  # Create a proper dict copy
+                if isinstance(response.get('created_at'), datetime):
+                    response['created_at'] = response['created_at'].isoformat()
+                if isinstance(response.get('updated_at'), datetime):
+                    response['updated_at'] = response['updated_at'].isoformat()
+                if isinstance(response.get('approved_at'), datetime):
+                    response['approved_at'] = response['approved_at'].isoformat()
+                print(f"[API] Returning response with keys: {list(response.keys())}")
+                return response
+            except Exception as e:
+                import traceback
+                print(f"[API] Error serializing response: {e}")
+                traceback.print_exc()
+                # Return a minimal response if serialization fails
+                return {
+                    'id': request.get('id'),
+                    'status': str(request.get('status')),
+                    'employee_id': request.get('employee_id')
+                }
         raise HTTPException(status_code=500, detail="Failed to save request")
     except HTTPException:
         raise
