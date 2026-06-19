@@ -10,7 +10,8 @@ const employeeTypes = [
 
 export default function EmployeeManagement() {
   const [employees, setEmployees] = useState<any[]>([])
-  const [_loading, setLoading] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const [saving, setSaving] = useState<string | null>(null) // 'add', 'update', or employee_id for delete
   const [editing, setEditing] = useState<string | null>(null)
   const [showAdd, setShowAdd] = useState(false)
   const [formData, setFormData] = useState({
@@ -39,6 +40,7 @@ export default function EmployeeManagement() {
   }
 
   const handleAdd = async () => {
+    setSaving('add')
     try {
       await createEmployee({
         id: `emp_${Date.now()}`,
@@ -56,10 +58,13 @@ export default function EmployeeManagement() {
       loadEmployees()
     } catch (err) {
       alert('Error creating employee')
+    } finally {
+      setSaving(null)
     }
   }
 
   const handleUpdate = async (id: string) => {
+    setSaving('update')
     try {
       // Only send fields that should be updated - let backend preserve preferences, created_at, etc.
       const updateData = {
@@ -70,7 +75,7 @@ export default function EmployeeManagement() {
         active: formData.active
       }
       await updateEmployee(id, updateData)
-      
+
       // If manager and password provided, update password
       if (formData.employee_type === 'manager' && formData.password) {
         try {
@@ -80,22 +85,27 @@ export default function EmployeeManagement() {
           alert('Employee updated but password update failed. You may need to update the password separately.')
         }
       }
-      
+
       setEditing(null)
       loadEmployees()
     } catch (err) {
       console.error('Update error:', err)
       alert('Error updating employee')
+    } finally {
+      setSaving(null)
     }
   }
 
   const handleDelete = async (id: string) => {
     if (!confirm('Are you sure you want to delete this employee?')) return
+    setSaving(id)
     try {
       await deleteEmployee(id)
       loadEmployees()
     } catch (err) {
       alert('Error deleting employee')
+    } finally {
+      setSaving(null)
     }
   }
 
@@ -188,11 +198,11 @@ export default function EmployeeManagement() {
           <div className="flex gap-2 mt-4">
             <button
               onClick={handleAdd}
-              disabled={!formData.name}
+              disabled={!formData.name || saving === 'add'}
               className="flex items-center gap-2 bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700 disabled:opacity-50"
             >
               <Check className="w-4 h-4" />
-              Save
+              {saving === 'add' ? 'Saving...' : 'Save'}
             </button>
             <button
               onClick={() => setShowAdd(false)}
@@ -284,13 +294,15 @@ export default function EmployeeManagement() {
                       <div className="flex gap-2">
                         <button
                           onClick={() => handleUpdate(emp.id)}
-                          className="text-green-600 hover:text-green-800"
+                          disabled={saving === 'update'}
+                          className="text-green-600 hover:text-green-800 disabled:opacity-50"
                         >
-                          <Check className="w-4 h-4" />
+                          {saving === 'update' ? 'Saving...' : <Check className="w-4 h-4" />}
                         </button>
                         <button
                           onClick={() => setEditing(null)}
-                          className="text-red-600 hover:text-red-800"
+                          disabled={saving === 'update'}
+                          className="text-red-600 hover:text-red-800 disabled:opacity-50"
                         >
                           <X className="w-4 h-4" />
                         </button>
@@ -316,15 +328,17 @@ export default function EmployeeManagement() {
                       <div className="flex gap-2">
                         <button
                           onClick={() => startEdit(emp)}
-                          className="text-blue-600 hover:text-blue-800"
+                          disabled={saving === emp.id}
+                          className="text-blue-600 hover:text-blue-800 disabled:opacity-50"
                         >
                           <Edit className="w-4 h-4" />
                         </button>
                         <button
                           onClick={() => handleDelete(emp.id)}
-                          className="text-red-600 hover:text-red-800"
+                          disabled={saving === emp.id}
+                          className="text-red-600 hover:text-red-800 disabled:opacity-50"
                         >
-                          <Trash2 className="w-4 h-4" />
+                          {saving === emp.id ? 'Deleting...' : <Trash2 className="w-4 h-4" />}
                         </button>
                       </div>
                     </td>

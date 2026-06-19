@@ -522,15 +522,16 @@ class SchedulingEngine:
             # Assign employees to event using exact event time
             while assigned < people_needed and attempts < 100:
                 attempts += 1
-                
+
                 candidates = []
                 # Skip managers in event staffing - they get management assignments only
                 regular_employees_event = [e for e in employees if e.employee_type != EmployeeType.MANAGER]
+                print(f"[SCHEDULER] Evaluating {len(regular_employees_event)} regular employees for event '{event.name}'")
                 for emp in regular_employees_event:
                     # Skip if already assigned to this event
                     if emp.id in assigned_employees:
                         continue
-                    
+
                     avail = availabilities.get(emp.id)
                     if not avail:
                         avail = Availability(
@@ -538,7 +539,7 @@ class SchedulingEngine:
                             employee_id=emp.id,
                             week_start_date=week_start_date
                         )
-                    
+
                     # Create shift with exact event time
                     test_shift = Shift(
                         id="temp",
@@ -553,26 +554,30 @@ class SchedulingEngine:
                         event_name=event.name,
                         color=get_location_color(event.location)
                     )
-                    
+
                     can_assign, reason = self.can_assign_shift(emp, test_shift, schedule, avail, approved_requests)
                     if can_assign:
                         current_hours = self.get_employee_weekly_hours(schedule, emp.id)
                         score = self.score_employee_for_shift(emp, test_shift, avail, employee_preferences, historical_job_preferences, current_hours)
                         candidates.append((score, emp, avail, test_shift))
-                
+                        print(f"[SCHEDULER] Candidate for event '{event.name}': {emp.name} (score={score:.2f})")
+                    else:
+                        print(f"[SCHEDULER] Rejected {emp.name} for event '{event.name}': {reason}")
+
                 candidates.sort(key=lambda x: x[0], reverse=True)
-                
+                print(f"[SCHEDULER] Found {len(candidates)} candidates for event '{event.name}'")
+
                 if candidates:
                     _, best_emp, best_avail, shift = candidates[0]
                     shift.id = str(uuid.uuid4())
                     schedule.shifts.append(shift)
-                    
+
                     current = schedule.total_hours.get(best_emp.id, 0)
                     schedule.total_hours[best_emp.id] = current + shift.hours
-                    
+
                     # Track unique locations for diversity
                     employee_locations[best_emp.id].add(event.location)
-                    
+
                     assigned_employees.add(best_emp.id)
                     assigned += 1
                     print(f"[SCHEDULER] Assigned {best_emp.name} to event '{event.name}' ({assigned}/{people_needed})")

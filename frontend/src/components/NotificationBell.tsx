@@ -10,7 +10,6 @@ export default function NotificationBell() {
   const [unreadCount, setUnreadCount] = useState(0)
   const [isManager] = useState(auth.isManager())
   const [hasAuthError, setHasAuthError] = useState(false)
-  const [processingRequest, setProcessingRequest] = useState<string | null>(null)
 
   useEffect(() => {
     if (hasAuthError) return // Stop polling if auth error occurred
@@ -71,39 +70,46 @@ export default function NotificationBell() {
   }
 
   const handleApprove = async (requestId: string, comment: string = '') => {
-    setProcessingRequest(requestId)
-    try {
-      await approveAvailabilityRequest(requestId, comment)
-      // Immediately remove the request from the list
-      setAvailabilityRequests(prev => prev.filter(r => r.id !== requestId))
-      loadNotifications() // Refresh notifications immediately after approval
-      // Wait a moment for Excel file to be saved, then refresh schedule
-      setTimeout(() => {
-        window.dispatchEvent(new CustomEvent('scheduleUpdate'))
-      }, 500)
-    } catch (err) {
-      console.error('Error approving request:', err)
-      alert('Error approving request. Please try again.')
-      loadAvailabilityRequests() // Reload on error
-    } finally {
-      setProcessingRequest(null)
-    }
+    // Immediately dismiss the request from UI
+    const requestToProcess = availabilityRequests.find(r => r.id === requestId)
+    setAvailabilityRequests(prev => prev.filter(r => r.id !== requestId))
+
+    // Run approval in background
+    approveAvailabilityRequest(requestId, comment)
+      .then(() => {
+        loadNotifications()
+        setTimeout(() => {
+          window.dispatchEvent(new CustomEvent('scheduleUpdate'))
+        }, 500)
+      })
+      .catch((err) => {
+        console.error('Error approving request:', err)
+        alert('Error approving request. Please try again.')
+        // Re-add the request if it failed
+        if (requestToProcess) {
+          setAvailabilityRequests(prev => [...prev, requestToProcess])
+        }
+      })
   }
 
   const handleReject = async (requestId: string, comment: string = '') => {
-    setProcessingRequest(requestId)
-    try {
-      await rejectAvailabilityRequest(requestId, comment)
-      // Immediately remove the request from the list
-      setAvailabilityRequests(prev => prev.filter(r => r.id !== requestId))
-      loadNotifications() // Refresh notifications immediately after rejection
-    } catch (err) {
-      console.error('Error rejecting request:', err)
-      alert('Error rejecting request. Please try again.')
-      loadAvailabilityRequests() // Reload on error
-    } finally {
-      setProcessingRequest(null)
-    }
+    // Immediately dismiss the request from UI
+    const requestToProcess = availabilityRequests.find(r => r.id === requestId)
+    setAvailabilityRequests(prev => prev.filter(r => r.id !== requestId))
+
+    // Run rejection in background
+    rejectAvailabilityRequest(requestId, comment)
+      .then(() => {
+        loadNotifications()
+      })
+      .catch((err) => {
+        console.error('Error rejecting request:', err)
+        alert('Error rejecting request. Please try again.')
+        // Re-add the request if it failed
+        if (requestToProcess) {
+          setAvailabilityRequests(prev => [...prev, requestToProcess])
+        }
+      })
   }
 
   const getNotificationIcon = (type: string) => {
@@ -166,25 +172,34 @@ export default function NotificationBell() {
                           <p className="text-xs text-gray-600">
                             {request.request_type === 'availability' ? 'Availability Request' : 'Time Off Request'}
                           </p>
-                          {request.comment && (
-                            <p className="text-xs text-gray-500 italic mt-1">"{request.comment}"</p>
-                          )}
+                          <div className="text-xs text-gray-600 mt-1 space-y-1">
+                            {request.start_date && request.end_date && (
+                              <p><strong>Date:</strong> {request.start_date} to {request.end_date}</p>
+                            )}
+                            {request.days_of_week && request.days_of_week.length > 0 && (
+                              <p><strong>Days:</strong> {Array.isArray(request.days_of_week) ? request.days_of_week.join(', ') : request.days_of_week}</p>
+                            )}
+                            {request.start_time && request.end_time && (
+                              <p><strong>Time:</strong> {request.start_time} - {request.end_time}</p>
+                            )}
+                            {request.employee_comment && (
+                              <p><strong>Comment:</strong> "{request.employee_comment}"</p>
+                            )}
+                          </div>
                         </div>
                       </div>
                       <div className="flex gap-2">
                         <button
                           onClick={() => handleApprove(request.id)}
-                          disabled={processingRequest === request.id}
-                          className="flex-1 bg-green-600 text-white text-xs py-2 px-3 rounded hover:bg-green-700 min-h-[44px] disabled:opacity-50 disabled:cursor-not-allowed"
+                          className="flex-1 bg-green-600 text-white text-xs py-2 px-3 rounded hover:bg-green-700 min-h-[44px]"
                         >
-                          {processingRequest === request.id ? 'Processing...' : 'Approve'}
+                          Approve
                         </button>
                         <button
                           onClick={() => handleReject(request.id)}
-                          disabled={processingRequest === request.id}
-                          className="flex-1 bg-red-600 text-white text-xs py-2 px-3 rounded hover:bg-red-700 min-h-[44px] disabled:opacity-50 disabled:cursor-not-allowed"
+                          className="flex-1 bg-red-600 text-white text-xs py-2 px-3 rounded hover:bg-red-700 min-h-[44px]"
                         >
-                          {processingRequest === request.id ? 'Processing...' : 'Reject'}
+                          Reject
                         </button>
                       </div>
                     </div>

@@ -720,6 +720,7 @@ async def auto_generate_schedule(
                 print(f"[API] Location staffing: {key} -> {location_name} = {target} people per day")
 
         print(f"[API] Total event staffing entries: {len(event_staffing)}")
+        print(f"[API] Event staffing dict: {event_staffing}")
         print(f"[API] Call center target: {call_center_target}")
         print(f"[API] Location requirements passed to scheduler: {location_requirements}")
         engine = SchedulingEngine()
