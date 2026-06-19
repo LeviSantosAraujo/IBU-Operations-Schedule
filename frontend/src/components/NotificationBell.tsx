@@ -10,6 +10,7 @@ export default function NotificationBell() {
   const [unreadCount, setUnreadCount] = useState(0)
   const [isManager] = useState(auth.isManager())
   const [hasAuthError, setHasAuthError] = useState(false)
+  const [processingRequest, setProcessingRequest] = useState<string | null>(null)
 
   useEffect(() => {
     if (hasAuthError) return // Stop polling if auth error occurred
@@ -70,9 +71,11 @@ export default function NotificationBell() {
   }
 
   const handleApprove = async (requestId: string, comment: string = '') => {
+    setProcessingRequest(requestId)
     try {
       await approveAvailabilityRequest(requestId, comment)
-      loadAvailabilityRequests()
+      // Immediately remove the request from the list
+      setAvailabilityRequests(prev => prev.filter(r => r.id !== requestId))
       loadNotifications() // Refresh notifications immediately after approval
       // Wait a moment for Excel file to be saved, then refresh schedule
       setTimeout(() => {
@@ -81,16 +84,25 @@ export default function NotificationBell() {
     } catch (err) {
       console.error('Error approving request:', err)
       alert('Error approving request. Please try again.')
+      loadAvailabilityRequests() // Reload on error
+    } finally {
+      setProcessingRequest(null)
     }
   }
 
   const handleReject = async (requestId: string, comment: string = '') => {
+    setProcessingRequest(requestId)
     try {
       await rejectAvailabilityRequest(requestId, comment)
-      loadAvailabilityRequests()
+      // Immediately remove the request from the list
+      setAvailabilityRequests(prev => prev.filter(r => r.id !== requestId))
       loadNotifications() // Refresh notifications immediately after rejection
     } catch (err) {
       console.error('Error rejecting request:', err)
+      alert('Error rejecting request. Please try again.')
+      loadAvailabilityRequests() // Reload on error
+    } finally {
+      setProcessingRequest(null)
     }
   }
 
@@ -162,15 +174,17 @@ export default function NotificationBell() {
                       <div className="flex gap-2">
                         <button
                           onClick={() => handleApprove(request.id)}
-                          className="flex-1 bg-green-600 text-white text-xs py-2 px-3 rounded hover:bg-green-700 min-h-[44px]"
+                          disabled={processingRequest === request.id}
+                          className="flex-1 bg-green-600 text-white text-xs py-2 px-3 rounded hover:bg-green-700 min-h-[44px] disabled:opacity-50 disabled:cursor-not-allowed"
                         >
-                          Approve
+                          {processingRequest === request.id ? 'Processing...' : 'Approve'}
                         </button>
                         <button
                           onClick={() => handleReject(request.id)}
-                          className="flex-1 bg-red-600 text-white text-xs py-2 px-3 rounded hover:bg-red-700 min-h-[44px]"
+                          disabled={processingRequest === request.id}
+                          className="flex-1 bg-red-600 text-white text-xs py-2 px-3 rounded hover:bg-red-700 min-h-[44px] disabled:opacity-50 disabled:cursor-not-allowed"
                         >
-                          Reject
+                          {processingRequest === request.id ? 'Processing...' : 'Reject'}
                         </button>
                       </div>
                     </div>
@@ -196,6 +210,25 @@ export default function NotificationBell() {
                       </div>
                       <div className="flex-1">
                         <p className="text-sm text-gray-800">{notification.message}</p>
+                        {notification.details && (
+                          <div className="text-xs text-gray-600 mt-1 space-y-1">
+                            {notification.details.request_type && (
+                              <p><strong>Type:</strong> {notification.details.request_type}</p>
+                            )}
+                            {notification.details.start_date && notification.details.end_date && (
+                              <p><strong>Date:</strong> {notification.details.start_date} to {notification.details.end_date}</p>
+                            )}
+                            {notification.details.days_of_week && notification.details.days_of_week !== 'All days' && (
+                              <p><strong>Days:</strong> {notification.details.days_of_week}</p>
+                            )}
+                            {notification.details.time_range && notification.details.time_range !== 'All day' && (
+                              <p><strong>Time:</strong> {notification.details.time_range}</p>
+                            )}
+                            {notification.details.employee_comment && (
+                              <p><strong>Comment:</strong> "{notification.details.employee_comment}"</p>
+                            )}
+                          </div>
+                        )}
                         <p className="text-xs text-gray-500 mt-1">
                           {new Date(notification.created_at).toLocaleString()}
                         </p>

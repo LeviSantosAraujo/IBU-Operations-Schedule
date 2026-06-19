@@ -1121,11 +1121,21 @@ async def approve_availability_request(request_id: str, body: Dict = {}, authori
         # Send notification to employee
         try:
             comment_part = f" Manager note: {body.get('comment')}" if body.get('comment') else ""
+            days_str = ', '.join(request_data.get('days_of_week', [])) if request_data.get('days_of_week') else 'All days'
+            time_str = f"{request_data.get('start_time', '00:00')} - {request_data.get('end_time', '23:59')}" if request_data.get('start_time') else 'All day'
             notification = {
                 'id': str(uuid.uuid4()),
                 'employee_id': request_data['employee_id'],
                 'type': NotificationType.AVAILABILITY_APPROVED,
                 'message': f"Your {request_type} request ({start_date} to {end_date}) has been approved.{comment_part}",
+                'details': {
+                    'request_type': request_type,
+                    'start_date': start_date,
+                    'end_date': end_date,
+                    'days_of_week': days_str,
+                    'time_range': time_str,
+                    'employee_comment': request_data.get('employee_comment', '')
+                },
                 'created_at': datetime.now(),
                 'read': False
             }
@@ -1187,6 +1197,14 @@ async def reject_availability_request(request_id: str, body: Dict = {}, authoriz
                 'employee_id': request_data['employee_id'],
                 'type': NotificationType.AVAILABILITY_REJECTED,
                 'message': f"Your {request_type} request ({start_date} to {end_date}) was not approved.{comment_part}",
+                'details': {
+                    'request_type': request_type,
+                    'start_date': start_date,
+                    'end_date': end_date,
+                    'days_of_week': ', '.join(request_data.get('days_of_week', [])) if request_data.get('days_of_week') else 'All days',
+                    'time_range': f"{request_data.get('start_time', '00:00')} - {request_data.get('end_time', '23:59')}" if request_data.get('start_time') else 'All day',
+                    'employee_comment': request_data.get('employee_comment', '')
+                },
                 'created_at': datetime.now(),
                 'read': False
             }
