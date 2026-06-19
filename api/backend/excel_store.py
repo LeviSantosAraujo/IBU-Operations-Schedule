@@ -1987,7 +1987,7 @@ def save_availability_request(request: Dict) -> bool:
                 sheet.cell(row=row, column=6).value = json.dumps(request.get('days_of_week')) if request.get('days_of_week') else None
                 sheet.cell(row=row, column=7).value = request.get('start_time')
                 sheet.cell(row=row, column=8).value = request.get('end_time')
-                sheet.cell(row=row, column=9).value = request['status']
+                sheet.cell(row=row, column=9).value = request.get('status')
                 sheet.cell(row=row, column=10).value = request.get('manager_comment')
                 sheet.cell(row=row, column=11).value = request.get('employee_comment')
                 sheet.cell(row=row, column=12).value = str(request.get('preferences', {})) if request.get('preferences') else None
@@ -2008,7 +2008,7 @@ def save_availability_request(request: Dict) -> bool:
         sheet.cell(row=row, column=6).value = json.dumps(request.get('days_of_week')) if request.get('days_of_week') else None
         sheet.cell(row=row, column=7).value = request.get('start_time')
         sheet.cell(row=row, column=8).value = request.get('end_time')
-        sheet.cell(row=row, column=9).value = request['status']
+        sheet.cell(row=row, column=9).value = request.get('status')
         sheet.cell(row=row, column=10).value = request.get('manager_comment')
         sheet.cell(row=row, column=11).value = request.get('employee_comment')
         sheet.cell(row=row, column=12).value = str(request.get('preferences', {})) if request.get('preferences') else None
