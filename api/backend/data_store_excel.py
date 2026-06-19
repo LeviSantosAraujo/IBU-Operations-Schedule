@@ -209,7 +209,21 @@ def get_system_config() -> SystemConfig:
 
 def save_system_config(config: SystemConfig) -> SystemConfig:
     """Save system config to Excel and update cache"""
-    result = excel_save_system_config(config.model_dump())
+    config_dict = config.model_dump()
+
+    # Convert datetime and date objects to ISO strings for JSON serialization
+    def convert_datetime(obj):
+        if isinstance(obj, (datetime, date)):
+            return obj.isoformat()
+        elif isinstance(obj, dict):
+            return {k: convert_datetime(v) for k, v in obj.items()}
+        elif isinstance(obj, list):
+            return [convert_datetime(item) for item in obj]
+        return obj
+
+    config_dict = convert_datetime(config_dict)
+
+    result = excel_save_system_config(config_dict)
     # Invalidate cache
     if "config" in _MEMORY_CACHE:
         del _MEMORY_CACHE["config"]

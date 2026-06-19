@@ -73,6 +73,7 @@ export default function NotificationBell() {
     try {
       await approveAvailabilityRequest(requestId, comment)
       loadAvailabilityRequests()
+      loadNotifications() // Refresh notifications immediately after approval
       // Wait a moment for Excel file to be saved, then refresh schedule
       setTimeout(() => {
         window.dispatchEvent(new CustomEvent('scheduleUpdate'))
@@ -87,6 +88,7 @@ export default function NotificationBell() {
     try {
       await rejectAvailabilityRequest(requestId, comment)
       loadAvailabilityRequests()
+      loadNotifications() // Refresh notifications immediately after rejection
     } catch (err) {
       console.error('Error rejecting request:', err)
     }
