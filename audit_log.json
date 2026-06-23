@@ -1,1 +1,1 @@
-[{"timestamp": "2026-06-23T14:09:24.159191", "entity_type": "employee", "operation": "update", "entity_id": null, "user_id": "emp_1781822824670", "changes": {"count": 18}, "metadata": {}}]
+[{"timestamp": "2026-06-23T14:09:24.159191", "entity_type": "employee", "operation": "update", "entity_id": null, "user_id": "emp_1781822824670", "changes": {"count": 18}, "metadata": {}}, {"timestamp": "2026-06-23T15:04:06.661938", "entity_type": "availability_request", "operation": "update", "entity_id": null, "user_id": "emp_1781822824670", "changes": {"count": 6}, "metadata": {}}]
