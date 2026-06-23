@@ -1,1 +1,1 @@
-[]
+[{"request_type": "day_off", "start_date": "2026-06-20", "end_date": "2026-07-04", "days_of_week": ["monday"], "employee_comment": "Please approve.", "id": "a63982ed-8e1f-4c5b-bccb-bc93c3869c46", "employee_id": "emp_1782239342180", "status": "pending", "created_at": "2026-06-23T14:43:50.857784"}]
