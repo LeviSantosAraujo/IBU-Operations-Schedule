@@ -1,1 +1,1 @@
-[]
+[{"request_type": "availability", "start_date": "2026-06-20", "end_date": "2026-06-27", "days_of_week": ["monday"], "start_time": "09:00", "end_time": "12:00", "employee_comment": "", "preferences": {}, "id": "bce1e449-44ff-466d-9598-69c37daa71a4", "employee_id": "emp_1782314498542", "status": "pending", "created_at": "2026-06-24T11:36:20.433723"}]
