@@ -1,1 +1,1 @@
-[]
+[{"request_type": "availability", "start_date": "2026-06-20", "end_date": "2026-07-04", "days_of_week": ["monday"], "start_time": "09:00", "end_time": "12:00", "employee_comment": "", "preferences": {"ground_floor": 1, "second_floor": 1, "sixth_floor": 1, "call_center": 10, "80_bloor": 1, "event": 1}, "id": "faef25d8-abb8-4bf6-b466-ac8db826c9f3", "employee_id": "emp_1782326233502", "status": "pending", "created_at": "2026-06-24T14:37:47.789688"}]
