@@ -28,8 +28,6 @@ import threading
 from typing import List, Dict, Any, Optional
 from datetime import date, datetime
 import github_storage
-import cache_manager
-import audit_logger
 import time
 
 GITHUB_AVAILABLE = github_storage.GITHUB_AVAILABLE
@@ -87,6 +85,8 @@ def _deserialize_dates(obj: Any) -> Any:
 def _update_rate_limit_from_headers(headers: dict) -> None:
     """Update rate limit information from GitHub API response headers."""
     try:
+        import cache_manager
+        
         remaining = int(headers.get("X-RateLimit-Remaining", 5000))
         total = int(headers.get("X-RateLimit-Limit", 5000))
         reset_time = headers.get("X-RateLimit-Reset")
@@ -103,6 +103,8 @@ def _update_rate_limit_from_headers(headers: dict) -> None:
 
 def _read_json_file(filename: str, current_sha: Optional[str] = None) -> Any:
     """Read a JSON file from GitHub with caching. Returns None if not found."""
+    import cache_manager
+    
     cache = cache_manager.get_cache()
     cache_key = cache_manager.cache_key_for_file(filename)
     
@@ -182,6 +184,8 @@ def _read_json_file(filename: str, current_sha: Optional[str] = None) -> Any:
 
 def _execute_write(filename: str, data: Any, user_id: Optional[str] = None) -> bool:
     """Execute the actual write to GitHub (called after debounce)."""
+    import cache_manager
+    
     cache = cache_manager.get_cache()
     cache_key = cache_manager.cache_key_for_file(filename)
     
@@ -293,6 +297,7 @@ def set_employees(employees: List[Dict], user_id: Optional[str] = None) -> bool:
     """Set employees in employees.json with audit logging."""
     result = _write_json_file("employees.json", employees)
     if result and user_id:
+        import audit_logger
         audit_logger.log_write_operation("employee", "update", None, user_id, {"count": len(employees)})
     return result
 
@@ -307,6 +312,7 @@ def set_schedules(schedules: List[Dict], user_id: Optional[str] = None) -> bool:
     """Set schedules in schedules.json with audit logging."""
     result = _write_json_file("schedules.json", schedules)
     if result and user_id:
+        import audit_logger
         audit_logger.log_write_operation("schedule", "update", None, user_id, {"count": len(schedules)})
     return result
 
@@ -321,6 +327,7 @@ def set_availability_requests(requests: List[Dict], user_id: Optional[str] = Non
     """Set availability requests in availability_requests.json with audit logging."""
     result = _write_json_file("availability_requests.json", requests)
     if result and user_id:
+        import audit_logger
         audit_logger.log_write_operation("availability_request", "update", None, user_id, {"count": len(requests)})
     return result
 
@@ -335,6 +342,7 @@ def set_notifications(notifications: List[Dict], user_id: Optional[str] = None) 
     """Set notifications in notifications.json with audit logging."""
     result = _write_json_file("notifications.json", notifications)
     if result and user_id:
+        import audit_logger
         audit_logger.log_write_operation("notification", "update", None, user_id, {"count": len(notifications)})
     return result
 
@@ -349,6 +357,7 @@ def set_system_config(config: Dict, user_id: Optional[str] = None) -> bool:
     """Set system config in system_config.json with audit logging."""
     result = _write_json_file("system_config.json", config)
     if result and user_id:
+        import audit_logger
         audit_logger.log_write_operation("system_config", "update", None, user_id, {"keys": list(config.keys())})
     return result
 
@@ -363,6 +372,7 @@ def set_availabilities(availabilities: List[Dict], user_id: Optional[str] = None
     """Set availabilities in availabilities.json with audit logging."""
     result = _write_json_file("availabilities.json", availabilities)
     if result and user_id:
+        import audit_logger
         audit_logger.log_write_operation("availability", "update", None, user_id, {"count": len(availabilities)})
     return result
 
@@ -377,6 +387,7 @@ def set_events(events: List[Dict], user_id: Optional[str] = None) -> bool:
     """Set events in events.json with audit logging."""
     result = _write_json_file("events.json", events)
     if result and user_id:
+        import audit_logger
         audit_logger.log_write_operation("event", "update", None, user_id, {"count": len(events)})
     return result
 
@@ -393,5 +404,6 @@ def set_coverage_requirements(requirements: List[Dict], user_id: Optional[str] =
     """Set coverage requirements in coverage_requirements.json with audit logging."""
     result = _write_json_file("coverage_requirements.json", requirements)
     if result and user_id:
+        import audit_logger
         audit_logger.log_write_operation("coverage_requirement", "update", None, user_id, {"count": len(requirements)})
     return result

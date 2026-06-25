@@ -30,7 +30,6 @@ import threading
 import time
 from typing import Dict, Any, Optional, List
 from datetime import datetime
-import json_store
 
 
 AUDIT_LOG_ENABLED = os.getenv("AUDIT_LOG_ENABLED", "true").lower() == "true"
@@ -123,6 +122,8 @@ def _flush_buffer() -> bool:
     # Use lock to prevent race conditions on read-modify-write
     with _audit_write_lock:
         try:
+            import json_store
+            
             # Load existing audit log
             audit_log = json_store._read_json_file("audit_log.json")
             if audit_log is None:
@@ -224,6 +225,8 @@ def get_audit_logs(
         List of audit log entries
     """
     try:
+        import json_store
+        
         audit_log = json_store._read_json_file("audit_log.json")
         if audit_log is None:
             return []
@@ -255,6 +258,8 @@ def get_audit_log_stats() -> Dict[str, Any]:
         Dictionary with audit log statistics
     """
     try:
+        import json_store
+        
         audit_log = json_store._read_json_file("audit_log.json")
         if audit_log is None:
             return {
