@@ -3,22 +3,32 @@
 A comprehensive automated scheduling system built with Python (FastAPI) and React. This system handles employee availability, weighted auto-scheduling, location-based staffing, event management, and multi-week storage.
 
 ## Deployment Notes
-- Uses Vercel for hosting
-- Python dependencies in root requirements.txt and api/requirements.txt
+- Uses Vercel for hosting with two separate projects:
+  - Backend: `ibu-operations-schedule` (Python FastAPI)
+  - Frontend: `ibu-operations-schedule-frontend` (React/Vite)
+- Python dependencies in root requirements.txt
 - Frontend built with Vite
 - Data stored in GitHub (data branch) for persistence
 - Authentication uses JWT tokens (stateless, works with serverless)
 - Mobile-responsive design with card-based views on small screens
 
 **Important for Vercel Deployment:**
+
+**Backend Project (`ibu-operations-schedule`):**
 - Set `GITHUB_TOKEN` environment variable in Vercel for GitHub data storage
 - Set `GITHUB_REPO` environment variable (e.g., "LeviSantosAraujo/IBU-Operations-Schedule")
 - Set `GITHUB_DATA_BRANCH` environment variable (default: "data")
-- Set `GITHUB_DATA_FILE` environment variable (default: "ibu_schedule.xlsx")
 - Set `JWT_SECRET` environment variable in Vercel for secure JWT token signing (REQUIRED - no default)
-  - Generate a secure random secret: `openssl rand -base64 32` or use a password manager
+  - Generate a secure random secret: `python3 -c "import secrets; print(secrets.token_urlsafe(32))"`
   - This secret is used to sign and verify JWT tokens for authentication
-  - Do not use the default placeholder - the application will fail to start without it
+  - The application will fail to start without it
+
+**Frontend Project (`ibu-operations-schedule-frontend`):**
+- Set `VITE_API_URL` environment variable to point to backend API URL
+- Root Directory: `frontend`
+- Framework Preset: Vite
+- Build Command: `npm run build`
+- Output Directory: `dist`
 
 **Architecture Overview:**
 The system uses GitHub JSON files as the single source of truth for all data:
