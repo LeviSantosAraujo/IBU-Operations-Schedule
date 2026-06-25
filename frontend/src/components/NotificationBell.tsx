@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Bell, X, Check, XCircle, User } from 'lucide-react'
-import { getNotifications, markNotificationAsRead, getAvailabilityRequests, approveAvailabilityRequest, rejectAvailabilityRequest } from '../api'
+import { getNotifications, markNotificationAsRead, markAllNotificationsAsRead, getAvailabilityRequests, approveAvailabilityRequest, rejectAvailabilityRequest } from '../api'
 import { auth } from '../auth'
 
 export default function NotificationBell() {
@@ -10,6 +10,7 @@ export default function NotificationBell() {
   const [unreadCount, setUnreadCount] = useState(0)
   const [isManager] = useState(auth.isManager())
   const [hasAuthError, setHasAuthError] = useState(false)
+  const [optimisticallyReadNotifications, setOptimisticallyReadNotifications] = useState<Set<string>>(new Set())
 
   useEffect(() => {
     if (hasAuthError) return // Stop polling if auth error occurred
@@ -33,8 +34,12 @@ export default function NotificationBell() {
   const loadNotifications = async () => {
     try {
       const data = await getNotifications()
-      setNotifications(data || [])
-      setUnreadCount((data || []).filter((n: any) => !n.read).length)
+      // Merge server data with optimistic updates - keep notifications marked as read
+      const mergedData = (data || []).map((n: any) => 
+        optimisticallyReadNotifications.has(n.id) ? { ...n, read: true } : n
+      )
+      setNotifications(mergedData)
+      setUnreadCount(mergedData.filter((n: any) => !n.read).length)
       setHasAuthError(false)
     } catch (err: any) {
       if (err.response?.status === 401 || err.response?.status === 403) {
@@ -47,9 +52,12 @@ export default function NotificationBell() {
   const loadAvailabilityRequests = async () => {
     try {
       const data = await getAvailabilityRequests()
+      console.log('[FRONTEND] Loading availability requests:', data)
       const pendingRequests = data.filter((r: any) =>
         r.status === 'pending' || r.status === 'AvailabilityRequestStatus.PENDING'
       )
+      console.log('[FRONTEND] Pending requests:', pendingRequests)
+      console.log('[FRONTEND] All request statuses:', data.map((r: any) => ({ id: r.id, status: r.status, days: r.days_of_week })))
       setAvailabilityRequests(pendingRequests)
       setHasAuthError(false)
     } catch (err: any) {
@@ -61,12 +69,59 @@ export default function NotificationBell() {
   }
 
   const handleMarkAsRead = async (notificationId: string) => {
-    try {
-      await markNotificationAsRead(notificationId)
-      loadNotifications()
-    } catch (err) {
-      console.error('Error marking notification as read:', err)
-    }
+    // Optimistically mark notification as read
+    setOptimisticallyReadNotifications(prev => new Set(prev).add(notificationId))
+    setNotifications(prev => prev.map(n => 
+      n.id === notificationId ? { ...n, read: true } : n
+    ))
+    setUnreadCount(prev => Math.max(0, prev - 1))
+
+    // Run API call in background
+    markNotificationAsRead(notificationId)
+      .then(() => {
+        // Remove from optimistic set once confirmed by server
+        setOptimisticallyReadNotifications(prev => {
+          const newSet = new Set(prev)
+          newSet.delete(notificationId)
+          return newSet
+        })
+        loadNotifications()
+      })
+      .catch((err) => {
+        console.error('Error marking notification as read:', err)
+        // Revert optimistic update if it failed
+        setOptimisticallyReadNotifications(prev => {
+          const newSet = new Set(prev)
+          newSet.delete(notificationId)
+          return newSet
+        })
+        loadNotifications()
+      })
+  }
+
+  const handleMarkAllAsRead = async () => {
+    // Optimistically mark all notifications as read
+    const notificationIds = regularNotifications.filter(n => !n.read).map(n => n.id)
+    setOptimisticallyReadNotifications(prev => new Set([...prev, ...notificationIds]))
+    setNotifications(prev => prev.map(n => ({ ...n, read: true })))
+    setUnreadCount(0)
+
+    // Run API call in background
+    markAllNotificationsAsRead()
+      .then(() => {
+        // Keep them in optimistic set to prevent reappearing on poll
+        console.log('All notifications marked as read')
+      })
+      .catch((err) => {
+        console.error('Error marking all notifications as read:', err)
+        // Revert optimistic update if it failed
+        setOptimisticallyReadNotifications(prev => {
+          const newSet = new Set(prev)
+          notificationIds.forEach(id => newSet.delete(id))
+          return newSet
+        })
+        loadNotifications()
+      })
   }
 
   const handleApprove = async (requestId: string, comment: string = '') => {
@@ -78,9 +133,8 @@ export default function NotificationBell() {
     approveAvailabilityRequest(requestId, comment)
       .then(() => {
         loadNotifications()
-        setTimeout(() => {
-          window.dispatchEvent(new CustomEvent('scheduleUpdate'))
-        }, 500)
+        // Dispatch schedule update event immediately
+        window.dispatchEvent(new CustomEvent('scheduleUpdate'))
       })
       .catch((err) => {
         console.error('Error approving request:', err)
@@ -123,7 +177,8 @@ export default function NotificationBell() {
     }
   }
 
-  const totalCount = unreadCount + availabilityRequests.length
+  const regularNotifications = notifications.filter(n => n.type !== 'availability_request')
+  const totalCount = regularNotifications.filter(n => !n.read).length + availabilityRequests.length
 
   return (
     <div className="relative">
@@ -148,12 +203,22 @@ export default function NotificationBell() {
           <div className="absolute right-0 top-12 w-full sm:w-96 max-w-[calc(100vw-2rem)] bg-white rounded-lg shadow-xl border z-20 max-h-[80vh] overflow-y-auto">
             <div className="p-4 border-b flex justify-between items-center">
               <h3 className="font-semibold">Notifications</h3>
-              <button
-                onClick={() => setIsOpen(false)}
-                className="text-gray-500 hover:text-gray-700"
-              >
-                <X className="w-4 h-4" />
-              </button>
+              <div className="flex gap-2">
+                {!isManager && unreadCount > 0 && (
+                  <button
+                    onClick={handleMarkAllAsRead}
+                    className="text-xs text-blue-600 hover:text-blue-800"
+                  >
+                    Mark all read
+                  </button>
+                )}
+                <button
+                  onClick={() => setIsOpen(false)}
+                  className="text-gray-500 hover:text-gray-700"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
             </div>
             
             {/* Availability Requests Section - Managers Only */}
@@ -168,7 +233,7 @@ export default function NotificationBell() {
                       <div className="flex items-start gap-2 mb-2">
                         <User className="w-4 h-4 text-gray-500 mt-0.5" />
                         <div className="flex-1">
-                          <p className="text-sm font-medium">{request.employee_name || 'Employee'}</p>
+                          <p className="text-sm font-medium text-gray-900">{request.employee_name || 'Employee'}</p>
                           <p className="text-xs text-gray-600">
                             {request.request_type === 'availability' ? 'Availability Request' : 'Time Off Request'}
                           </p>
@@ -209,11 +274,11 @@ export default function NotificationBell() {
             )}
 
             {/* Regular Notifications */}
-            {notifications.length === 0 && availabilityRequests.length === 0 ? (
+            {regularNotifications.length === 0 && availabilityRequests.length === 0 ? (
               <div className="p-4 text-gray-500 text-sm">No notifications</div>
             ) : (
               <div className="divide-y">
-                {notifications.map((notification) => (
+                {regularNotifications.map((notification) => (
                   <div
                     key={notification.id}
                     className={`p-4 hover:bg-gray-50 cursor-pointer ${!notification.read ? 'bg-blue-50' : ''}`}

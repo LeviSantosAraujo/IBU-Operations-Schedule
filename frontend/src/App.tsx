@@ -10,6 +10,7 @@ import DatabaseManagement from './components/DatabaseManagement'
 import EmployeeScheduleView from './components/EmployeeScheduleView'
 import MyAvailability from './components/MyAvailability'
 import NotificationBell from './components/NotificationBell'
+import { ErrorBoundary } from './components/ErrorBoundary'
 
 // Protected Route Component
 function ProtectedRoute({ 
@@ -250,27 +251,29 @@ function App() {
   
   return (
     <Router>
-      <Routes>
-        <Route 
-          path="/login" 
-          element={
-            isLoggedIn ? <Navigate to="/" replace /> : 
-            <Login onLogin={handleLogin} />
-          } 
-        />
-        <Route 
-          path="/setup" 
-          element={
-            <ExcelSetup onSetupComplete={() => {}} />
-          } 
-        />
-        <Route 
-          path="/*" 
-          element={
-            isLoggedIn ? <AppLayout onLogout={handleLogout} /> : <Navigate to="/login" replace />
-          } 
-        />
-      </Routes>
+      <ErrorBoundary>
+        <Routes>
+          <Route 
+            path="/login" 
+            element={
+              isLoggedIn ? <Navigate to="/" replace /> : 
+              <Login onLogin={handleLogin} />
+            } 
+          />
+          <Route 
+            path="/setup" 
+            element={
+              <ExcelSetup onSetupComplete={() => {}} />
+            } 
+          />
+          <Route 
+            path="/*" 
+            element={
+              isLoggedIn ? <AppLayout onLogout={handleLogout} /> : <Navigate to="/login" replace />
+            } 
+          />
+        </Routes>
+      </ErrorBoundary>
     </Router>
   )
 }

@@ -13,6 +13,8 @@ import {
   Plus, Trash2, Save, Play, Calendar, ChevronLeft, ChevronRight, 
   Check, Clock, MapPin, Bell, X, Eraser
 } from 'lucide-react'
+import { LoadingOverlay } from './LoadingOverlay'
+import { ButtonWithLoading } from './ButtonWithLoading'
 
 const days = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']
 const baseLocationColors: any = {
@@ -87,7 +89,8 @@ export default function ScheduleManager() {
     start_time: '',
     end_time: '',
     location: '',
-    description: ''
+    description: '',
+    is_call_center: false
   })
   const [showAddShift, setShowAddShift] = useState(false)
   const [isHourAdjustment, setIsHourAdjustment] = useState(false)
@@ -104,6 +107,10 @@ export default function ScheduleManager() {
   })
   const [saved, setSaved] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [globalLoading, setGlobalLoading] = useState(false)
+  const [globalLoadingMessage, setGlobalLoadingMessage] = useState('')
+  const [eventSaving, setEventSaving] = useState(false)
+  const [configSaving, setConfigSaving] = useState(false)
   const [showApprovalModal, setShowApprovalModal] = useState(false)
   const [selectedRequest, setSelectedRequest] = useState<any>(null)
   const [managerComment, setManagerComment] = useState('')
@@ -295,6 +302,8 @@ export default function ScheduleManager() {
     try {
       await approveAvailabilityRequest(requestId, comment)
       loadAvailabilityRequests()
+      loadSchedule()
+      window.dispatchEvent(new CustomEvent('scheduleUpdate'))
       setShowApprovalModal(false)
       setManagerComment('')
       setSelectedRequest(null)
@@ -307,6 +316,7 @@ export default function ScheduleManager() {
     try {
       await rejectAvailabilityRequest(requestId, comment)
       loadAvailabilityRequests()
+      window.dispatchEvent(new CustomEvent('scheduleUpdate'))
       setShowApprovalModal(false)
       setManagerComment('')
       setSelectedRequest(null)
@@ -322,6 +332,7 @@ export default function ScheduleManager() {
   }
 
   const handleCreateEvent = async () => {
+    setEventSaving(true)
     try {
       const formattedDate = format(weekStart, 'yyyy-MM-dd')
       const eventData = {
@@ -347,6 +358,8 @@ export default function ScheduleManager() {
       setTimeout(() => setEventToast(null), 5000)
     } catch (err) {
       alert('Failed to create event')
+    } finally {
+      setEventSaving(false)
     }
   }
 
@@ -364,6 +377,8 @@ export default function ScheduleManager() {
 
   const handleGenerateWithoutEvents = async () => {
     setShowEventAdvisory(false)
+    setGlobalLoading(true)
+    setGlobalLoadingMessage('Generating schedule...')
     setGenerating(true)
     try {
       const formattedDate = format(weekStart, 'yyyy-MM-dd')
@@ -373,6 +388,7 @@ export default function ScheduleManager() {
       alert('Error generating schedule')
     } finally {
       setGenerating(false)
+      setGlobalLoading(false)
     }
   }
 
@@ -404,7 +420,15 @@ export default function ScheduleManager() {
 
   const handleAutoGenerate = async () => {
     // Save staffing targets
-    await updateStaffingTargets(staffingTargets)
+    setConfigSaving(true)
+    try {
+      await updateStaffingTargets(staffingTargets)
+    } catch (err) {
+      alert('Error saving staffing targets')
+      setConfigSaving(false)
+      return
+    }
+    setConfigSaving(false)
     setShowAutoGenerateModal(false)
 
     setGenerating(true)
@@ -455,6 +479,7 @@ export default function ScheduleManager() {
       if (data.metadata?.generation_time_seconds) {
         setGenerationTime(data.metadata.generation_time_seconds)
       }
+      // No auto-refresh needed - schedule is already updated in memory
     } catch (err) {
       alert('Error generating schedule')
       setGenerationStatus('Error during generation')
@@ -473,6 +498,7 @@ export default function ScheduleManager() {
       setSaving(true)
       await saveSchedule(schedule)
       setSaved(true)
+      window.dispatchEvent(new CustomEvent('scheduleUpdate'))
       setTimeout(() => setSaved(false), 3000)
     } catch (err) {
       alert('Error saving schedule')
@@ -498,13 +524,20 @@ export default function ScheduleManager() {
   const handleClearSchedule = async () => {
     if (!weekStart || !schedule) return
     if (!confirm('Are you sure you want to clear all shifts for this week? Events and locations will be preserved.')) return
+    setGlobalLoading(true)
+    setGlobalLoadingMessage('Clearing schedule...')
     try {
       const formattedDate = format(weekStart, 'yyyy-MM-dd')
       await clearSchedule(formattedDate)
       alert('Schedule cleared! Events and locations have been preserved.')
-      loadSchedule()
+      // Dispatch event after delay to ensure backend write completes
+      setTimeout(() => {
+        window.dispatchEvent(new CustomEvent('scheduleUpdate'))
+      }, 1000)
     } catch (err) {
       alert('Error clearing schedule')
+    } finally {
+      setGlobalLoading(false)
     }
   }
 
@@ -512,6 +545,7 @@ export default function ScheduleManager() {
     if (!schedule) return
     const updatedShifts = schedule.shifts.filter((s: Shift) => s.id !== shiftId)
     setSchedule({ ...schedule, shifts: updatedShifts, total_hours: recalculateHours(updatedShifts) })
+    window.dispatchEvent(new CustomEvent('scheduleUpdate'))
   }
 
   const handleAddShift = () => {
@@ -561,6 +595,7 @@ export default function ScheduleManager() {
     saveToHistory()
     const updatedShifts = [...schedule.shifts, shift]
     setSchedule({ ...schedule, shifts: updatedShifts, total_hours: recalculateHours(updatedShifts) })
+    window.dispatchEvent(new CustomEvent('scheduleUpdate'))
     setShowAddShift(false)
     setIsHourAdjustment(false)
     setAdjustmentHours(0)
@@ -625,6 +660,26 @@ export default function ScheduleManager() {
     if (diff > 0 && diff < 2) return 'text-orange-600'
     if (diff >= 2) return 'text-red-600'
     return 'text-gray-900'
+  }
+
+  const formatAvailabilityLabel = (label: string | undefined) => {
+    if (!label) return 'Approved'
+    if (label === 'Day Off') return 'Day Off'
+    return label.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+  }
+
+  const deduplicateLockedShifts = (shifts: Shift[]) => {
+    const nonPending = shifts.filter(s => !(s.locked && s.id.startsWith('pending_')))
+    const pending = shifts.filter(s => s.locked && s.id.startsWith('pending_'))
+    const keptPending = pending.filter(p => {
+      return !nonPending.some(s =>
+        s.employee_id === p.employee_id &&
+        s.day_of_week === p.day_of_week &&
+        s.start_time === p.start_time &&
+        s.end_time === p.end_time
+      )
+    })
+    return [...nonPending, ...keptPending]
   }
 
   const handleDragStart = (e: DragEvent<HTMLDivElement>, shift: Shift) => {
@@ -733,7 +788,8 @@ export default function ScheduleManager() {
         start_time: normalizeTimeForInput(existingShift.start_time),
         end_time: normalizeTimeForInput(existingShift.end_time),
         location: existingShift.location || '',
-        description: existingShift.comment || ''
+        description: existingShift.comment || '',
+        is_call_center: existingShift.is_call_center || false
       })
       setShowEditModal(true)
     }
@@ -759,7 +815,8 @@ export default function ScheduleManager() {
       start_time: '09:00',
       end_time: '17:00',
       location: '',
-      description: ''
+      description: '',
+      is_call_center: false
     })
     setShowEditModal(true)
   }
@@ -779,7 +836,8 @@ export default function ScheduleManager() {
       end_time: editForm.end_time,
       hours: hours,
       location: editForm.location,
-      comment: editForm.description
+      comment: editForm.description,
+      is_call_center: editForm.is_call_center
     }
     
     // Check if this is an edit or add
@@ -797,6 +855,7 @@ export default function ScheduleManager() {
     }
     
     setSchedule({ ...schedule, shifts: updatedShifts, total_hours: recalculateHours(updatedShifts) })
+    window.dispatchEvent(new CustomEvent('scheduleUpdate'))
     setShowEditModal(false)
     setEditingShift(null)
     setDraggedShift(null)
@@ -1239,7 +1298,7 @@ export default function ScheduleManager() {
                           {empHours.toFixed(1)}
                         </td>
                         {days.map(day => {
-                          const shifts = getShiftsForCell(emp.id, day)
+                          const shifts = deduplicateLockedShifts(getShiftsForCell(emp.id, day))
                           // Get all availability requests for this employee and day
                           const empDayRequests = availabilityRequests
                             .filter((r: any) => {
@@ -1257,8 +1316,8 @@ export default function ScheduleManager() {
                             .sort((a: any, b: any) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime())
 
                           // Get approved availabilities for this employee and day
-                          const empDayAvailabilities = approvedAvailabilities.filter((a: any) => 
-                            a.employee_id === emp.id && a[day.toLowerCase()]
+                          const empDayAvailabilities = approvedAvailabilities.filter((a: any) =>
+                            a.employee_id === emp.id && a.day_of_week === day
                           )
 
                           const hasShifts = shifts.length > 0
@@ -1289,68 +1348,71 @@ export default function ScheduleManager() {
                                 shift.locked ? (
                                   <div
                                     key={shift.id}
-                                    className={`p-2 rounded mb-1 text-xs border relative group ${
-                                      shift.location === 'day off' ? 'border-black bg-black text-white' : 'border-gray-400 bg-gray-200 text-gray-600'
+                                    className={`rounded p-2 mb-1 text-xs border ${
+                                      shift.id.startsWith('pending_') 
+                                        ? 'border-yellow-400 bg-yellow-100 text-yellow-800' 
+                                        : shift.location === 'day off' 
+                                          ? 'border-black bg-black text-white' 
+                                          : 'border-gray-400 bg-gray-200 text-gray-600'
                                     }`}
-                                    title={`Approved availability: ${shift.locked_availability_type} (click trash to override)`}
                                   >
-                                    <div className="font-semibold">🔒 {shift.locked_availability_type}</div>
-                                    {shift.comment && <div className="italic text-xs mt-1">{shift.comment}</div>}
-                                    <button
-                                      onClick={(e) => { e.stopPropagation(); handleDeleteShift(shift.id) }}
-                                      className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 text-red-500 hover:text-red-700 bg-white rounded-full p-1"
-                                      title="Remove locked shift (manager override)"
-                                    >
-                                      <Trash2 className="w-3 h-3" />
-                                    </button>
+                                    <div className="font-semibold">
+                                      {shift.id.startsWith('pending_') ? '⏳ Pending' : '🔒'} {formatAvailabilityLabel(shift.locked_availability_type)}
+                                    </div>
+                                    <div className="font-medium">{formatTime12Hour(shift.start_time)} – {formatTime12Hour(shift.end_time)}</div>
+                                    {shift.comment && <div className="italic text-xs">{shift.comment}</div>}
                                   </div>
                                 ) : (
-                                <div 
-                                  key={shift.id} 
-                                  draggable
-                                  onDragStart={(e) => handleDragStart(e, shift)}
-                                  onClick={(e) => e.stopPropagation()}
-                                  onDoubleClick={(e) => { e.stopPropagation(); handleCellDoubleClick(shift.id) }}
-                                  className={`shift-card p-2 rounded mb-1 text-xs border relative group cursor-move ${getShiftColorClass(shift)} ${!isShiftHighlighted(shift) ? 'opacity-30' : ''}`}
-                                >
-                                  <div className="flex justify-between items-start">
-                                    <div>
-                                      <div className="font-medium">{formatTime12Hour(shift.start_time)} - {formatTime12Hour(shift.end_time)}</div>
-                                      <div className="text-gray-600 flex items-center gap-1">
-                                        <Clock className="w-3 h-3" />
-                                        {shift.hours}h
-                                      </div>
-                                      {shift.location && (
+                                  <div
+                                    key={shift.id}
+                                    draggable
+                                    onDragStart={(e) => handleDragStart(e, shift)}
+                                    onClick={(e) => e.stopPropagation()}
+                                    onDoubleClick={(e) => { e.stopPropagation(); handleCellDoubleClick(shift.id) }}
+                                    className={`shift-card p-2 rounded mb-1 text-xs border relative group cursor-move ${getShiftColorClass(shift)} ${!isShiftHighlighted(shift) ? 'opacity-30' : ''}`}
+                                  >
+                                    <div className="flex justify-between items-start">
+                                      <div>
+                                        <div className="font-medium">{formatTime12Hour(shift.start_time)} - {formatTime12Hour(shift.end_time)}</div>
                                         <div className="text-gray-600 flex items-center gap-1">
-                                          <MapPin className="w-3 h-3" />
-                                          {shift.location}
-                                          {shift.is_call_center && (
-                                            <span className="ml-1 px-1.5 py-0.5 bg-blue-100 text-blue-700 text-xs rounded font-medium">CC</span>
-                                          )}
+                                          <Clock className="w-3 h-3" />
+                                          {shift.hours}h
                                         </div>
-                                      )}
-                                      {shift.comment && (
-                                        <div className="text-gray-500 italic mt-1">{shift.comment}</div>
-                                      )}
+                                        {shift.location && (
+                                          <div className="text-gray-600 flex items-center gap-1">
+                                            <MapPin className="w-3 h-3" />
+                                            {shift.location}
+                                            {shift.is_call_center && (
+                                              <span className="ml-1 px-1.5 py-0.5 bg-blue-100 text-blue-700 text-xs rounded font-medium">CC</span>
+                                            )}
+                                          </div>
+                                        )}
+                                        {shift.comment && (
+                                          <div className="text-gray-500 italic mt-1">{shift.comment}</div>
+                                        )}
+                                      </div>
+                                      <button
+                                        onClick={(e) => { e.stopPropagation(); handleDeleteShift(shift.id) }}
+                                        className="opacity-0 group-hover:opacity-100 text-red-500 hover:text-red-700"
+                                      >
+                                        <Trash2 className="w-3 h-3" />
+                                      </button>
                                     </div>
-                                    <button
-                                      onClick={(e) => { e.stopPropagation(); handleDeleteShift(shift.id) }}
-                                      className="opacity-0 group-hover:opacity-100 text-red-500 hover:text-red-700"
-                                    >
-                                      <Trash2 className="w-3 h-3" />
-                                    </button>
                                   </div>
-                                </div>
                                 )
                               ))}
                               {showAvailabilities && (() => {
                                 const avail = empDayAvailabilities[0]
-                                const availType = avail?.[day.toLowerCase()] || ''
-                                const availLabel = availType.replace('_', ' ').toUpperCase()
+                                const requestType = avail?.request_type || 'availability'
+                                const isDayOff = requestType === 'day_off'
+                                const timeRange = avail?.start_time && avail?.end_time
+                                  ? `${avail.start_time} - ${avail.end_time}`
+                                  : 'All day'
+                                const displayLabel = isDayOff ? 'Day Off' : timeRange
                                 return (
                                   <div className="text-xs font-medium p-1 rounded bg-blue-100 text-blue-700 border border-blue-300">
-                                    <div>📅 {availLabel}</div>
-                                    <div className="text-[10px] opacity-70">Approved availability</div>
+                                    <div>📅 {displayLabel}</div>
+                                    {avail?.employee_comment && <div className="text-[10px] opacity-70">{avail.employee_comment}</div>}
                                   </div>
                                 )
                               })()}
@@ -1412,7 +1474,7 @@ export default function ScheduleManager() {
                       </div>
                       <div className="space-y-2">
                         {days.map((day, i) => {
-                          const shifts = getShiftsForCell(emp.id, day)
+                          const shifts = deduplicateLockedShifts(getShiftsForCell(emp.id, day))
                           const empDayRequests = availabilityRequests
                             .filter((r: any) => {
                               if (r.employee_id !== emp.id) return false
@@ -1427,7 +1489,7 @@ export default function ScheduleManager() {
                             .sort((a: any, b: any) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime())
 
                           const empDayAvailabilities = approvedAvailabilities.filter((a: any) =>
-                            a.employee_id === emp.id && a[day.toLowerCase()]
+                            a.employee_id === emp.id && a.day_of_week === day
                           )
 
                           const hasShifts = shifts.length > 0
@@ -1443,13 +1505,19 @@ export default function ScheduleManager() {
                                 shift.locked ? (
                                   <div
                                     key={shift.id}
-                                    className={`p-2 rounded mb-1 text-xs border ${
-                                      shift.location === 'day off' ? 'border-black bg-black text-white' : 'border-gray-400 bg-gray-200 text-gray-600'
+                                    className={`rounded p-2 mb-1 text-xs border ${
+                                      shift.id.startsWith('pending_') 
+                                        ? 'border-yellow-400 bg-yellow-100 text-yellow-800' 
+                                        : shift.location === 'day off' 
+                                          ? 'border-black bg-black text-white' 
+                                          : 'border-gray-400 bg-gray-200 text-gray-600'
                                     }`}
                                   >
-                                    <div className="font-semibold">🔒 {shift.locked_availability_type || 'Approved'}</div>
-                                    <div className="font-medium">{shift.start_time} - {shift.end_time}</div>
-                                    {shift.location && <div className="text-xs mt-1">{shift.location}</div>}
+                                    <div className="font-semibold">
+                                      {shift.id.startsWith('pending_') ? '⏳ Pending' : '🔒'} {formatAvailabilityLabel(shift.locked_availability_type)}
+                                    </div>
+                                    <div className="font-medium">{shift.start_time} – {shift.end_time}</div>
+                                    {shift.comment && <div className="italic text-xs">{shift.comment}</div>}
                                   </div>
                                 ) : (
                                   <div
@@ -1499,11 +1567,20 @@ export default function ScheduleManager() {
                                   </div>
                                 )
                               })()}
-                              {showAvailabilities && (
-                                <div className="text-xs p-1 rounded bg-blue-50 text-blue-700">
-                                  {empDayAvailabilities[0][day.toLowerCase()]}
-                                </div>
-                              )}
+                              {showAvailabilities && (() => {
+                                const avail = empDayAvailabilities[0]
+                                const requestType = avail?.request_type || 'availability'
+                                const isDayOff = requestType === 'day_off'
+                                const timeRange = avail?.start_time && avail?.end_time
+                                  ? `${avail.start_time} - ${avail.end_time}`
+                                  : 'All day'
+                                const displayLabel = isDayOff ? 'Day Off' : timeRange
+                                return (
+                                  <div className="text-xs p-1 rounded bg-blue-50 text-blue-700">
+                                    📅 {displayLabel}
+                                  </div>
+                                )
+                              })()}
                               {!hasShifts && !showRequests && !showAvailabilities && (
                                 <div className="text-xs text-gray-300 italic">—</div>
                               )}
@@ -1637,6 +1714,17 @@ export default function ScheduleManager() {
                     <option value="80 Bloor">80 Bloor</option>
                     <option value="Working from Home">Working from Home</option>
                   </select>
+                </div>
+                
+                <div className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    id="callCenterFlag"
+                    checked={editForm.is_call_center}
+                    onChange={(e) => setEditForm({...editForm, is_call_center: e.target.checked})}
+                    className="w-4 h-4"
+                  />
+                  <label htmlFor="callCenterFlag" className="text-sm font-medium">Add Call Center</label>
                 </div>
                 
                 <div>
@@ -2017,12 +2105,13 @@ export default function ScheduleManager() {
             </div>
 
             <div className="flex gap-3">
-              <button
+              <ButtonWithLoading
                 onClick={handleAutoGenerate}
+                isLoading={configSaving}
                 className="flex-1 bg-green-600 text-white py-2 rounded hover:bg-green-700"
               >
                 Generate Schedule
-              </button>
+              </ButtonWithLoading>
               <button
                 onClick={() => setShowAutoGenerateModal(false)}
                 className="flex-1 bg-gray-600 text-white py-2 rounded hover:bg-gray-700"
@@ -2114,13 +2203,14 @@ export default function ScheduleManager() {
               </div>
             </div>
             <div className="flex gap-3 mt-6">
-              <button
+              <ButtonWithLoading
                 onClick={handleCreateEvent}
+                isLoading={eventSaving}
                 disabled={!eventForm.name}
-                className="flex-1 bg-blue-600 text-white py-2 rounded hover:bg-blue-700 disabled:opacity-50"
+                className="flex-1 bg-blue-600 text-white py-2 rounded hover:bg-blue-700"
               >
                 Create Event
-              </button>
+              </ButtonWithLoading>
               <button
                 onClick={() => setShowEventModal(false)}
                 className="flex-1 border border-gray-300 py-2 rounded hover:bg-gray-100"
@@ -2131,6 +2221,8 @@ export default function ScheduleManager() {
           </div>
         </div>
       )}
+      
+      <LoadingOverlay isLoading={globalLoading} message={globalLoadingMessage} />
     </div>
   )
 }

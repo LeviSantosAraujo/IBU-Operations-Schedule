@@ -1,13 +1,21 @@
 # IBU Operations Schedule API
 # GitHub persistence enabled - data stored in data branch
+import os
+from dotenv import load_dotenv
+
+# Load environment variables from .env for local development BEFORE any imports
+load_dotenv('.env')
+
 from fastapi import FastAPI, HTTPException, Query, Header, Depends, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from contextlib import asynccontextmanager
 from typing import List, Optional, Dict
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 import uuid
-import os
+import threading
+import queue
+import time
 import shutil
 import io
 import re
@@ -24,7 +32,7 @@ from excel_store import (
     set_blob_key, _clear_workbook_cache
 )
 from data_store_excel import (
-    get_all_employees, get_employee_by_id, save_employee, delete_employee,
+    save_employee, delete_employee,
     get_availabilities, get_availability_for_week, save_availability,
     get_all_schedules, get_schedule_by_week, save_schedule, delete_schedule,
     get_floor_coverage, get_system_config, save_system_config,
@@ -36,10 +44,16 @@ from data_store_excel import (
     get_notifications, save_notification, mark_notification_read,
     initialize_sample_data,
 )
+import json_store as staging_store
 from storage import store_excel_data, excel_file_exists, get_excel_data
 from scheduler import SchedulingEngine, generate_schedule
 from auth import AuthManager, require_auth, require_manager, require_self_or_manager
 from openpyxl import load_workbook
+
+# Background sync queue for GitHub writes
+_sync_queue: queue.Queue = queue.Queue()
+_sync_worker_thread: Optional[threading.Thread] = None
+_sync_worker_running = False
 
 # Pydantic models for requests
 class LoginRequest(BaseModel):
@@ -55,11 +69,192 @@ class SetPasswordRequest(BaseModel):
     employee_id: str
     password: str
 
+# Sync status tracking
+_sync_status: Dict[str, str] = {}  # request_id -> "syncing", "synced", "failed"
+_sync_status_lock = threading.RLock()
+
+
+def _sync_worker():
+    """Background worker to process sync queue with retry logic."""
+    global _sync_worker_running
+    _sync_worker_running = True
+    print("[SYNC] Background sync worker started")
+    
+    while _sync_worker_running:
+        try:
+            # Get task from queue with timeout
+            task = _sync_queue.get(timeout=1.0)
+            if task is None:  # Poison pill to stop worker
+                break
+            
+            request_id = task.get('request_id')
+            sync_func = task.get('sync_func')
+            retry_count = task.get('retry_count', 0)
+            max_retries = 3
+            
+            try:
+                # Update status to syncing
+                with _sync_status_lock:
+                    _sync_status[request_id] = "syncing"
+                
+                # Execute sync function
+                success = sync_func()
+                
+                if success:
+                    with _sync_status_lock:
+                        _sync_status[request_id] = "synced"
+                    print(f"[SYNC] Successfully synced request {request_id}")
+                else:
+                    if retry_count < max_retries:
+                        # Retry with exponential backoff
+                        retry_count += 1
+                        backoff = min(2 ** retry_count, 10)  # Max 10 seconds
+                        print(f"[SYNC] Retry {retry_count}/{max_retries} for request {request_id} in {backoff}s")
+                        time.sleep(backoff)
+                        task['retry_count'] = retry_count
+                        _sync_queue.put(task)
+                    else:
+                        with _sync_status_lock:
+                            _sync_status[request_id] = "failed"
+                        print(f"[SYNC] Failed to sync request {request_id} after {max_retries} retries")
+                
+            except Exception as e:
+                print(f"[SYNC] Error processing sync for request {request_id}: {e}")
+                import traceback
+                traceback.print_exc()
+                
+                if retry_count < max_retries:
+                    retry_count += 1
+                    backoff = min(2 ** retry_count, 10)
+                    print(f"[SYNC] Retry {retry_count}/{max_retries} for request {request_id} in {backoff}s")
+                    time.sleep(backoff)
+                    task['retry_count'] = retry_count
+                    _sync_queue.put(task)
+                else:
+                    with _sync_status_lock:
+                        _sync_status[request_id] = "failed"
+            
+            _sync_queue.task_done()
+            
+        except queue.Empty:
+            continue
+        except Exception as e:
+            print(f"[SYNC] Worker error: {e}")
+            time.sleep(1)
+    
+    print("[SYNC] Background sync worker stopped")
+
+
+def start_sync_worker():
+    """Start the background sync worker thread."""
+    global _sync_worker_thread
+    if _sync_worker_thread is None or not _sync_worker_thread.is_alive():
+        _sync_worker_thread = threading.Thread(target=_sync_worker, daemon=True)
+        _sync_worker_thread.start()
+        print("[SYNC] Started background sync worker thread")
+
+
+def stop_sync_worker():
+    """Stop the background sync worker thread."""
+    global _sync_worker_running
+    _sync_worker_running = False
+    _sync_queue.put(None)  # Poison pill
+    if _sync_worker_thread:
+        _sync_worker_thread.join(timeout=5)
+        print("[SYNC] Stopped background sync worker thread")
+
+
+def add_sync_task(request_id: str, sync_func):
+    """Add a sync task to the background queue."""
+    _sync_queue.put({
+        'request_id': request_id,
+        'sync_func': sync_func,
+        'retry_count': 0
+    })
+    print(f"[SYNC] Added sync task for request {request_id}")
+
+
+def get_sync_status(request_id: str) -> Optional[str]:
+    """Get the sync status for a request."""
+    with _sync_status_lock:
+        return _sync_status.get(request_id)
+
+
+def time_ranges_overlap(start_a: str, end_a: str, start_b: str, end_b: str) -> bool:
+    """Check if two time ranges overlap. Returns True if they overlap."""
+    try:
+        from datetime import datetime
+        a_start = datetime.strptime(start_a, "%H:%M")
+        a_end = datetime.strptime(end_a, "%H:%M")
+        b_start = datetime.strptime(start_b, "%H:%M")
+        b_end = datetime.strptime(end_b, "%H:%M")
+        
+        # Handle overnight shifts (e.g., 22:00 to 02:00)
+        if a_end <= a_start:
+            a_end += timedelta(days=1)
+        if b_end <= b_start:
+            b_end += timedelta(days=1)
+        
+        # Check for overlap
+        return a_start < b_end and b_start < a_end
+    except Exception as e:
+        print(f"[ERROR] Failed to parse time ranges for overlap check: {e}")
+        return False
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup: do not load Excel file - all data is served from JSON/blob storage"""
     _clear_workbook_cache()
     print("[STARTUP] Server starting - using JSON/blob storage for all data")
+    
+    # GitHub JSON is the single source of truth - no Excel fallback needed
+    print(f"[STARTUP] Using GitHub JSON as single source of truth")
+    
+    # Start background sync worker
+    start_sync_worker()
+    
+    # Cleanup orphaned availability records
+    try:
+        employees_dicts = staging_store.get_employees()
+        employees = [Employee(**e) for e in employees_dicts]
+        employee_ids = {e.id for e in employees}
+        
+        staging_availabilities = staging_store.get_availabilities()
+        if staging_availabilities:
+            orphaned_count = 0
+            valid_availabilities = []
+            for avail in staging_availabilities:
+                if avail.get('employee_id') in employee_ids:
+                    valid_availabilities.append(avail)
+                else:
+                    orphaned_count += 1
+                    print(f"[STARTUP] Removing orphaned availability for employee {avail.get('employee_id')}")
+            
+            if orphaned_count > 0:
+                print(f"[STARTUP] Found {orphaned_count} orphaned availability records, cleaning up...")
+                staging_store.set_availabilities(valid_availabilities, user_id="system")
+                print(f"[STARTUP] Cleaned up {orphaned_count} orphaned availability records")
+        
+        # Cleanup orphaned availability requests
+        staging_requests = staging_store.get_availability_requests()
+        if staging_requests:
+            orphaned_requests = 0
+            valid_requests = []
+            for req in staging_requests:
+                if req.get('employee_id') in employee_ids:
+                    valid_requests.append(req)
+                else:
+                    orphaned_requests += 1
+                    print(f"[STARTUP] Removing orphaned request for employee {req.get('employee_id')}")
+            
+            if orphaned_requests > 0:
+                print(f"[STARTUP] Found {orphaned_requests} orphaned availability requests, cleaning up...")
+                staging_store.set_availability_requests(valid_requests, user_id="system")
+                print(f"[STARTUP] Cleaned up {orphaned_requests} orphaned availability requests")
+    except Exception as e:
+        print(f"[STARTUP] Error cleaning up orphaned records: {e}")
+    
     yield
     _clear_workbook_cache()
 
@@ -97,7 +292,8 @@ app.add_middleware(
         "https://ibu-operations-schedule-frontend-rbrfsfadd.vercel.app",
         "https://ibu-operations-schedule.vercel.app",
         "http://localhost:3000",
-        "http://localhost:5173"
+        "http://localhost:5173",
+        "http://localhost:8000"
     ],
     allow_credentials=False,
     allow_methods=["*"],
@@ -114,22 +310,14 @@ async def root():
         "health": "/api/health",
     }
 
-@app.get("/api/health")
-async def health_check():
-    """Simple health check to verify API is working"""
-    return {
-        "status": "healthy",
-        "timestamp": datetime.now().isoformat(),
-        "message": "API is working"
-    }
-
 # ============ Excel File Management ============
 
 @app.get("/api/excel/status")
 async def excel_status():
     """Check if system is configured (using JSON/blob storage)"""
     try:
-        has_employees = len(get_all_employees()) > 0
+        employees = staging_store.get_employees()
+        has_employees = len(employees) > 0
         from storage import BLOB_AVAILABLE
         return {
             "configured": has_employees,
@@ -146,7 +334,7 @@ async def excel_status():
 
 @app.get("/api/excel/download")
 async def download_excel():
-    """Export current Excel data to Excel file for viewing"""
+    """Export current GitHub JSON data to Excel file for download"""
     from fastapi.responses import StreamingResponse
     import io
     from openpyxl import Workbook
@@ -154,33 +342,84 @@ async def download_excel():
     # Create Excel workbook
     wb = Workbook()
     
-    # Employees sheet
+    # Employees sheet - read from GitHub JSON
     emp_sheet = wb.active
     emp_sheet.title = "Employees"
-    emp_sheet.append(["ID", "Name", "Email", "Type", "Max Hours", "Active"])
-    for emp in get_all_employees():
+    emp_sheet.append(["ID", "Name", "Email", "Type", "Max Hours", "Active", "Created At"])
+    employees = staging_store.get_employees()
+    for emp in employees:
         emp_sheet.append([
-            emp.id, emp.name, emp.email or "", emp.employee_type,
-            emp.max_hours_per_week, emp.active
+            emp.get('id'), emp.get('name'), emp.get('email') or "", emp.get('employee_type'),
+            emp.get('max_hours_per_week'), emp.get('active'), emp.get('created_at')
         ])
     
-    # Schedules sheet
-    if get_all_schedules():
+    # Schedules sheet - read from GitHub JSON
+    schedules = staging_store.get_schedules()
+    if schedules:
         sched_sheet = wb.create_sheet("Schedules")
-        sched_sheet.append(["Week Start", "Employee ID", "Day", "Location", "Start Time", "End Time"])
-        for schedule in get_all_schedules():
-            for shift in schedule.shifts:
+        sched_sheet.append(["Week Start", "Schedule ID", "Employee ID", "Day", "Location", "Start Time", "End Time", "Hours", "Break Provided"])
+        for schedule in schedules:
+            for shift in schedule.get('shifts', []):
                 sched_sheet.append([
-                    schedule.week_start_date, shift.employee_id, shift.day_of_week,
-                    shift.floor.value if shift.floor else "", shift.start_time, shift.end_time
+                    schedule.get('week_start_date'), schedule.get('id'), shift.get('employee_id'), shift.get('day_of_week'),
+                    shift.get('floor'), shift.get('start_time'), shift.get('end_time'), shift.get('hours'), shift.get('break_provided')
                 ])
     
-    # Config sheet
+    # Availabilities sheet - read from GitHub JSON
+    availabilities = staging_store.get_availabilities()
+    if availabilities:
+        avail_sheet = wb.create_sheet("Availabilities")
+        avail_sheet.append(["ID", "Employee ID", "Week Start", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday", "Approved", "Submitted At"])
+        for avail in availabilities:
+            avail_sheet.append([
+                avail.get('id'), avail.get('employee_id'), avail.get('week_start_date'),
+                avail.get('monday'), avail.get('tuesday'), avail.get('wednesday'), avail.get('thursday'),
+                avail.get('friday'), avail.get('saturday'), avail.get('sunday'),
+                avail.get('approved'), avail.get('submitted_at')
+            ])
+    
+    # Availability Requests sheet - read from GitHub JSON
+    requests = staging_store.get_availability_requests()
+    if requests:
+        req_sheet = wb.create_sheet("Availability Requests")
+        req_sheet.append(["ID", "Employee ID", "Request Type", "Start Date", "End Date", "Days of Week", "Start Time", "End Time", "Status", "Created At"])
+        for req in requests:
+            req_sheet.append([
+                req.get('id'), req.get('employee_id'), req.get('request_type'),
+                req.get('start_date'), req.get('end_date'), ', '.join(req.get('days_of_week', [])),
+                req.get('start_time'), req.get('end_time'), req.get('status'), req.get('created_at')
+            ])
+    
+    # Notifications sheet - read from GitHub JSON
+    notifications = staging_store.get_notifications()
+    if notifications:
+        notif_sheet = wb.create_sheet("Notifications")
+        notif_sheet.append(["ID", "Employee ID", "Type", "Message", "Read", "Created At"])
+        for notif in notifications:
+            notif_sheet.append([
+                notif.get('id'), notif.get('employee_id'), notif.get('type'),
+                notif.get('message'), notif.get('read'), notif.get('created_at')
+            ])
+    
+    # Config sheet - read from GitHub JSON
     config_sheet = wb.create_sheet("Config")
-    config = get_system_config()
+    config = staging_store.get_system_config()
     config_sheet.append(["Setting", "Value"])
-    for key, value in config.model_dump().items():
+    for key, value in config.items():
         config_sheet.append([key, str(value)])
+    
+    # Events sheet - read from GitHub JSON
+    events = config.get('events', [])
+    if events:
+        event_sheet = wb.create_sheet("Events")
+        event_sheet.append(["ID", "Name", "Week Start Date", "Date", "Start Time", "End Time", "Location", "People Needed", "Description", "Created By"])
+        for event in events:
+            event_sheet.append([
+                event.get('id'), event.get('name'), event.get('week_start_date'),
+                event.get('date'), event.get('start_time'), event.get('end_time'),
+                event.get('location'), event.get('people_needed'), event.get('description'),
+                event.get('created_by')
+            ])
     
     # Save to buffer
     buffer = io.BytesIO()
@@ -243,10 +482,11 @@ async def create_new_excel(authorization: Optional[str] = Header(None)):
 @app.post("/api/managers/set-password")
 async def set_manager_password_endpoint(request: SetPasswordRequest):
     """Set password for a manager (only if not already set)"""
-    employee = get_employee_by_id(request.employee_id)
-    if not employee:
+    employee_dict = staging_store.get_employee_by_id(request.employee_id)
+    if not employee_dict:
         raise HTTPException(status_code=404, detail="Employee not found")
     
+    employee = Employee(**employee_dict)
     if employee.employee_type != EmployeeType.MANAGER:
         raise HTTPException(status_code=403, detail="Only managers can have passwords")
     
@@ -266,10 +506,11 @@ async def update_manager_password_endpoint(request: SetPasswordRequest, authoriz
     if user["role"] not in ["manager", "admin"] and user["employee_id"] != request.employee_id:
         raise HTTPException(status_code=403, detail="Can only update your own password")
     
-    employee = get_employee_by_id(request.employee_id)
-    if not employee:
+    employee_dict = staging_store.get_employee_by_id(request.employee_id)
+    if not employee_dict:
         raise HTTPException(status_code=404, detail="Employee not found")
     
+    employee = Employee(**employee_dict)
     if employee.employee_type != EmployeeType.MANAGER:
         raise HTTPException(status_code=403, detail="Only managers can have passwords")
     
@@ -302,14 +543,16 @@ async def login(request: LoginRequest):
     """Login as an employee with optional password for managers"""
 
     # Check if system has employees configured (using JSON/blob storage)
-    has_employees = len(get_all_employees()) > 0
+    employees = staging_store.get_employees()
+    has_employees = len(employees) > 0
     if not has_employees:
         raise HTTPException(status_code=400, detail="No employees configured. Please initialize the system first.")
 
-    employee = get_employee_by_id(request.employee_id)
-
-    if not employee:
+    employee_dict = staging_store.get_employee_by_id(request.employee_id)
+    if not employee_dict:
         raise HTTPException(status_code=404, detail="Employee not found")
+
+    employee = Employee(**employee_dict)
 
     # Managers need password verification
     if employee.employee_type == EmployeeType.MANAGER:
@@ -320,7 +563,7 @@ async def login(request: LoginRequest):
                 raise HTTPException(status_code=401, detail="Invalid password")
         # If no password set yet, allow login (first time setup)
 
-    token = AuthManager.login(request.employee_id, request.password, get_employee_by_id)
+    token = AuthManager.login(request.employee_id, request.password, staging_store.get_employee_by_id)
 
     return {
         "token": token,
@@ -338,21 +581,23 @@ async def admin_login(request: AdminLoginRequest):
         raise HTTPException(status_code=403, detail="Invalid secret key")
 
     # Check if system has employees configured
-    has_employees = len(get_all_employees()) > 0
+    employees = staging_store.get_employees()
+    has_employees = len(employees) > 0
     if not has_employees:
         raise HTTPException(status_code=400, detail="No employees configured. Please initialize the system first.")
 
-    employee = get_employee_by_id(request.employee_id)
-
-    if not employee:
+    employee_dict = staging_store.get_employee_by_id(request.employee_id)
+    if not employee_dict:
         raise HTTPException(status_code=404, detail="Employee not found")
+
+    employee = Employee(**employee_dict)
 
     # Force manager role for admin login
     if employee.employee_type != EmployeeType.MANAGER:
         raise HTTPException(status_code=403, detail="Admin login only available for managers")
 
     # Bypass password verification for admin login
-    token = AuthManager.login(request.employee_id, request.password, get_employee_by_id)
+    token = AuthManager.login(request.employee_id, request.password, staging_store.get_employee_by_id)
 
     return {
         "token": token,
@@ -379,11 +624,86 @@ async def get_me(authorization: Optional[str] = Header(None)):
 
 # ============ Employee Endpoints ============
 
+@app.post("/api/staging/cleanup-orphaned-records")
+async def cleanup_orphaned_records(authorization: str = Header(None)):
+    """Remove availability records for non-existent employees"""
+    try:
+        user = require_manager(authorization)
+
+        # Get all current employees
+        employees_dicts = staging_store.get_employees()
+        employees = [Employee(**e) for e in employees_dicts]
+        employee_ids = {e.id for e in employees}
+        
+        # Clean up staging availabilities
+        staging_availabilities = staging_store.get_availabilities()
+        orphaned_count = 0
+        valid_availabilities = []
+        for avail in staging_availabilities:
+            if avail.get('employee_id') in employee_ids:
+                valid_availabilities.append(avail)
+            else:
+                orphaned_count += 1
+                print(f"[CLEANUP] Removing orphaned availability for employee {avail.get('employee_id')}")
+        
+        if orphaned_count > 0:
+            print(f"[CLEANUP] Found {orphaned_count} orphaned availability records")
+            staging_store.set_availabilities(valid_availabilities, user_id="system")
+        
+        # Clean up staging availability requests
+        staging_requests = staging_store.get_availability_requests()
+        orphaned_requests = 0
+        valid_requests = []
+        for req in staging_requests:
+            if req.get('employee_id') in employee_ids:
+                valid_requests.append(req)
+            else:
+                orphaned_requests += 1
+                print(f"[CLEANUP] Removing orphaned request for employee {req.get('employee_id')}")
+        
+        if orphaned_requests > 0:
+            print(f"[CLEANUP] Found {orphaned_requests} orphaned availability requests")
+            staging_store.set_availability_requests(valid_requests, user_id="system")
+        
+        total_cleaned = orphaned_count + orphaned_requests
+        if total_cleaned > 0:
+            return {"message": f"Cleaned up {total_cleaned} orphaned records ({orphaned_count} availabilities, {orphaned_requests} requests)"}
+        else:
+            return {"message": "No orphaned records found"}
+            
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Failed to cleanup orphaned records: {str(e)}")
+
+@app.post("/api/staging/reset-from-excel")
+async def reset_staging_from_excel(authorization: str = Header(None)):
+    """Reset staging data from Excel (managers only)"""
+    user = require_manager(authorization)
+    
+    try:
+        # Load all employees from Excel (intentional Excel read for this utility)
+        from data_store_excel import get_all_employees
+        all_employees = get_all_employees()
+        employees_data = [e.model_dump() for e in all_employees]
+        
+        # Update staging with all employees
+        staging_store.set_employees(employees_data, user_id="system")
+        
+        return {"message": f"Reset staging with {len(employees_data)} employees from Excel"}
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Failed to reset staging: {str(e)}")
+
 @app.get("/api/employees", response_model=List[Employee])
 async def list_employees(active_only: bool = False, authorization: str = Header(None)):
     """List all employees (managers see manager_preferences, employees do not)"""
     try:
-        employees = get_all_employees()
+        # Read from GitHub JSON (single source of truth)
+        staging_employees = staging_store.get_employees()
+        employees = [Employee(**e) for e in staging_employees]
+        
         print(f"[DEBUG] Loaded {len(employees)} employees")
         if active_only:
             employees = [e for e in employees if e.active]
@@ -409,10 +729,10 @@ async def list_employees(active_only: bool = False, authorization: str = Header(
 @app.get("/api/employees/{employee_id}", response_model=Employee)
 async def get_employee(employee_id: str):
     """Get a specific employee"""
-    employee = get_employee_by_id(employee_id)
-    if not employee:
+    employee_dict = staging_store.get_employee_by_id(employee_id)
+    if not employee_dict:
         raise HTTPException(status_code=404, detail="Employee not found")
-    return employee
+    return Employee(**employee_dict)
 
 @app.post("/api/employees", response_model=Employee)
 async def create_employee(
@@ -422,7 +742,15 @@ async def create_employee(
     """Create a new employee (managers only)"""
     if not employee.id:
         employee.id = f"emp_{uuid.uuid4().hex[:8]}"
-    return save_employee(employee)
+    
+    # Update staging layer first (fast)
+    employees = staging_store.get_employees()
+    employees.append(employee.model_dump())
+    staging_store.set_employees(employees, user_id=user.get('employee_id'))
+    
+    # No action queue needed - GitHub JSON is single source of truth
+    
+    return employee
 
 @app.put("/api/employees/{employee_id}", response_model=Employee)
 async def update_employee(
@@ -431,9 +759,11 @@ async def update_employee(
     user: Dict = Depends(require_self_or_manager)
 ):
     """Update an employee (managers can edit anyone, employees can edit themselves)"""
-    existing = get_employee_by_id(employee_id)
-    if not existing:
+    existing_dict = staging_store.get_employee_by_id(employee_id)
+    if not existing_dict:
         raise HTTPException(status_code=404, detail="Employee not found")
+    
+    existing = Employee(**existing_dict)
     
     # Build updated employee by merging existing with new values
     update_data = employee_update.model_dump(exclude_unset=True)
@@ -455,7 +785,15 @@ async def update_employee(
         created_at=existing.created_at
     )
     
-    return save_employee(updated_employee)
+    # Update staging layer first (fast)
+    employees = staging_store.get_employees()
+    employees = [e if e["id"] != employee_id else updated_employee.model_dump() for e in employees]
+    staging_store.set_employees(employees, user_id=user.get('employee_id'))
+    
+    # Add to action queue for Excel sync (async, no blocking)
+    # No action queue needed - GitHub JSON is single source of truth
+    
+    return updated_employee
 
 @app.delete("/api/employees/{employee_id}")
 async def remove_employee(
@@ -463,8 +801,39 @@ async def remove_employee(
     user: Dict = Depends(require_manager)
 ):
     """Delete an employee (managers only)"""
-    if delete_employee(employee_id):
+    # Update staging layer first (fast)
+    employees = staging_store.get_employees()
+    was_in_staging = any(e["id"] == employee_id for e in employees)
+    employees = [e for e in employees if e["id"] != employee_id]
+    staging_store.set_employees(employees, user_id=user.get('employee_id'))
+    
+    # Clean up availability records for deleted employee
+    availabilities = staging_store.get_availabilities()
+    cleaned_availabilities = [a for a in availabilities if a.get("employee_id") != employee_id]
+    if len(cleaned_availabilities) != len(availabilities):
+        print(f"[DELETE] Cleaning up {len(availabilities) - len(cleaned_availabilities)} availability records for deleted employee {employee_id}")
+        staging_store.set_availabilities(cleaned_availabilities, user_id=user.get('employee_id'))
+    
+    # Clean up availability requests for deleted employee
+    requests = staging_store.get_availability_requests()
+    cleaned_requests = [r for r in requests if r.get("employee_id") != employee_id]
+    if len(cleaned_requests) != len(requests):
+        print(f"[DELETE] Cleaning up {len(requests) - len(cleaned_requests)} availability requests for deleted employee {employee_id}")
+        staging_store.set_availability_requests(cleaned_requests, user_id=user.get('employee_id'))
+    
+    # Clean up notifications for deleted employee
+    notifications = staging_store.get_notifications()
+    cleaned_notifications = [n for n in notifications if n.get("employee_id") != employee_id]
+    if len(cleaned_notifications) != len(notifications):
+        print(f"[DELETE] Cleaning up {len(notifications) - len(cleaned_notifications)} notifications for deleted employee {employee_id}")
+        staging_store.set_notifications(cleaned_notifications, user_id=user.get('employee_id'))
+    
+    # Note: Excel cleanup removed - GitHub JSON is now the single source of truth
+    
+    # Return success if employee was in staging
+    if was_in_staging:
         return {"message": "Employee deleted"}
+    
     raise HTTPException(status_code=404, detail="Employee not found")
 
 # ============ Availability Endpoints ============
@@ -482,7 +851,19 @@ async def list_availabilities(
     if user["role"] != "manager":
         employee_id = user["employee_id"]
     
-    return get_availabilities(week_start_date, employee_id)
+    # Read from GitHub JSON (single source of truth)
+    staging_availabilities = staging_store.get_availabilities()
+    availabilities = [Availability(**a) for a in staging_availabilities]
+    
+    # Filter by week_start_date if provided
+    if week_start_date:
+        availabilities = [a for a in availabilities if a.week_start_date == week_start_date]
+    
+    # Filter by employee_id if provided
+    if employee_id:
+        availabilities = [a for a in availabilities if a.employee_id == employee_id]
+    
+    return availabilities
 
 @app.get("/api/availability/{employee_id}/{week_start_date}", response_model=Availability)
 async def get_employee_availability(
@@ -559,7 +940,20 @@ async def submit_availability(
     availability.approved = False
     availability.approved_by = None
     availability.approved_at = None
-    return save_availability(availability)
+    
+    # Update staging layer first (fast)
+    config = staging_store.get_system_config()
+    if 'availabilities' not in config:
+        config['availabilities'] = []
+    config['availabilities'] = [a if a['id'] != availability.id else availability.model_dump() for a in config['availabilities']]
+    if not any(a['id'] == availability.id for a in config['availabilities']):
+        config['availabilities'].append(availability.model_dump())
+    staging_store.set_system_config(config, user_id=user.get('employee_id'))
+    
+    # Add to action queue for Excel sync (async, no blocking)
+    # No action queue needed - GitHub JSON is single source of truth
+    
+    return availability
 
 @app.get("/api/availability/colors")
 async def get_availability_colors():
@@ -590,7 +984,17 @@ async def approve_availability(
     availability.approved_by = user["employee_id"]
     availability.approved_at = datetime.now()
     
-    return save_availability(availability)
+    # Update staging layer first (fast)
+    config = staging_store.get_system_config()
+    if 'availabilities' not in config:
+        config['availabilities'] = []
+    config['availabilities'] = [a if a['id'] != availability.id else availability.model_dump() for a in config['availabilities']]
+    staging_store.set_system_config(config, user_id=user.get('employee_id'))
+    
+    # Add to action queue for Excel sync (async, no blocking)
+    # No action queue needed - GitHub JSON is single source of truth
+    
+    return availability
 
 @app.get("/api/availability/pending")
 async def get_pending_availabilities(user: Dict = Depends(require_manager)):
@@ -629,7 +1033,10 @@ async def set_coverage_requirements(
 async def list_schedules(authorization: Optional[str] = Header(None)):
     """List all schedules (all authenticated users)"""
     require_auth(authorization)
-    return get_all_schedules()
+    
+    # Try to read from staging first
+    staging_schedules = staging_store.get_schedules()
+    return [WeeklySchedule(**s) for s in staging_schedules]
 
 @app.get("/api/schedules/{week_start_date}", response_model=WeeklySchedule)
 async def get_schedule(
@@ -638,29 +1045,269 @@ async def get_schedule(
 ):
     """Get schedule for a specific week (all authenticated users)"""
     user = require_auth(authorization)
-    schedule = get_schedule_by_week(week_start_date)
+    
+    print(f"[SCHEDULE] Getting schedule for week {week_start_date}, user: {user.get('employee_id')}, is_manager: {is_manager_user(user)}")
+    
+    # Try to read from staging first
+    staging_schedules = staging_store.get_schedules()
+    schedule = None
+    if staging_schedules:
+        for s in staging_schedules:
+            # Handle both string and date objects
+            week_start = s.get('week_start_date')
+            if isinstance(week_start, date):
+                week_start_str = str(week_start)
+            else:
+                week_start_str = week_start
+            
+            if week_start_str == str(week_start_date):
+                schedule = WeeklySchedule(**s)
+                print(f"[SCHEDULE] Found schedule in staging with {len(schedule.shifts)} shifts")
+                # Log locked shifts
+                locked_shifts = [s for s in schedule.shifts if s.locked]
+                print(f"[SCHEDULE] Locked shifts in schedule: {len(locked_shifts)}")
+                for ls in locked_shifts:
+                    print(f"[SCHEDULE]   - {ls.id}: emp={ls.employee_id}, day={ls.day_of_week}, locked={ls.locked}, type={ls.locked_availability_type}")
+                break
+    
     if not schedule:
         raise HTTPException(status_code=404, detail="Schedule not found")
     
-    # Add approved availabilities to the schedule response
-    all_availabilities = get_availabilities()
-    approved_availabilities = [a for a in all_availabilities if a.approved and a.week_start_date == week_start_date]
+    # Recreate pending locked shifts if they're missing but the request still exists
+    all_requests = staging_store.get_availability_requests()
+    week_end_date = week_start_date + timedelta(days=6)
+    day_map = {0: 'monday', 1: 'tuesday', 2: 'wednesday', 3: 'thursday', 4: 'friday', 5: 'saturday', 6: 'sunday'}
     
-    # Filter: managers see all, employees see only their own
-    if not is_manager_user(user):
-        approved_availabilities = [a for a in approved_availabilities if a.employee_id == user.get('employee_id')]
+    for req in all_requests:
+        if req.get('status') != 'pending':
+            continue
+        
+        emp_id = req.get('employee_id')
+        if not emp_id:
+            continue
+        
+        # Check if request overlaps with the current week
+        if req.get('start_date') and req.get('end_date'):
+            try:
+                req_start = date.fromisoformat(str(req['start_date'])[:10])
+                req_end = date.fromisoformat(str(req['end_date'])[:10])
+                if req_end < week_start_date or req_start > week_end_date:
+                    continue
+                
+                req_days = req.get('days_of_week', [])
+                request_type = req.get('request_type', 'availability')
+                
+                # For each day in the week that matches the request's days_of_week
+                current_date = week_start_date
+                while current_date <= week_end_date:
+                    day_name = day_map[current_date.weekday()]
+                    if day_name in req_days and current_date >= req_start and current_date <= req_end:
+                        # Check if a pending locked shift already exists for this employee/day
+                        existing_pending = next(
+                            (s for s in schedule.shifts 
+                             if s.employee_id == emp_id and s.day_of_week == day_name and s.locked and s.id.startswith(f"pending_{req['id']}")),
+                            None
+                        )
+                        
+                        if not existing_pending:
+                            # Create pending locked shift
+                            if request_type == 'day_off':
+                                shift_start = '00:00'
+                                shift_end = '23:59'
+                                shift_location = 'day off'
+                                shift_hours = 0
+                                locked_type = 'Day Off'
+                            else:
+                                shift_start = req.get('start_time', '00:00')
+                                shift_end = req.get('end_time', '23:59')
+                                shift_location = None
+                                shift_hours = 0
+                                locked_type = request_type.capitalize()
+                            
+                            pending_shift = Shift(
+                                id=f"pending_{req['id']}_{day_name}_{emp_id}",
+                                employee_id=emp_id,
+                                day_of_week=day_name,
+                                start_time=shift_start,
+                                end_time=shift_end,
+                                job_type=JobType.IBU_OPS,
+                                location=shift_location,
+                                hours=shift_hours,
+                                locked=True,
+                                locked_availability_type=locked_type,
+                                is_event=False
+                            )
+                            schedule.shifts.append(pending_shift)
+                            print(f"[SCHEDULE] Recreated pending locked shift for {emp_id} on {day_name}")
+                    
+                    current_date += timedelta(days=1)
+            except Exception as e:
+                print(f"[SCHEDULE] Warning: could not recreate pending locked shift: {e}")
+                continue
     
-    # Add availability requests to the schedule response
-    all_requests = get_availability_requests()
-    # Filter by week start date
-    week_requests = [r for r in all_requests if r.get('week_start_date') == week_start_date]
-    # Filter: managers see all, employees see only their own
+    # Recreate approved locked shifts if they're missing but the request still exists
+    for req in all_requests:
+        if req.get('status') not in ['approved', 'AvailabilityRequestStatus.APPROVED']:
+            continue
+        
+        emp_id = req.get('employee_id')
+        if not emp_id:
+            continue
+        
+        # Check if request overlaps with the current week
+        if req.get('start_date') and req.get('end_date'):
+            try:
+                req_start = date.fromisoformat(str(req['start_date'])[:10])
+                req_end = date.fromisoformat(str(req['end_date'])[:10])
+                if req_end < week_start_date or req_start > week_end_date:
+                    continue
+                
+                req_days = req.get('days_of_week', [])
+                request_type = req.get('request_type', 'availability')
+                
+                # For each day in the week that matches the request's days_of_week
+                current_date = week_start_date
+                while current_date <= week_end_date:
+                    day_name = day_map[current_date.weekday()]
+                    if day_name in req_days and current_date >= req_start and current_date <= req_end:
+                        # Check if an approved locked shift already exists for this employee/day
+                        existing_approved = next(
+                            (s for s in schedule.shifts 
+                             if s.employee_id == emp_id and s.day_of_week == day_name and s.locked and s.id.startswith(f"locked_{req['id']}")),
+                            None
+                        )
+                        
+                        if not existing_approved:
+                            # Create approved locked shift
+                            if request_type == 'day_off':
+                                shift_start = '00:00'
+                                shift_end = '23:59'
+                                shift_location = 'day off'
+                                shift_hours = 0
+                                locked_type = 'Day Off'
+                            else:
+                                shift_start = req.get('start_time', '00:00')
+                                shift_end = req.get('end_time', '23:59')
+                                shift_location = None
+                                shift_hours = 0
+                                locked_type = request_type.capitalize()
+                            
+                            approved_shift = Shift(
+                                id=f"locked_{req['id']}_{day_name}_{emp_id}",
+                                employee_id=emp_id,
+                                day_of_week=day_name,
+                                start_time=shift_start,
+                                end_time=shift_end,
+                                job_type=JobType.IBU_OPS,
+                                location=shift_location,
+                                hours=shift_hours,
+                                locked=True,
+                                locked_availability_type=locked_type,
+                                is_event=False
+                            )
+                            schedule.shifts.append(approved_shift)
+                            print(f"[SCHEDULE] Recreated approved locked shift for {emp_id} on {day_name}")
+                    
+                    current_date += timedelta(days=1)
+            except Exception as e:
+                print(f"[SCHEDULE] Warning: could not recreate approved locked shift: {e}")
+                continue
+    
+    # Derive approved availability markers from approved requests
+    # This replaces the old locked-shift mechanism
+    approved_markers = []
+    
+    for req in all_requests:
+        if req.get('status') not in ['approved', 'AvailabilityRequestStatus.APPROVED']:
+            continue
+        
+        emp_id = req.get('employee_id')
+        if not emp_id:
+            continue
+        
+        # Filter: employees see only their own
+        if not is_manager_user(user) and emp_id != user.get('employee_id'):
+            continue
+        
+        # Handle new date range model
+        if req.get('start_date') and req.get('end_date'):
+            try:
+                req_start = date.fromisoformat(str(req['start_date'])[:10])
+                req_end = date.fromisoformat(str(req['end_date'])[:10])
+                req_days = req.get('days_of_week', [])
+                request_type = req.get('request_type', 'availability')
+                
+                # Check if this request overlaps with the current week
+                if req_end < week_start_date or req_start > week_end_date:
+                    continue
+                
+                # For each day in the week that matches the request's days_of_week
+                current_date = week_start_date
+                while current_date <= week_end_date:
+                    day_name = day_map[current_date.weekday()]
+                    if day_name in req_days and current_date >= req_start and current_date <= req_end:
+                        # Check if a real shift exists for this employee/day with overlapping time
+                        has_overlapping_shift = False
+                        for shift in schedule.shifts:
+                            if shift.employee_id == emp_id and shift.day_of_week == day_name:
+                                # For day-off requests, any shift overlaps
+                                if request_type == 'day_off':
+                                    has_overlapping_shift = True
+                                    break
+                                # For time-range requests, check time overlap
+                                elif req.get('start_time') and req.get('end_time'):
+                                    if time_ranges_overlap(
+                                        req.get('start_time'), req.get('end_time'),
+                                        shift.start_time, shift.end_time
+                                    ):
+                                        has_overlapping_shift = True
+                                        break
+                        
+                        # Only add marker if no overlapping real shift exists
+                        if not has_overlapping_shift:
+                            marker = {
+                                'employee_id': emp_id,
+                                'day_of_week': day_name,
+                                'date': current_date.isoformat(),
+                                'request_type': request_type,
+                                'start_time': req.get('start_time'),
+                                'end_time': req.get('end_time'),
+                                'employee_comment': req.get('employee_comment'),
+                                'request_id': req.get('id')
+                            }
+                            approved_markers.append(marker)
+                    
+                    current_date += timedelta(days=1)
+            except Exception as e:
+                print(f"[SCHEDULE] Warning: could not parse approved request: {e}")
+                continue
+    
+    # Add availability requests to the schedule response (pending requests only for managers)
+    week_requests = []
+    for req in all_requests:
+        if req.get('status') == 'pending':
+            # Check if request overlaps with the current week
+            if req.get('start_date') and req.get('end_date'):
+                try:
+                    req_start = date.fromisoformat(str(req['start_date'])[:10])
+                    req_end = date.fromisoformat(str(req['end_date'])[:10])
+                    if req_end < week_start_date or req_start > week_end_date:
+                        continue
+                    week_requests.append(req)
+                except:
+                    continue
+            elif req.get('week_start_date'):
+                # Legacy model
+                if str(req.get('week_start_date')) == str(week_start_date):
+                    week_requests.append(req)
+    
+    # Filter: employees see only their own
     if not is_manager_user(user):
         week_requests = [r for r in week_requests if r.get('employee_id') == user.get('employee_id')]
     
     # Add availabilities and requests to schedule (this is a dynamic field, not in the model)
     schedule_data = schedule.model_dump()
-    schedule_data['approved_availabilities'] = approved_availabilities
+    schedule_data['approved_availabilities'] = approved_markers
     schedule_data['availability_requests'] = week_requests
     
     return schedule_data
@@ -723,9 +1370,117 @@ async def auto_generate_schedule(
         print(f"[API] Event staffing dict: {event_staffing}")
         print(f"[API] Call center target: {call_center_target}")
         print(f"[API] Location requirements passed to scheduler: {location_requirements}")
+        
+        # Preserve locked shifts from existing schedule before generating new one
+        staging_schedules = staging_store.get_schedules()
+        existing_schedule = None
+        for s in staging_schedules:
+            if str(s.get('week_start_date')) == str(week_start_date):
+                existing_schedule = WeeklySchedule(**s)
+                break
+        
+        # Recreate locked shifts from approved availability requests before generating
+        # This ensures locked shifts are preserved even if they were only recreated in get_schedule
+        all_requests = staging_store.get_availability_requests()
+        week_end_date = week_start_date + timedelta(days=6)
+        day_map = {0: 'monday', 1: 'tuesday', 2: 'wednesday', 3: 'thursday', 4: 'friday', 5: 'saturday', 6: 'sunday'}
+        
+        # If existing schedule exists, use it as base; otherwise start with empty schedule
+        if existing_schedule:
+            schedule_for_locked = existing_schedule
+        else:
+            schedule_for_locked = WeeklySchedule(week_start_date=week_start_date, shifts=[])
+        
+        # Recreate approved locked shifts if they're missing but the request still exists
+        for req in all_requests:
+            if req.get('status') not in ['approved', 'AvailabilityRequestStatus.APPROVED']:
+                continue
+            
+            emp_id = req.get('employee_id')
+            if not emp_id:
+                continue
+            
+            # Check if request overlaps with the current week
+            if req.get('start_date') and req.get('end_date'):
+                try:
+                    req_start = date.fromisoformat(str(req['start_date'])[:10])
+                    req_end = date.fromisoformat(str(req['end_date'])[:10])
+                    if req_end < week_start_date or req_start > week_end_date:
+                        continue
+                    
+                    req_days = req.get('days_of_week', [])
+                    request_type = req.get('request_type', 'availability')
+                    
+                    # For each day in the week that matches the request's days_of_week
+                    current_date = week_start_date
+                    while current_date <= week_end_date:
+                        day_name = day_map[current_date.weekday()]
+                        if day_name in req_days and current_date >= req_start and current_date <= req_end:
+                            # Check if an approved locked shift already exists for this employee/day
+                            existing_approved = next(
+                                (s for s in schedule_for_locked.shifts 
+                                 if s.employee_id == emp_id and s.day_of_week == day_name and s.locked and s.id.startswith(f"locked_{req['id']}")),
+                                None
+                            )
+                            
+                            if not existing_approved:
+                                # Create approved locked shift
+                                if request_type == 'day_off':
+                                    shift_start = '00:00'
+                                    shift_end = '23:59'
+                                    shift_location = 'day off'
+                                    shift_hours = 0
+                                    locked_type = 'Day Off'
+                                else:
+                                    shift_start = req.get('start_time', '00:00')
+                                    shift_end = req.get('end_time', '23:59')
+                                    shift_location = None
+                                    shift_hours = 0
+                                    locked_type = request_type.capitalize()
+                                
+                                approved_shift = Shift(
+                                    id=f"locked_{req['id']}_{day_name}_{emp_id}",
+                                    employee_id=emp_id,
+                                    day_of_week=day_name,
+                                    start_time=shift_start,
+                                    end_time=shift_end,
+                                    job_type=JobType.IBU_OPS,
+                                    location=shift_location,
+                                    hours=shift_hours,
+                                    locked=True,
+                                    locked_availability_type=locked_type,
+                                    is_event=False
+                                )
+                                schedule_for_locked.shifts.append(approved_shift)
+                                print(f"[API] Recreated approved locked shift for {emp_id} on {day_name}")
+                        
+                        current_date += timedelta(days=1)
+                except Exception as e:
+                    print(f"[API] Warning: could not recreate approved locked shift: {e}")
+                    continue
+        
+        # Now preserve all locked shifts (including recreated ones)
+        preserved_locked_shifts = [s for s in schedule_for_locked.shifts if s.locked]
+        print(f"[API] Preserving {len(preserved_locked_shifts)} locked shifts")
+        
         engine = SchedulingEngine()
         schedule = engine.generate_auto_schedule(week_start_date, location_requirements, event_staffing, call_center_target)
-        return save_schedule(schedule)
+        
+        # Add preserved locked shifts back to the new schedule
+        for locked_shift in preserved_locked_shifts:
+            schedule.shifts.append(locked_shift)
+            print(f"[API] Restored locked shift: {locked_shift.id}")
+        
+        # Update staging layer first (fast) - remove all schedules with this week_start_date to prevent duplicates
+        schedules = staging_store.get_schedules()
+        schedules = [s for s in schedules if str(s.get('week_start_date')) != str(week_start_date)]
+        schedules.append(schedule.model_dump())
+        staging_store.set_schedules(schedules, user_id=user.get('employee_id'))
+        
+        # Add to action queue for Excel sync (async, no blocking)
+        # No action queue needed - GitHub JSON is single source of truth
+        
+        return schedule
     except Exception as e:
         import traceback
         print(f"[API] Error in auto_generate_schedule: {e}")
@@ -739,7 +1494,18 @@ async def create_or_update_schedule(
 ):
     """Save a schedule (manual editing) (managers only)"""
     schedule.updated_at = datetime.now()
-    return save_schedule(schedule)
+    
+    # Update staging layer first (fast)
+    schedules = staging_store.get_schedules()
+    schedules = [s if s['id'] != schedule.id else schedule.model_dump() for s in schedules]
+    if not any(s['id'] == schedule.id for s in schedules):
+        schedules.append(schedule.model_dump())
+    staging_store.set_schedules(schedules, user_id=user.get('employee_id'))
+    
+    # Add to action queue for Excel sync (async, no blocking)
+    # No action queue needed - GitHub JSON is single source of truth
+    
+    return schedule
 
 @app.put("/api/schedules/{week_start_date}/shifts", response_model=WeeklySchedule)
 async def update_schedule_shifts(
@@ -748,12 +1514,23 @@ async def update_schedule_shifts(
     user: Dict = Depends(require_manager)
 ):
     """Update shifts for a schedule (drag-drop saves here) (managers only)"""
-    schedule = get_schedule_by_week(week_start_date)
+    # Try staging first for speed
+    staging_schedules = staging_store.get_schedules()
+    schedule = None
+    for s in staging_schedules:
+        # Handle both string and date objects
+        week_start = s.get('week_start_date')
+        if isinstance(week_start, date):
+            week_start_str = str(week_start)
+        else:
+            week_start_str = week_start
+        
+        if week_start_str == str(week_start_date):
+            schedule = WeeklySchedule(**s)
+            break
+    
     if not schedule:
-        schedule = WeeklySchedule(
-            id=str(uuid.uuid4()),
-            week_start_date=week_start_date
-        )
+        raise HTTPException(status_code=404, detail="Schedule not found")
     
     schedule.shifts = shifts
     # Recalculate total hours
@@ -767,7 +1544,15 @@ async def update_schedule_shifts(
     schedule.total_hours = total_hours
     schedule.updated_at = datetime.now()
     
-    return save_schedule(schedule)
+    # Update staging layer first (fast)
+    schedules = staging_store.get_schedules()
+    schedules = [s if s['id'] != schedule.id else schedule.model_dump() for s in schedules]
+    staging_store.set_schedules(schedules, user_id=user.get('employee_id'))
+    
+    # Add to action queue for Excel sync (async, no blocking)
+    # No action queue needed - GitHub JSON is single source of truth
+    
+    return schedule
 
 @app.put("/api/schedules/{week_start_date}/shifts/{shift_id}/break")
 async def mark_break_provided(
@@ -777,7 +1562,21 @@ async def mark_break_provided(
     user: Dict = Depends(require_manager)
 ):
     """Mark a shift's break as provided (managers only)"""
-    schedule = get_schedule_by_week(week_start_date)
+    # Try staging first for speed
+    staging_schedules = staging_store.get_schedules()
+    schedule = None
+    for s in staging_schedules:
+        # Handle both string and date objects
+        week_start = s.get('week_start_date')
+        if isinstance(week_start, date):
+            week_start_str = str(week_start)
+        else:
+            week_start_str = week_start
+        
+        if week_start_str == str(week_start_date):
+            schedule = WeeklySchedule(**s)
+            break
+    
     if not schedule:
         raise HTTPException(status_code=404, detail="Schedule not found")
     
@@ -788,7 +1587,15 @@ async def mark_break_provided(
     shift.break_provided = break_provided
     schedule.updated_at = datetime.now()
     
-    return save_schedule(schedule)
+    # Update staging layer first (fast)
+    schedules = staging_store.get_schedules()
+    schedules = [s if s['id'] != schedule.id else schedule.model_dump() for s in schedules]
+    staging_store.set_schedules(schedules, user_id=user.get('employee_id'))
+    
+    # Add to action queue for Excel sync (async, no blocking)
+    # No action queue needed - GitHub JSON is single source of truth
+    
+    return schedule
 
 @app.post("/api/schedules/{week_start_date}/publish")
 async def publish_schedule(
@@ -796,11 +1603,33 @@ async def publish_schedule(
     user: Dict = Depends(require_manager)
 ):
     """Publish a schedule (finalize it) (managers only)"""
-    schedule = get_schedule_by_week(week_start_date)
+    # Try staging first for speed
+    staging_schedules = staging_store.get_schedules()
+    schedule = None
+    for s in staging_schedules:
+        # Handle both string and date objects
+        week_start = s.get('week_start_date')
+        if isinstance(week_start, date):
+            week_start_str = str(week_start)
+        else:
+            week_start_str = week_start
+        
+        if week_start_str == str(week_start_date):
+            schedule = WeeklySchedule(**s)
+            break
+    
     if not schedule:
         raise HTTPException(status_code=404, detail="Schedule not found")
     schedule.status = "published"
-    save_schedule(schedule)
+    
+    # Update staging layer first (fast)
+    schedules = staging_store.get_schedules()
+    schedules = [s if s['id'] != schedule.id else schedule.model_dump() for s in schedules]
+    staging_store.set_schedules(schedules, user_id=user.get('employee_id'))
+    
+    # Add to action queue for Excel sync (async, no blocking)
+    # No action queue needed - GitHub JSON is single source of truth
+    
     return {"message": "Schedule published"}
 
 @app.delete("/api/schedules/{week_start_date}")
@@ -809,8 +1638,16 @@ async def remove_schedule(
     user: Dict = Depends(require_manager)
 ):
     """Delete a schedule (managers only)"""
-    if delete_schedule(week_start_date):
+    # Update staging layer first (fast)
+    staging_schedules = staging_store.get_schedules()
+    initial_count = len(staging_schedules)
+    staging_schedules = [s for s in staging_schedules if str(s.get('week_start_date')) != str(week_start_date)]
+    
+    if len(staging_schedules) < initial_count:
+        # Schedule was in staging, update staging
+        staging_store.set_schedules(staging_schedules, user_id=user.get('employee_id'))
         return {"message": "Schedule deleted"}
+    
     raise HTTPException(status_code=404, detail="Schedule not found")
 
 @app.get("/api/schedules/weeks/available")
@@ -828,15 +1665,39 @@ async def clear_schedule_shifts(
     user: Dict = Depends(require_manager)
 ):
     """Clear all shifts from a schedule while preserving events (managers only)"""
-    schedule = get_schedule_by_week(week_start_date)
+    # Try to read from staging first
+    staging_schedules = staging_store.get_schedules()
+    schedule = None
+    for s in staging_schedules:
+        # Handle both string and date objects
+        week_start = s.get('week_start_date')
+        if isinstance(week_start, date):
+            week_start_str = str(week_start)
+        else:
+            week_start_str = week_start
+        
+        if week_start_str == str(week_start_date):
+            schedule = WeeklySchedule(**s)
+            break
+    
     if not schedule:
         raise HTTPException(status_code=404, detail="Schedule not found")
     
-    # Clear all shifts and reset total hours
+    # Clear all shifts - approved/pending availability markers are derived from requests
     schedule.shifts = []
     schedule.total_hours = {}
-    save_schedule(schedule)
-    return {"message": "Schedule cleared"}
+    
+    # Force cache invalidation to ensure fresh data
+    import cache_manager
+    cache_manager.clear_cache()
+    
+    # Update staging layer
+    schedules = staging_store.get_schedules()
+    schedules = [s for s in schedules if str(s.get('week_start_date')) != str(week_start_date)]
+    schedules.append(schedule.model_dump())
+    staging_store.set_schedules(schedules, user_id=user.get('employee_id'))
+    
+    return schedule
 
 # ============ Floor Coverage & Queries ============
 
@@ -881,8 +1742,18 @@ async def get_employee_hours_summary(
     user: Dict = Depends(require_manager)
 ):
     """Get hours summary for all employees for a week (managers only)"""
-    schedule = get_schedule_by_week(week_start_date)
-    employees = get_all_employees()
+    staging_schedules = staging_store.get_schedules()
+    schedule = None
+    for s in staging_schedules:
+        if s.get('week_start_date') == str(week_start_date):
+            schedule = WeeklySchedule(**s)
+            break
+    
+    if not schedule:
+        raise HTTPException(status_code=404, detail="Schedule not found")
+    
+    employees_dicts = staging_store.get_employees()
+    employees = [Employee(**e) for e in employees_dicts]
     
     summary = []
     for emp in employees:
@@ -905,12 +1776,21 @@ async def get_employee_hours_summary(
 @app.get("/api/config")
 async def get_config():
     """Get system configuration"""
-    return get_system_config()
+    # Try to read from staging first
+    return staging_store.get_system_config()
 
 @app.put("/api/config")
 async def update_config(config: Dict):
     """Update system configuration"""
-    return save_system_config(config)
+    result = save_system_config(config)
+    
+    # Update staging layer
+    staging_store.set_system_config(result.model_dump(), user_id="system")
+    
+    # Add to action queue for Excel sync
+    # No action queue needed - GitHub JSON is single source of truth
+    
+    return result
 
 @app.get("/api/staffing-targets")
 async def get_staffing_targets():
@@ -947,7 +1827,16 @@ async def update_staffing_targets(targets: Dict[str, int], user: Dict = Depends(
         cleaned_targets[normalized_key] = value
     
     config.staffing_targets = cleaned_targets
-    return save_system_config(config)
+    result = save_system_config(config)
+    
+    if result:
+        # Update staging layer
+        staging_store.set_system_config(result.model_dump(), user_id="system")
+        
+        # Add to action queue for Excel sync
+        # No action queue needed - GitHub JSON is single source of truth
+    
+    return result
 
 # ============ Availability Requests ============
 
@@ -958,7 +1847,15 @@ async def get_all_availability_requests(authorization: str = Header(None)):
     if not user or user.get('role') not in ['manager', 'admin']:
         raise HTTPException(status_code=403, detail="Manager access required")
     
-    return get_availability_requests()
+    # Read from GitHub JSON (single source of truth)
+    staging_requests = staging_store.get_availability_requests()
+    # Add employee names to requests
+    all_employees_dicts = staging_store.get_employees()
+    all_employees = [Employee(**e) for e in all_employees_dicts]
+    employee_map = {e.id: e.name for e in all_employees}
+    for request in staging_requests:
+        request['employee_name'] = employee_map.get(request.get('employee_id'), 'Unknown')
+    return staging_requests
 
 @app.get("/api/availability-requests/my")
 async def get_my_availability_requests(authorization: str = Header(None)):
@@ -967,8 +1864,9 @@ async def get_my_availability_requests(authorization: str = Header(None)):
     if not user:
         raise HTTPException(status_code=401, detail="Unauthorized")
     
-    all_requests = get_availability_requests()
-    my_requests = [r for r in all_requests if r.get('employee_id') == user.get('employee_id')]
+    # Read from GitHub JSON (single source of truth)
+    staging_requests = staging_store.get_availability_requests()
+    my_requests = [r for r in staging_requests if r.get('employee_id') == user.get('employee_id')]
     return my_requests
 
 @app.post("/api/availability-requests")
@@ -984,32 +1882,186 @@ async def create_availability_request(request: Dict, authorization: str = Header
         request['status'] = AvailabilityRequestStatus.PENDING
         request['created_at'] = datetime.now()
 
-        save_result = save_availability_request(request)
-        print(f"[API] save_availability_request returned: {save_result}")
+        # Update staging layer first (fast)
+        requests = staging_store.get_availability_requests()
+        requests.append(request)
+        staging_store.set_availability_requests(requests, user_id=user.get('employee_id'))
+        
+        # Add to action queue for Excel sync (async, no blocking)
+        # No action queue needed - GitHub JSON is single source of truth
 
-        if save_result:
-            # Ensure response is JSON-serializable
-            try:
-                response = dict(request)  # Create a proper dict copy
-                if isinstance(response.get('created_at'), datetime):
-                    response['created_at'] = response['created_at'].isoformat()
-                if isinstance(response.get('updated_at'), datetime):
-                    response['updated_at'] = response['updated_at'].isoformat()
-                if isinstance(response.get('approved_at'), datetime):
-                    response['approved_at'] = response['approved_at'].isoformat()
-                print(f"[API] Returning response with keys: {list(response.keys())}")
-                return response
-            except Exception as e:
-                import traceback
-                print(f"[API] Error serializing response: {e}")
-                traceback.print_exc()
-                # Return a minimal response if serialization fails
-                return {
-                    'id': request.get('id'),
-                    'status': str(request.get('status')),
-                    'employee_id': request.get('employee_id')
+        # Create locked shifts for pending availability request
+        try:
+            request_type = request.get('request_type', 'availability')
+            start_date_str = request.get('start_date', request.get('week_start_date', ''))
+            end_date_str = request.get('end_date', start_date_str)
+            days_of_week = request.get('days_of_week', [])
+            employee_id = request.get('employee_id')
+            
+            if start_date_str and end_date_str and days_of_week:
+                try:
+                    start_date = date.fromisoformat(str(start_date_str)[:10])
+                    end_date = date.fromisoformat(str(end_date_str)[:10])
+                    day_map = {0: 'monday', 1: 'tuesday', 2: 'wednesday', 3: 'thursday', 4: 'friday', 5: 'saturday', 6: 'sunday'}
+                    
+                    # Process each week in the date range
+                    current_week_start = start_date - timedelta(days=start_date.weekday())
+                    while current_week_start <= end_date:
+                        week_end = current_week_start + timedelta(days=6)
+                        
+                        # Get or create schedule for this week
+                        staging_schedules = staging_store.get_schedules()
+                        schedule = None
+                        for s in staging_schedules:
+                            week_start = s.get('week_start_date')
+                            if isinstance(week_start, date):
+                                week_start_str = str(week_start)
+                            else:
+                                week_start_str = week_start
+                            if week_start_str == str(current_week_start):
+                                schedule = WeeklySchedule(**s)
+                                break
+                        
+                        if not schedule:
+                            # Create new schedule
+                            schedule = WeeklySchedule(
+                                id=f"schedule_{current_week_start.isoformat()}",
+                                week_start_date=current_week_start,
+                                shifts=[],
+                                total_hours={},
+                                created_by=user.get('employee_id')
+                            )
+                        
+                        # Create locked shifts for each matching day in this week
+                        current_date = max(current_week_start, start_date)
+                        while current_date <= min(week_end, end_date):
+                            day_name = day_map[current_date.weekday()]
+                            if day_name in days_of_week:
+                                # Check if a locked shift already exists for this employee/day
+                                existing_locked = next(
+                                    (s for s in schedule.shifts 
+                                     if s.employee_id == employee_id and s.day_of_week == day_name and s.locked),
+                                    None
+                                )
+                                
+                                if not existing_locked:
+                                    # Create locked shift
+                                    if request_type == 'day_off':
+                                        shift_start = '00:00'
+                                        shift_end = '23:59'
+                                        shift_location = 'day off'
+                                        shift_hours = 0
+                                        locked_type = 'Day Off'
+                                    else:
+                                        shift_start = request.get('start_time', '00:00')
+                                        shift_end = request.get('end_time', '23:59')
+                                        shift_location = None  # Placeholder, manager will assign
+                                        shift_hours = 0  # Don't count toward total
+                                        locked_type = request_type.capitalize()
+                                    
+                                    locked_shift = Shift(
+                                        id=f"pending_{request['id']}_{day_name}_{employee_id}",
+                                        employee_id=employee_id,
+                                        day_of_week=day_name,
+                                        start_time=shift_start,
+                                        end_time=shift_end,
+                                        job_type=JobType.IBU_OPS,  # Placeholder
+                                        location=shift_location,
+                                        hours=shift_hours,
+                                        locked=True,
+                                        locked_availability_type=locked_type,
+                                        is_event=False
+                                    )
+                                    schedule.shifts.append(locked_shift)
+                                    print(f"[CREATION] Created pending locked shift for {employee_id} on {day_name}")
+                            
+                            current_date += timedelta(days=1)
+                        
+                        # Save the updated schedule
+                        staging_schedules = [s for s in staging_schedules if str(s.get('week_start_date')) != str(current_week_start)]
+                        staging_schedules.append(schedule.model_dump())
+                        staging_store.set_schedules(staging_schedules, user_id=user.get('employee_id'))
+                        
+                        current_week_start += timedelta(days=7)
+                        
+                except Exception as e:
+                    print(f"[CREATION] Warning: could not create pending locked shifts: {e}")
+                    import traceback
+                    traceback.print_exc()
+        except Exception as e:
+            print(f"[CREATION] Warning: error in pending locked shift creation: {e}")
+            import traceback
+            traceback.print_exc()
+        
+        # Send notification to managers
+        try:
+            employee_dict = staging_store.get_employee_by_id(user['employee_id'])
+            employee = Employee(**employee_dict) if employee_dict else None
+            employee_name = employee.name if employee else user['employee_id']
+            
+            request_type = request.get('request_type', 'availability')
+            days_str = ', '.join(request.get('days_of_week', [])) if request.get('days_of_week') else 'All days'
+            time_str = f"{request.get('start_time', '00:00')} - {request.get('end_time', '23:59')}" if request.get('start_time') else 'All day'
+            
+            # Get all managers
+            all_employees_dicts = staging_store.get_employees()
+            all_employees = [Employee(**e) for e in all_employees_dicts]
+            managers = [e for e in all_employees if e.employee_type in ['manager', 'admin']]
+            
+            # Create all notifications first, then save once to avoid duplicates
+            notifications = staging_store.get_notifications()
+            for manager in managers:
+                notification = {
+                    'id': str(uuid.uuid4()),
+                    'employee_id': manager.id,
+                    'type': NotificationType.AVAILABILITY_REQUEST,
+                    'message': f"{employee_name} submitted a {request_type} request for {days_str} ({time_str})",
+                    'details': {
+                        'request_id': request['id'],
+                        'employee_id': user['employee_id'],
+                        'employee_name': employee_name,
+                        'request_type': request_type,
+                        'days_of_week': days_str,
+                        'time_range': time_str,
+                        'start_date': request.get('start_date'),
+                        'end_date': request.get('end_date'),
+                        'employee_comment': request.get('employee_comment', '')
+                    },
+                    'created_at': datetime.now(),
+                    'read': False
                 }
-        raise HTTPException(status_code=500, detail="Failed to save request")
+                notifications.append(notification)
+            
+            # Save all notifications at once to avoid duplicate writes
+            staging_store.set_notifications(notifications, user_id=user.get('employee_id'))
+            print(f"[API] Created {len(managers)} manager notifications for request {request['id']}")
+                
+        except Exception as e:
+            print(f"[API] Warning: could not send manager notification: {e}")
+            import traceback
+            traceback.print_exc()
+        
+        # Ensure response is JSON-serializable
+        try:
+            response = dict(request)  # Create a proper dict copy
+            if isinstance(response.get('created_at'), datetime):
+                response['created_at'] = response['created_at'].isoformat()
+            if isinstance(response.get('updated_at'), datetime):
+                response['updated_at'] = response['updated_at'].isoformat()
+            if isinstance(response.get('approved_at'), datetime):
+                response['approved_at'] = response['approved_at'].isoformat()
+            print(f"[API] Returning response with keys: {list(response.keys())}")
+            return response
+        except Exception as e:
+            import traceback
+            print(f"[API] Error serializing response: {e}")
+            traceback.print_exc()
+            # Return a minimal response if serialization fails
+            return {
+                'id': request.get('id'),
+                'status': str(request.get('status')),
+                'employee_id': request.get('employee_id')
+            }
     except HTTPException:
         raise
     except Exception as e:
@@ -1026,101 +2078,185 @@ async def approve_availability_request(request_id: str, body: Dict = {}, authori
         if not user or user.get('role') not in ['manager', 'admin']:
             raise HTTPException(status_code=403, detail="Manager access required")
 
-        requests = get_availability_requests()
+        # Read from GitHub JSON (single source of truth)
+        staging_requests = staging_store.get_availability_requests()
+        requests = staging_requests
+        
         request_data = next((r for r in requests if r['id'] == request_id), None)
 
         if not request_data:
             raise HTTPException(status_code=404, detail="Request not found")
 
+        # Update status to APPROVED immediately
         request_data['status'] = AvailabilityRequestStatus.APPROVED
         request_data['manager_comment'] = body.get('comment')
         request_data['updated_at'] = datetime.now()
         request_data['approved_by'] = user.get('employee_id')
         request_data['approved_at'] = datetime.now()
 
-        if not save_availability_request(request_data):
-            raise HTTPException(status_code=500, detail="Failed to save request to Excel")
+        # Update staging layer first (fast)
+        requests = staging_store.get_availability_requests()
+        requests = [r if r['id'] != request_id else request_data for r in requests]
+        staging_store.set_availability_requests(requests, user_id=user.get('employee_id'))
+        
+        # Add to action queue for Excel sync (async, no blocking)
+        # No action queue needed - GitHub JSON is single source of truth
 
-        # Add locked shifts for each day in the date range
+        # Update pending locked shifts to approved locked shifts
         try:
-            from datetime import timedelta
-
-            # Support both old and new model
-            start_date = date.fromisoformat(str(request_data.get('start_date', request_data.get('week_start_date')))[:10])
-            end_date = date.fromisoformat(str(request_data.get('end_date', request_data.get('week_start_date')))[:10])
-            days_of_week = request_data.get('days_of_week', [request_data.get('day_of_week', '')])
+            start_date_str = request_data.get('start_date', request_data.get('week_start_date', ''))
+            end_date_str = request_data.get('end_date', start_date_str)
+            days_of_week = request_data.get('days_of_week', [])
+            employee_id = request_data.get('employee_id')
             request_type = request_data.get('request_type', 'availability')
-
-            # Determine time range
-            if request_type == 'day_off':
-                start_t, end_t = '00:00', '23:59'
-                avail_label = 'Day Off'
-                color = '#000000'  # Black for day-offs
-            else:
-                start_t = request_data.get('start_time', '00:00')
-                end_t = request_data.get('end_time', '23:59')
-                avail_label = f"{start_t} - {end_t}"
-                color = '#D1D5DB'
-
-            # Create locked shifts for each date in range
-            # Use the actual date's day of week, not the days_of_week array
-            current_date = start_date
-            day_map = {0: 'monday', 1: 'tuesday', 2: 'wednesday', 3: 'thursday', 4: 'friday', 5: 'saturday', 6: 'sunday'}
-
-            while current_date <= end_date:
-                day_name = day_map[current_date.weekday()]
-                # Get or create schedule for this week
-                week_start = current_date - timedelta(days=current_date.weekday())
-                schedule = get_schedule_by_week(week_start)
-                if not schedule:
-                    schedule = WeeklySchedule(
-                        id=f"sched_{week_start.isoformat()}",
-                        week_start_date=week_start
-                    )
-
-                # Calculate hours (0 for day off, calculated for regular shifts)
-                if request_type == 'day_off':
-                    hours = 0.0
-                else:
-                    start_h, start_m = map(int, start_t.split(':'))
-                    end_h, end_m = map(int, end_t.split(':'))
-                    hours = (end_h + end_m / 60) - (start_h + start_m / 60)
-                    if hours < 0:
-                        hours += 24
-
-                locked_shift = Shift(
-                    id=f"locked_{request_data['id']}_{current_date.isoformat()}",
-                    employee_id=request_data['employee_id'],
-                    day_of_week=day_name,
-                    start_time=start_t,
-                    end_time=end_t,
-                    job_type=JobType.DESK,
-                    hours=hours,
-                    locked=True,
-                    locked_availability_type=avail_label,
-                    color=color,
-                    location='day off' if request_type == 'day_off' else None,
-                    comment=request_data.get('employee_comment', ''),
-                    preferences=request_data.get('preferences')
-                )
-
-                # Remove any previous locked shift for same employee/day
-                schedule.shifts = [s for s in schedule.shifts if not (
-                    getattr(s, 'locked', False) and
-                    s.employee_id == request_data['employee_id'] and
-                    s.day_of_week == day_name
-                )]
-                schedule.shifts.append(locked_shift)
-                save_schedule(schedule)
-
-                current_date += timedelta(days=1)
+            
+            if start_date_str and end_date_str and days_of_week:
+                try:
+                    start_date = date.fromisoformat(str(start_date_str)[:10])
+                    end_date = date.fromisoformat(str(end_date_str)[:10])
+                    day_map = {0: 'monday', 1: 'tuesday', 2: 'wednesday', 3: 'thursday', 4: 'friday', 5: 'saturday', 6: 'sunday'}
+                    
+                    # Process each week in the date range
+                    current_week_start = start_date - timedelta(days=start_date.weekday())
+                    while current_week_start <= end_date:
+                        # Get schedule for this week
+                        staging_schedules = staging_store.get_schedules()
+                        schedule = None
+                        for s in staging_schedules:
+                            week_start = s.get('week_start_date')
+                            if isinstance(week_start, date):
+                                week_start_str = str(week_start)
+                            else:
+                                week_start_str = week_start
+                            if week_start_str == str(current_week_start):
+                                schedule = WeeklySchedule(**s)
+                                break
+                        
+                        if not schedule:
+                            # Create new empty schedule for this week
+                            schedule = WeeklySchedule(
+                                id=f"schedule_{current_week_start.isoformat()}",
+                                week_start_date=current_week_start,
+                                shifts=[],
+                                total_hours={},
+                                created_by=user.get('employee_id')
+                            )
+                        
+                        if schedule:
+                            request_type = request_data.get('request_type', 'availability')
+                            
+                            # Convert pending locked shifts to approved, or create new approved shifts if none exist
+                            updated_shifts = []
+                            converted_days = set()
+                            for shift in schedule.shifts:
+                                if shift.id.startswith(f"pending_{request_id}_"):
+                                    # Convert to approved locked shift
+                                    updated_shift = Shift(
+                                        id=shift.id.replace(f"pending_{request_id}_", f"locked_{request_id}_"),
+                                        employee_id=shift.employee_id,
+                                        day_of_week=shift.day_of_week,
+                                        start_time=shift.start_time,
+                                        end_time=shift.end_time,
+                                        job_type=shift.job_type,
+                                        location=shift.location,
+                                        hours=shift.hours,
+                                        locked=True,
+                                        locked_availability_type=shift.locked_availability_type,
+                                        is_event=shift.is_event
+                                    )
+                                    updated_shifts.append(updated_shift)
+                                    converted_days.add(shift.day_of_week)
+                                    print(f"[APPROVAL] Converted pending locked shift to approved for {employee_id} on {shift.day_of_week}")
+                                else:
+                                    updated_shifts.append(shift)
+                            
+                            schedule.shifts = updated_shifts
+                            
+                            # If no pending shifts were converted, create new locked shifts directly
+                            week_end = current_week_start + timedelta(days=6)
+                            current_date = max(current_week_start, start_date)
+                            while current_date <= min(week_end, end_date):
+                                day_name = day_map[current_date.weekday()]
+                                if day_name in days_of_week and day_name not in converted_days:
+                                    # Check if a locked shift already exists for this employee/day
+                                    existing_locked = next(
+                                        (s for s in schedule.shifts 
+                                         if s.employee_id == employee_id and s.day_of_week == day_name and s.locked),
+                                        None
+                                    )
+                                    if not existing_locked:
+                                        if request_type == 'day_off':
+                                            shift_start = '00:00'
+                                            shift_end = '23:59'
+                                            shift_location = 'day off'
+                                            shift_hours = 0
+                                            locked_type = 'Day Off'
+                                        else:
+                                            shift_start = request_data.get('start_time', '00:00')
+                                            shift_end = request_data.get('end_time', '23:59')
+                                            shift_location = None
+                                            shift_hours = 0
+                                            locked_type = request_type.capitalize()
+                                        
+                                        locked_shift = Shift(
+                                            id=f"locked_{request_id}_{day_name}_{employee_id}",
+                                            employee_id=employee_id,
+                                            day_of_week=day_name,
+                                            start_time=shift_start,
+                                            end_time=shift_end,
+                                            job_type=JobType.IBU_OPS,
+                                            location=shift_location,
+                                            hours=shift_hours,
+                                            locked=True,
+                                            locked_availability_type=locked_type,
+                                            is_event=False
+                                        )
+                                        schedule.shifts.append(locked_shift)
+                                        print(f"[APPROVAL] Created locked shift directly for {employee_id} on {day_name}")
+                                current_date += timedelta(days=1)
+                            
+                            # Save the updated schedule
+                            staging_schedules = [s for s in staging_schedules if str(s.get('week_start_date')) != str(current_week_start)]
+                            staging_schedules.append(schedule.model_dump())
+                            staging_store.set_schedules(staging_schedules, user_id=user.get('employee_id'))
+                        
+                        current_week_start += timedelta(days=7)
+                        
+                except Exception as e:
+                    print(f"[APPROVAL] Warning: could not update pending locked shifts: {e}")
+                    import traceback
+                    traceback.print_exc()
         except Exception as e:
+            print(f"[APPROVAL] Warning: error in pending locked shift update: {e}")
             import traceback
-            print(f"[API] Warning: could not add locked shift: {e}")
             traceback.print_exc()
+
+        # Remove manager notifications for this request after approval
+        try:
+            notifications = staging_store.get_notifications()
+            cleaned = [
+                n for n in notifications
+                if not (
+                    n.get('type') == NotificationType.AVAILABILITY_REQUEST and
+                    n.get('details', {}).get('request_id') == request_id
+                )
+            ]
+            if len(cleaned) < len(notifications):
+                staging_store.set_notifications(cleaned, user_id=user.get('employee_id'))
+        except Exception as e:
+            print(f"[APPROVAL] Warning: could not clean up manager notifications: {e}")
 
         # Send notification to employee
         try:
+            employee_dict = staging_store.get_employee_by_id(request_data['employee_id'])
+            employee = Employee(**employee_dict) if employee_dict else None
+            employee_name = employee.name if employee else request_data['employee_id']
+            
+            # Support both old and new model for notification message
+            request_type = request_data.get('request_type', 'availability')
+            start_date = request_data.get('start_date', request_data.get('week_start_date', ''))
+            end_date = request_data.get('end_date', start_date)
+            
             comment_part = f" Manager note: {body.get('comment')}" if body.get('comment') else ""
             days_str = ', '.join(request_data.get('days_of_week', [])) if request_data.get('days_of_week') else 'All days'
             time_str = f"{request_data.get('start_time', '00:00')} - {request_data.get('end_time', '23:59')}" if request_data.get('start_time') else 'All day'
@@ -1140,7 +2276,13 @@ async def approve_availability_request(request_id: str, body: Dict = {}, authori
                 'created_at': datetime.now(),
                 'read': False
             }
-            save_notification(notification)
+            # Update staging layer
+            notifications = staging_store.get_notifications()
+            notifications.append(notification)
+            staging_store.set_notifications(notifications, user_id=user.get('employee_id'))
+            
+            # Add to action queue for Excel sync (async, no blocking)
+            # No action queue needed - GitHub JSON is single source of truth
         except Exception as e:
             import traceback
             print(f"[API] Warning: could not send notification: {e}")
@@ -1172,7 +2314,10 @@ async def reject_availability_request(request_id: str, body: Dict = {}, authoriz
         if not user or user.get('role') not in ['manager', 'admin']:
             raise HTTPException(status_code=403, detail="Manager access required")
 
-        requests = get_availability_requests()
+        # Read from GitHub JSON (single source of truth)
+        staging_requests = staging_store.get_availability_requests()
+        requests = staging_requests
+        
         request_data = next((r for r in requests if r['id'] == request_id), None)
 
         if not request_data:
@@ -1182,8 +2327,85 @@ async def reject_availability_request(request_id: str, body: Dict = {}, authoriz
         request_data['manager_comment'] = body.get('comment', '')
         request_data['updated_at'] = datetime.now()
 
-        if not save_availability_request(request_data):
-            raise HTTPException(status_code=500, detail="Failed to save request to Excel")
+        # Update staging layer first (fast)
+        requests = staging_store.get_availability_requests()
+        requests = [r if r['id'] != request_id else request_data for r in requests]
+        staging_store.set_availability_requests(requests, user_id=user.get('employee_id'))
+
+        # Remove locked shifts for this request (cleanup if it was previously approved)
+        try:
+            start_date_str = request_data.get('start_date', request_data.get('week_start_date', ''))
+            end_date_str = request_data.get('end_date', start_date_str)
+            days_of_week = request_data.get('days_of_week', [])
+            employee_id = request_data.get('employee_id')
+            
+            if start_date_str and end_date_str and days_of_week:
+                try:
+                    start_date = date.fromisoformat(str(start_date_str)[:10])
+                    end_date = date.fromisoformat(str(end_date_str)[:10])
+                    day_map = {0: 'monday', 1: 'tuesday', 2: 'wednesday', 3: 'thursday', 4: 'friday', 5: 'saturday', 6: 'sunday'}
+                    
+                    # Process each week in the date range
+                    current_week_start = start_date - timedelta(days=start_date.weekday())
+                    while current_week_start <= end_date:
+                        # Get schedule for this week
+                        staging_schedules = staging_store.get_schedules()
+                        schedule = None
+                        for s in staging_schedules:
+                            week_start = s.get('week_start_date')
+                            if isinstance(week_start, date):
+                                week_start_str = str(week_start)
+                            else:
+                                week_start_str = week_start
+                            if week_start_str == str(current_week_start):
+                                schedule = WeeklySchedule(**s)
+                                break
+                        
+                        if schedule:
+                            # Remove locked shifts for this request (both pending and approved)
+                            original_count = len(schedule.shifts)
+                            schedule.shifts = [
+                                s for s in schedule.shifts
+                                if not (s.locked and (s.id.startswith(f"locked_{request_id}_") or s.id.startswith(f"pending_{request_id}_")))
+                            ]
+                            removed_count = original_count - len(schedule.shifts)
+                            
+                            if removed_count > 0:
+                                # Save the updated schedule
+                                staging_schedules = [s for s in staging_schedules if str(s.get('week_start_date')) != str(current_week_start)]
+                                staging_schedules.append(schedule.model_dump())
+                                staging_store.set_schedules(staging_schedules, user_id=user.get('employee_id'))
+                                print(f"[REJECTION] Removed {removed_count} locked shifts for request {request_id}")
+                        
+                        current_week_start += timedelta(days=7)
+                        
+                except Exception as e:
+                    print(f"[REJECTION] Warning: could not remove locked shifts: {e}")
+                    import traceback
+                    traceback.print_exc()
+        except Exception as e:
+            print(f"[REJECTION] Warning: error in locked shift removal: {e}")
+            import traceback
+            traceback.print_exc()
+
+        # Remove manager notifications for this request after rejection
+        try:
+            notifications = staging_store.get_notifications()
+            cleaned = [
+                n for n in notifications
+                if not (
+                    n.get('type') == NotificationType.AVAILABILITY_REQUEST and
+                    n.get('details', {}).get('request_id') == request_id
+                )
+            ]
+            if len(cleaned) < len(notifications):
+                staging_store.set_notifications(cleaned, user_id=user.get('employee_id'))
+                print(f"[REJECTION] Removed {len(notifications) - len(cleaned)} manager notifications for request {request_id}")
+        except Exception as e:
+            print(f"[REJECTION] Warning: could not clean up manager notifications: {e}")
+
+        # Add to action queue for Excel sync (async, no blocking)
+        # No action queue needed - GitHub JSON is single source of truth
 
         # Support both old and new model for notification message
         request_type = request_data.get('request_type', 'availability')
@@ -1209,7 +2431,13 @@ async def reject_availability_request(request_id: str, body: Dict = {}, authoriz
                 'created_at': datetime.now(),
                 'read': False
             }
-            save_notification(notification)
+            # Update staging layer
+            notifications = staging_store.get_notifications()
+            notifications.append(notification)
+            staging_store.set_notifications(notifications, user_id=user.get('employee_id'))
+            
+            # Add to action queue for Excel sync (async, no blocking)
+            # No action queue needed - GitHub JSON is single source of truth
         except Exception as e:
             import traceback
             print(f"[API] Warning: could not send notification: {e}")
@@ -1242,7 +2470,24 @@ async def get_employee_notifications(authorization: str = Header(None)):
     if not user:
         raise HTTPException(status_code=401, detail="Unauthorized")
     
-    return get_notifications(user['employee_id'])
+    # Read from GitHub JSON (single source of truth)
+    staging_notifications = staging_store.get_notifications()
+    user_notifications = [n for n in staging_notifications if n.get('employee_id') == user['employee_id']]
+    return user_notifications
+
+
+@app.get("/api/sync-status/{request_id}")
+async def get_request_sync_status(request_id: str, authorization: str = Header(None)):
+    """Get the sync status for a specific request"""
+    user = AuthManager.get_current_user(authorization)
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    
+    status = get_sync_status(request_id)
+    if status:
+        return {"request_id": request_id, "status": status}
+    else:
+        return {"request_id": request_id, "status": "unknown"}
 
 @app.put("/api/notifications/{notification_id}/read")
 async def mark_notification_as_read(notification_id: str, authorization: str = Header(None)):
@@ -1251,10 +2496,88 @@ async def mark_notification_as_read(notification_id: str, authorization: str = H
     if not user:
         raise HTTPException(status_code=401, detail="Unauthorized")
     
-    if mark_notification_read(notification_id):
+    # Update staging layer
+    notifications = staging_store.get_notifications()
+    notification_found = False
+    for notif in notifications:
+        if notif.get('id') == notification_id:
+            notif['read'] = True
+            notification_found = True
+            break
+    
+    if notification_found:
+        staging_store.set_notifications(notifications, user_id=user.get('employee_id'))
+        # Add to action queue for Excel sync
+        # No action queue needed - GitHub JSON is single source of truth
         return {"success": True}
     
-    raise HTTPException(status_code=500, detail="Failed to mark notification as read")
+    raise HTTPException(status_code=404, detail="Notification not found")
+
+@app.put("/api/notifications/read-all")
+async def mark_all_notifications_as_read(authorization: str = Header(None)):
+    """Mark all notifications as read for the current user"""
+    user = AuthManager.get_current_user(authorization)
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    
+    # Update staging layer
+    notifications = staging_store.get_notifications()
+    updated_count = 0
+    for notif in notifications:
+        if notif.get('employee_id') == user.get('employee_id') and not notif.get('read'):
+            notif['read'] = True
+            updated_count += 1
+    
+    if updated_count > 0:
+        staging_store.set_notifications(notifications, user_id=user.get('employee_id'))
+        # Add to action queue for Excel sync
+        # No action queue needed - GitHub JSON is single source of truth
+    
+    return {"success": True, "updated_count": updated_count}
+
+@app.post("/api/notifications/cleanup-processed")
+async def cleanup_processed_notifications(authorization: str = Header(None)):
+    """Remove AVAILABILITY_REQUEST notifications for requests that are already approved or rejected"""
+    user = AuthManager.get_current_user(authorization)
+    if not user or user.get('role') not in ['manager', 'admin']:
+        raise HTTPException(status_code=403, detail="Manager access required")
+    
+    try:
+        from datetime import timedelta
+        
+        # Get all requests to check their status
+        requests = staging_store.get_availability_requests()
+        processed_request_ids = {
+            r['id'] for r in requests 
+            if r.get('status') in ['approved', 'rejected', AvailabilityRequestStatus.APPROVED, AvailabilityRequestStatus.REJECTED]
+        }
+        
+        # Get all notifications
+        notifications = staging_store.get_notifications()
+        
+        # Remove AVAILABILITY_REQUEST notifications for processed requests OR older than 7 days
+        cutoff_date = datetime.now() - timedelta(days=7)
+        cleaned = [
+            n for n in notifications
+            if not (
+                n.get('type') == NotificationType.AVAILABILITY_REQUEST and
+                (
+                    n.get('details', {}).get('request_id') in processed_request_ids or
+                    (isinstance(n.get('created_at'), datetime) and n.get('created_at') < cutoff_date)
+                )
+            )
+        ]
+        
+        removed_count = len(notifications) - len(cleaned)
+        
+        if removed_count > 0:
+            staging_store.set_notifications(cleaned, user_id=user.get('employee_id'))
+            print(f"[CLEANUP] Removed {removed_count} processed/old request notifications")
+        
+        return {"success": True, "removed_count": removed_count}
+    except Exception as e:
+        print(f"[CLEANUP] Error: {e}")
+        raise HTTPException(status_code=500, detail=f"Error cleaning up notifications: {str(e)}")
 
 # ============ Events ============
 
@@ -1262,7 +2585,11 @@ async def mark_notification_as_read(notification_id: str, authorization: str = H
 async def get_week_events():
     """Get all events"""
     try:
-        events = get_events()
+        # Read from GitHub JSON (single source of truth)
+        config = staging_store.get_system_config()
+        staging_events = config.get('events', [])
+        events = [Event(**e) for e in staging_events]
+        
         # Convert to dict with string dates
         return [
             {
@@ -1310,8 +2637,20 @@ async def create_event(event_data: dict, authorization: str = Header(None)):
     
     # Create Event object
     event = Event(**event_data)
+    result = save_event(event)
     
-    return save_event(event)
+    # Update staging layer
+    # Events are stored in system config
+    config = staging_store.get_system_config()
+    if 'events' not in config:
+        config['events'] = []
+    config['events'].append(result.model_dump())
+    staging_store.set_system_config(config, user_id=user.get('employee_id'))
+    
+    # Add to action queue for Excel sync
+    # No action queue needed - GitHub JSON is single source of truth
+    
+    return result
 
 @app.put("/api/events/{event_id}")
 async def update_event(event_id: str, event_data: dict, authorization: str = Header(None)):
@@ -1329,7 +2668,148 @@ async def update_event(event_id: str, event_data: dict, authorization: str = Hea
         event_data['date'] = date.fromisoformat(event_data['date'])
     
     event = Event(**event_data)
-    return save_event(event)
+    result = save_event(event)
+    
+    # Update staging layer
+    config = staging_store.get_system_config()
+    if 'events' not in config:
+        config['events'] = []
+    config['events'] = [e if e['id'] != event_id else result.model_dump() for e in config['events']]
+    staging_store.set_system_config(config, user_id=user.get('employee_id'))
+    
+    # Add to action queue for Excel sync
+    # No action queue needed - GitHub JSON is single source of truth
+    
+    return result
+
+@app.get("/api/cron/nightly-excel-commit")
+async def nightly_excel_commit():
+    """Cron job: Generate Excel from GitHub JSON and commit to GitHub data branch"""
+    try:
+        import io
+        from openpyxl import Workbook
+        from datetime import datetime
+        
+        # Create Excel workbook from GitHub JSON data
+        wb = Workbook()
+        
+        # Employees sheet
+        emp_sheet = wb.active
+        emp_sheet.title = "Employees"
+        emp_sheet.append(["ID", "Name", "Email", "Type", "Max Hours", "Active", "Created At"])
+        employees = staging_store.get_employees()
+        for emp in employees:
+            emp_sheet.append([
+                emp.get('id'), emp.get('name'), emp.get('email') or "", emp.get('employee_type'),
+                emp.get('max_hours_per_week'), emp.get('active'), emp.get('created_at')
+            ])
+        
+        # Schedules sheet
+        schedules = staging_store.get_schedules()
+        if schedules:
+            sched_sheet = wb.create_sheet("Schedules")
+            sched_sheet.append(["Week Start", "Schedule ID", "Employee ID", "Day", "Location", "Start Time", "End Time", "Hours", "Break Provided"])
+            for schedule in schedules:
+                for shift in schedule.get('shifts', []):
+                    sched_sheet.append([
+                        schedule.get('week_start_date'), schedule.get('id'), shift.get('employee_id'), shift.get('day_of_week'),
+                        shift.get('floor'), shift.get('start_time'), shift.get('end_time'), shift.get('hours'), shift.get('break_provided')
+                    ])
+        
+        # Availabilities sheet
+        availabilities = staging_store.get_availabilities()
+        if availabilities:
+            avail_sheet = wb.create_sheet("Availabilities")
+            avail_sheet.append(["ID", "Employee ID", "Week Start", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday", "Approved", "Submitted At"])
+            for avail in availabilities:
+                avail_sheet.append([
+                    avail.get('id'), avail.get('employee_id'), avail.get('week_start_date'),
+                    avail.get('monday'), avail.get('tuesday'), avail.get('wednesday'), avail.get('thursday'),
+                    avail.get('friday'), avail.get('saturday'), avail.get('sunday'),
+                    avail.get('approved'), avail.get('submitted_at')
+                ])
+        
+        # Availability Requests sheet
+        requests = staging_store.get_availability_requests()
+        if requests:
+            req_sheet = wb.create_sheet("Availability Requests")
+            req_sheet.append(["ID", "Employee ID", "Request Type", "Start Date", "End Date", "Days of Week", "Start Time", "End Time", "Status", "Created At"])
+            for req in requests:
+                req_sheet.append([
+                    req.get('id'), req.get('employee_id'), req.get('request_type'),
+                    req.get('start_date'), req.get('end_date'), ', '.join(req.get('days_of_week', [])),
+                    req.get('start_time'), req.get('end_time'), req.get('status'), req.get('created_at')
+                ])
+        
+        # Notifications sheet
+        notifications = staging_store.get_notifications()
+        if notifications:
+            notif_sheet = wb.create_sheet("Notifications")
+            notif_sheet.append(["ID", "Employee ID", "Type", "Message", "Read", "Created At"])
+            for notif in notifications:
+                notif_sheet.append([
+                    notif.get('id'), notif.get('employee_id'), notif.get('type'),
+                    notif.get('message'), notif.get('read'), notif.get('created_at')
+                ])
+        
+        # Config sheet
+        config_sheet = wb.create_sheet("Config")
+        config = staging_store.get_system_config()
+        config_sheet.append(["Setting", "Value"])
+        for key, value in config.items():
+            config_sheet.append([key, str(value)])
+        
+        # Events sheet
+        events = config.get('events', [])
+        if events:
+            event_sheet = wb.create_sheet("Events")
+            event_sheet.append(["ID", "Name", "Week Start Date", "Date", "Start Time", "End Time", "Location", "People Needed", "Description", "Created By"])
+            for event in events:
+                event_sheet.append([
+                    event.get('id'), event.get('name'), event.get('week_start_date'),
+                    event.get('date'), event.get('start_time'), event.get('end_time'),
+                    event.get('location'), event.get('people_needed'), event.get('description'),
+                    event.get('created_by')
+                ])
+        
+        # Save to buffer
+        buffer = io.BytesIO()
+        wb.save(buffer)
+        buffer.seek(0)
+        excel_data = buffer.getvalue()
+        
+        # Commit to GitHub data branch
+        from github_storage import GitHubStorage
+        github = GitHubStorage()
+        
+        commit_message = f"Nightly Excel auto-commit - {datetime.now().isoformat()}"
+        success = github.write_file(
+            "ibu_schedule.xlsx",
+            excel_data,
+            commit_message=commit_message
+        )
+        
+        if success:
+            return {
+                "success": True,
+                "message": "Excel file generated and committed to GitHub",
+                "timestamp": datetime.now().isoformat()
+            }
+        else:
+            return {
+                "success": False,
+                "message": "Failed to commit Excel file to GitHub",
+                "timestamp": datetime.now().isoformat()
+            }
+    except Exception as e:
+        import traceback
+        print(f"[CRON] Error in nightly Excel commit: {e}")
+        traceback.print_exc()
+        return {
+            "success": False,
+            "message": str(e),
+            "timestamp": datetime.now().isoformat()
+        }
 
 @app.delete("/api/events/{event_id}")
 async def remove_event(event_id: str, authorization: str = Header(None)):
@@ -1337,6 +2817,15 @@ async def remove_event(event_id: str, authorization: str = Header(None)):
     user = require_manager(authorization)
     
     if delete_event(event_id):
+        # Update staging layer
+        config = staging_store.get_system_config()
+        if 'events' in config:
+            config['events'] = [e for e in config['events'] if e['id'] != event_id]
+            staging_store.set_system_config(config, user_id=user.get('employee_id'))
+        
+        # Add to action queue for Excel sync
+        # No action queue needed - GitHub JSON is single source of truth
+        
         return {"success": True}
     
     raise HTTPException(status_code=404, detail="Event not found")
@@ -1346,6 +2835,107 @@ async def remove_event(event_id: str, authorization: str = Header(None)):
 @app.get("/api/health")
 async def health_check():
     return {"status": "healthy", "timestamp": datetime.now()}
+
+
+@app.get("/api/cache/stats")
+async def get_cache_stats():
+    """Get cache statistics for monitoring."""
+    try:
+        import cache_manager
+        stats = cache_manager.get_cache_stats()
+        return {
+            "success": True,
+            "stats": stats
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+
+@app.post("/api/cache/clear")
+async def clear_cache(authorization: str = Header(None)):
+    """Clear the cache (manager only)."""
+    user = require_manager(authorization)
+    try:
+        import cache_manager
+        cache_manager.clear_cache()
+        return {
+            "success": True,
+            "message": "Cache cleared successfully"
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+
+@app.get("/api/audit-logs")
+async def get_audit_logs(
+    entity_type: Optional[str] = None,
+    user_id: Optional[str] = None,
+    operation: Optional[str] = None,
+    limit: int = 100,
+    authorization: str = Header(None)
+):
+    """Get audit logs with optional filtering (manager only)."""
+    user = require_manager(authorization)
+    try:
+        import audit_logger
+        logs = audit_logger.get_audit_logs(
+            entity_type=entity_type,
+            user_id=user_id,
+            operation=operation,
+            limit=limit
+        )
+        return {
+            "success": True,
+            "logs": logs,
+            "count": len(logs)
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+
+@app.get("/api/audit-logs/stats")
+async def get_audit_log_stats(authorization: str = Header(None)):
+    """Get audit log statistics (manager only)."""
+    user = require_manager(authorization)
+    try:
+        import audit_logger
+        stats = audit_logger.get_audit_log_stats()
+        return {
+            "success": True,
+            "stats": stats
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+
+@app.post("/api/audit-logs/flush")
+async def flush_audit_log(authorization: str = Header(None)):
+    """Manually flush the audit log buffer (manager only)."""
+    user = require_manager(authorization)
+    try:
+        import audit_logger
+        result = audit_logger.flush_audit_log()
+        return {
+            "success": result,
+            "message": "Audit log flushed" if result else "Failed to flush audit log"
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e)
+        }
 
 # ============ Admin: Reset Blob Data ============
 
@@ -1383,15 +2973,17 @@ async def reset_blob_data(authorization: str = Header(None)):
     
     return {"success": True, "results": results}
 
+
 @app.post("/api/admin/reset-manager-password")
 async def reset_manager_password(employee_id: str):
     """TEMPORARY: Reset manager password without authentication (for recovery)"""
     from models import EmployeeType
 
-    employee = get_employee_by_id(employee_id)
-    if not employee:
+    employee_dict = staging_store.get_employee_by_id(employee_id)
+    if not employee_dict:
         raise HTTPException(status_code=404, detail="Employee not found")
     
+    employee = Employee(**employee_dict)
     if employee.employee_type != EmployeeType.MANAGER:
         raise HTTPException(status_code=400, detail="Employee is not a manager")
     
@@ -1800,6 +3392,133 @@ def parse_location_from_string(shift_str: str) -> str:
     
     return None
 
+@app.post("/api/diagnostic/test-saturday-approval")
+async def test_saturday_approval():
+    """Test approval of the Saturday request to debug the issue"""
+    try:
+        # Get the Saturday request
+        all_requests = get_availability_requests()
+        saturday_request = None
+        for r in all_requests:
+            if r.get('days_of_week') and 'saturday' in [d.lower() for d in r.get('days_of_week', [])]:
+                saturday_request = r
+                break
+        
+        if not saturday_request:
+            return {"error": "No Saturday request found"}
+        
+        print(f"[TEST] Found Saturday request: {saturday_request.get('id')}")
+        print(f"  Employee ID: {saturday_request.get('employee_id')}")
+        print(f"  Date range: {saturday_request.get('start_date')} to {saturday_request.get('end_date')}")
+        print(f"  Days of week: {saturday_request.get('days_of_week')}")
+        print(f"  Time: {saturday_request.get('start_time')} - {saturday_request.get('end_time')}")
+        print(f"  Status: {saturday_request.get('status')}")
+        
+        # Check if schedule exists for the week
+        from datetime import timedelta
+        start_date = date.fromisoformat(str(saturday_request.get('start_date'))[:10])
+        week_start = start_date - timedelta(days=start_date.weekday())
+        
+        print(f"[TEST] Week start for Saturday: {week_start}")
+        
+        # Check staging
+        staging_schedules = staging_store.get_schedules()
+        schedule = None
+        for s in staging_schedules:
+            if s.get('week_start_date') == str(week_start):
+                schedule = s
+                break
+        
+        if schedule:
+            print(f"[TEST] Schedule exists in staging for week {week_start}")
+            print(f"  Total shifts: {len(schedule.get('shifts', []))}")
+            employee_shifts = [s for s in schedule.get('shifts', []) if s.get('employee_id') == saturday_request.get('employee_id')]
+            print(f"  Employee shifts: {len(employee_shifts)}")
+            print(f"  Employee shift details: {employee_shifts}")
+        else:
+            print(f"[TEST] No schedule in staging for week {week_start}")
+            # Check Excel
+            from data_store_excel import get_schedule_by_week
+            schedule_obj = get_schedule_by_week(week_start)
+            if schedule_obj:
+                print(f"[TEST] Schedule exists in Excel for week {week_start}")
+                print(f"  Total shifts: {len(schedule_obj.shifts)}")
+                employee_shifts = [s for s in schedule_obj.shifts if s.employee_id == saturday_request.get('employee_id')]
+                print(f"  Employee shifts: {len(employee_shifts)}")
+            else:
+                print(f"[TEST] No schedule in Excel for week {week_start}")
+        
+        return {
+            "request_id": saturday_request.get('id'),
+            "employee_id": saturday_request.get('employee_id'),
+            "date_range": f"{saturday_request.get('start_date')} to {saturday_request.get('end_date')}",
+            "days_of_week": saturday_request.get('days_of_week'),
+            "week_start": str(week_start),
+            "status": saturday_request.get('status'),
+            "schedule_in_staging": schedule is not None,
+            "employee_shifts_count": len(employee_shifts) if schedule else 0
+        }
+    except Exception as e:
+        import traceback
+        print(f"[TEST] Error: {e}")
+        traceback.print_exc()
+        return {"error": str(e)}
+
+@app.get("/api/diagnostic/check-week-shifts/{week_start_date}")
+async def check_week_shifts(week_start_date: str):
+    """Check shifts for a specific week"""
+    try:
+        from excel_store import _get_workbook, _invalidate_cache
+        
+        print(f"[DIAGNOSTIC] Checking shifts for week {week_start_date}")
+        
+        # Get schedule from staging first
+        staging_schedules = staging_store.get_schedules()
+        print(f"[DIAGNOSTIC] Found {len(staging_schedules)} schedules in staging")
+        print(f"[DIAGNOSTIC] Staging week starts: {[s.get('week_start_date') for s in staging_schedules]}")
+        
+        schedule = None
+        source = None
+        for s in staging_schedules:
+            # Handle both string and date objects
+            week_start = s.get('week_start_date')
+            if isinstance(week_start, date):
+                week_start_str = str(week_start)
+            else:
+                week_start_str = week_start
+            
+            if week_start_str == week_start_date:
+                schedule = s
+                source = "staging"
+                print(f"[DIAGNOSTIC] Found schedule in staging for week {week_start_date}")
+                break
+        
+        if not schedule:
+            print(f"[DIAGNOSTIC] Schedule not found for week {week_start_date}")
+        
+        if not schedule:
+            return {"error": "No schedule found for this week"}
+        
+        # Filter shifts for the employee
+        employee_id = "emp_1781999606683"
+        employee_shifts = [s for s in schedule.get('shifts', []) if s.get('employee_id') == employee_id]
+        
+        print(f"[DIAGNOSTIC] Source: {source}, Total shifts: {len(schedule.get('shifts', []))}, Employee shifts: {len(employee_shifts)}")
+        
+        return {
+            "week_start_date": week_start_date,
+            "source": source,
+            "total_shifts": len(schedule.get('shifts', [])),
+            "employee_shifts": employee_shifts,
+            "employee_shifts_count": len(employee_shifts),
+            "all_shifts": schedule.get('shifts', [])
+        }
+    except Exception as e:
+        import traceback
+        print(f"[DIAGNOSTIC] Error: {e}")
+        traceback.print_exc()
+        return {"error": str(e)}
+
 @app.get("/api/diagnostic/schedules-data")
 async def diagnostic_schedules_data():
     """Diagnostic endpoint to inspect schedules data in Excel"""
@@ -1959,6 +3678,144 @@ async def diagnostic_password_check(employee_id: str, password: str):
     }
     return result
 
+@app.post("/api/diagnostic/cleanup-duplicate-schedules")
+async def cleanup_duplicate_schedules():
+    """Clean up duplicate schedules in staging layer"""
+    try:
+        staging_schedules = staging_store.get_schedules()
+        
+        # Group by week_start_date
+        schedule_map = {}
+        for s in staging_schedules:
+            week_start = s.get('week_start_date')
+            if week_start not in schedule_map:
+                schedule_map[week_start] = []
+            schedule_map[week_start].append(s)
+        
+        # Keep only the schedule with the most shifts for each week
+        cleaned_schedules = []
+        duplicates_removed = 0
+        for week_start, schedules in schedule_map.items():
+            if len(schedules) > 1:
+                # Sort by shift count descending, keep the one with most shifts
+                schedules.sort(key=lambda s: len(s.get('shifts', [])), reverse=True)
+                cleaned_schedules.append(schedules[0])
+                duplicates_removed += len(schedules) - 1
+                print(f"[CLEANUP] Week {week_start}: kept {len(schedules[0].get('shifts', []))} shifts, removed {len(schedules) - 1} duplicates")
+            else:
+                cleaned_schedules.append(schedules[0])
+        
+        staging_store.set_schedules(cleaned_schedules)
+        
+        return {
+            "success": True,
+            "duplicates_removed": duplicates_removed,
+            "schedules_kept": len(cleaned_schedules)
+        }
+    except Exception as e:
+        import traceback
+        print(f"[CLEANUP] Error: {e}")
+        traceback.print_exc()
+        return {"error": str(e)}
+
+@app.get("/api/diagnostic/check-staging")
+async def check_staging():
+    """Check what's in the staging layer and Excel"""
+    try:
+        from excel_store import _get_workbook, get_availability_requests
+        
+        employees_dicts = staging_store.get_employees()
+        employees = [Employee(**e) for e in employees_dicts]
+        active_employee_ids = {e.id for e in employees}
+        
+        staging_requests = staging_store.get_availability_requests()
+        staging_notifications = staging_store.get_notifications()
+        staging_schedules = staging_store.get_schedules()
+        
+        # Check Excel directly
+        excel_requests = get_availability_requests()
+        
+        # Check Excel notifications directly
+        wb = _get_workbook()
+        excel_notifications = []
+        if wb and 'Notifications' in wb.sheetnames:
+            sheet = wb['Notifications']
+            for row in range(2, sheet.max_row + 1):
+                notif = {
+                    'id': sheet.cell(row=row, column=1).value,
+                    'employee_id': sheet.cell(row=row, column=2).value,
+                    'type': sheet.cell(row=row, column=3).value,
+                    'message': sheet.cell(row=row, column=4).value,
+                    'read': sheet.cell(row=row, column=5).value,
+                    'created_at': sheet.cell(row=row, column=6).value
+                }
+                if notif['employee_id']:  # Skip empty rows
+                    excel_notifications.append(notif)
+        
+        return {
+            "active_employee_ids": list(active_employee_ids),
+            "staging_requests_count": len(staging_requests),
+            "staging_request_employee_ids": [r.get('employee_id') for r in staging_requests],
+            "staging_notifications_count": len(staging_notifications),
+            "staging_notification_employee_ids": [n.get('employee_id') for n in staging_notifications],
+            "staging_notification_details": staging_notifications,
+            "staging_schedules_count": len(staging_schedules),
+            "staging_schedules_week_starts": [s.get('week_start_date') for s in staging_schedules],
+            "staging_schedules_shift_counts": [{"week": s.get('week_start_date'), "shifts": len(s.get('shifts', []))} for s in staging_schedules],
+            "excel_requests_count": len(excel_requests),
+            "excel_request_employee_ids": [r.get('employee_id') for r in excel_requests],
+            "excel_request_details": [{"id": r.get('id'), "employee_id": r.get('employee_id'), "status": r.get('status'), "days": r.get('days_of_week')} for r in excel_requests],
+            "excel_notifications_count": len(excel_notifications),
+            "excel_notification_employee_ids": [n.get('employee_id') for n in excel_notifications],
+            "excel_notification_details": excel_notifications
+        }
+    except Exception as e:
+        import traceback
+        print(f"[DIAGNOSTIC] Error: {e}")
+        traceback.print_exc()
+        return {"error": str(e)}
+
+@app.post("/api/diagnostic/cleanup-orphaned-records")
+async def cleanup_orphaned_records():
+    """Clean up availability requests and notifications from deleted employees"""
+    try:
+        from excel_store import _get_workbook, _save_workbook, get_availability_requests, get_notifications
+        
+        # Get current employees
+        employees_dicts = staging_store.get_employees()
+        employees = [Employee(**e) for e in employees_dicts]
+        active_employee_ids = {e.id for e in employees}
+        print(f"[CLEANUP] Active employee IDs: {active_employee_ids}")
+        
+        # Clean up staging layer FIRST (frontend reads from here)
+        staging_requests = staging_store.get_availability_requests()
+        print(f"[CLEANUP] Staging requests before: {len(staging_requests)}")
+        print(f"[CLEANUP] Staging request employee IDs: {[r.get('employee_id') for r in staging_requests]}")
+        cleaned_staging_requests = [r for r in staging_requests if r.get('employee_id') in active_employee_ids]
+        print(f"[CLEANUP] Staging requests after: {len(cleaned_staging_requests)}")
+        staging_store.set_availability_requests(cleaned_staging_requests)
+        
+        staging_notifications = staging_store.get_notifications()
+        print(f"[CLEANUP] Staging notifications before: {len(staging_notifications)}")
+        cleaned_staging_notifications = [n for n in staging_notifications if n.get('employee_id') in active_employee_ids]
+        print(f"[CLEANUP] Staging notifications after: {len(cleaned_staging_notifications)}")
+        staging_store.set_notifications(cleaned_staging_notifications)
+        
+        # Note: Excel cleanup removed - GitHub JSON is now the single source of truth
+        
+        print(f"[CLEANUP] Staging layer: removed {len(staging_requests) - len(cleaned_staging_requests)} requests, {len(staging_notifications) - len(cleaned_staging_notifications)} notifications")
+        
+        return {
+            "success": True,
+            "removed_requests": len(staging_requests) - len(cleaned_staging_requests),
+            "removed_notifications": len(staging_notifications) - len(cleaned_staging_notifications)
+        }
+    except Exception as e:
+        import traceback
+        print(f"[CLEANUP] Error: {e}")
+        traceback.print_exc()
+        return {"success": False, "error": str(e)}
+
 @app.get("/api/diagnostic/reset-admin-password")
 async def reset_admin_password():
     """Reset admin password to admin123 (emergency fix)"""
@@ -1987,9 +3844,25 @@ async def test_github_write():
     except Exception as e:
         return {"success": False, "error": str(e)}
 
+@app.post("/api/log-error")
+async def log_frontend_error(error_data: dict):
+    """Log frontend errors for monitoring"""
+    print(f"[FRONTEND ERROR] {error_data.get('type', 'unknown')}: {error_data.get('message', 'no message')}")
+    print(f"  URL: {error_data.get('url', 'N/A')}")
+    print(f"  Method: {error_data.get('method', 'N/A')}")
+    print(f"  Status: {error_data.get('status', 'N/A')}")
+    print(f"  Timestamp: {error_data.get('timestamp', 'N/A')}")
+    print(f"  User Agent: {error_data.get('userAgent', 'N/A')}")
+    if 'stack' in error_data:
+        print(f"  Stack: {error_data['stack']}")
+    if 'componentStack' in error_data:
+        print(f"  Component Stack: {error_data['componentStack']}")
+    return {"success": True}
+
 if __name__ == "__main__":
     import uvicorn
     # Initialize blob storage for cloud deployment
     if os.getenv("BLOB_READ_WRITE_TOKEN"):
         set_blob_key("ibu_schedule.xlsx")
+    
     uvicorn.run(app, host="0.0.0.0", port=8000)

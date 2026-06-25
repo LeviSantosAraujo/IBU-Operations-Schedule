@@ -198,9 +198,15 @@ def get_system_config() -> SystemConfig:
     if not config_dict:
         config = SystemConfig()
     else:
-        # Ensure notifications is a list, not None
+        # Ensure notifications is a list, not None or a JSON string
         if config_dict.get('notifications') is None:
             config_dict['notifications'] = []
+        elif isinstance(config_dict.get('notifications'), str):
+            import json
+            try:
+                config_dict['notifications'] = json.loads(config_dict['notifications'])
+            except (json.JSONDecodeError, ValueError):
+                config_dict['notifications'] = []
         # Convert dict to Pydantic model
         config = SystemConfig(**config_dict)
     _update_cache(cache_key, config)

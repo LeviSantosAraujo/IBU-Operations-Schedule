@@ -79,7 +79,7 @@ export default function ExcelSetup({ onSetupComplete }: ExcelSetupProps) {
     formData.append('file', selectedFile)
 
     try {
-      const response = await fetch(`${API_BASE_URL}/excel/upload`, {
+      const response = await fetch(`${API_BASE_URL}/database/upload-excel`, {
         method: 'POST',
         headers: auth.getAuthHeaders(),
         body: formData

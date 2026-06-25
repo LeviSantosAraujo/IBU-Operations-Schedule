@@ -6,15 +6,34 @@ A comprehensive automated scheduling system built with Python (FastAPI) and Reac
 - Uses Vercel for hosting
 - Python dependencies in root requirements.txt and api/requirements.txt
 - Frontend built with Vite
-- Data stored in JSON files (api/backend/data/) for Vercel serverless compatibility
+- Data stored in GitHub (data branch) for persistence
 - Authentication uses JWT tokens (stateless, works with serverless)
 - Mobile-responsive design with card-based views on small screens
 
 **Important for Vercel Deployment:**
-- Set `BLOB_READ_WRITE_TOKEN` environment variable in Vercel for persistent data storage
-- Set `JWT_SECRET` environment variable in Vercel for secure JWT token signing
-- Without these, data is stored in-memory and lost between serverless function invocations
-- To set up Vercel Blob: https://vercel.com/docs/storage/vercel-blob
+- Set `GITHUB_TOKEN` environment variable in Vercel for GitHub data storage
+- Set `GITHUB_REPO` environment variable (e.g., "LeviSantosAraujo/IBU-Operations-Schedule")
+- Set `GITHUB_DATA_BRANCH` environment variable (default: "data")
+- Set `GITHUB_DATA_FILE` environment variable (default: "ibu_schedule.xlsx")
+- Set `JWT_SECRET` environment variable in Vercel for secure JWT token signing (REQUIRED - no default)
+  - Generate a secure random secret: `openssl rand -base64 32` or use a password manager
+  - This secret is used to sign and verify JWT tokens for authentication
+  - Do not use the default placeholder - the application will fail to start without it
+
+**Architecture Overview:**
+The system uses GitHub JSON files as the single source of truth for all data:
+1. **GitHub JSON Storage** (`json_store.py`): Per-entity JSON files stored on GitHub data branch
+   - employees.json, schedules.json, availabilities.json, availability_requests.json, notifications.json, system_config.json
+   - Optimistic locking with SHA caching to handle concurrent writes safely
+   - Fast read/write operations via GitHub Contents API
+2. **Excel Export** (`/api/excel/download`): On-demand Excel generation from GitHub JSON
+3. **Nightly Excel Commit** (Vercel Cron): Automated Excel generation and commit to GitHub at midnight
+
+This ensures:
+- Single source of truth (GitHub JSON files)
+- Fast user feedback (direct writes to GitHub JSON)
+- Data integrity (optimistic locking prevents race conditions)
+- Excel export available on-demand for historical records
 
 ## Features
 
@@ -35,6 +54,7 @@ A comprehensive automated scheduling system built with Python (FastAPI) and Reac
   - Specify time ranges for availability
   - Set job preferences (e.g., prefer Call Center, 2nd Floor)
   - View request history with status (Pending/Approved/Rejected)
+  - **Day off requests now correctly register for the selected day** (fixed date mapping issue)
 - **Schedule View**: View your own schedule with other employees' shifts dimmed if not assigned
 - **Locked Shifts Display**: Approved availability requests appear as locked shifts (🔒) in your schedule
   - Day off requests show as black boxes with "🔒 Day Off"
@@ -91,6 +111,16 @@ A comprehensive automated scheduling system built with Python (FastAPI) and Reac
   - Employee preferences are stored in locked shifts and used by scheduler
   - Optional manager comments for approvals (required for rejections)
   - Schedule automatically refreshes after approval to show locked shifts
+  - **"Mark all read" button** - Quickly mark all notifications as read with one click
+  - **Optimistic UI updates** - Notifications dismiss immediately with background sync
+- **Employee Management**: Add, edit, and delete employees
+  - Delete employees automatically cleans up associated availability requests from both staging and Excel
+  - Deletion works even if employee only exists in staging layer
+  - Loading indicators for all employee CRUD operations
+- **Availabilities Tab**: View employee availabilities and approved requests
+  - Shows detailed time ranges for approved availability requests (e.g., "09:00 - 12:00")
+  - Displays both actual availabilities and approved availability requests
+  - Day off requests show as "OFF"
 
 ### Locations
 - Ground Floor (GR) - 7:30 AM - 6:00 PM
@@ -132,6 +162,11 @@ source venv/bin/activate
 # Install dependencies
 pip install -r requirements.txt
 
+# Set required environment variables
+export JWT_SECRET="$(openssl rand -base64 32)"  # Generate secure secret
+export GITHUB_TOKEN="your_github_token"
+export GITHUB_REPO="owner/repo"
+
 # Start the server
 uvicorn main:app --reload --port 8000
 ```
@@ -163,16 +198,16 @@ The frontend will be available at `http://localhost:3000`
 Schedule Sheet IBU/
 ├── api/
 │   ├── backend/
-│   │   ├── data/                  # JSON data storage (employees.json, etc.)
 │   │   ├── uploads/              # Excel file uploads (local dev)
 │   │   ├── main.py               # FastAPI application entry point
 │   │   ├── models.py             # Pydantic data models (Employee, Event, etc.)
-│   │   ├── excel_store.py        # Excel file operations
-│   │   ├── data_store.py         # JSON file operations (Vercel fallback)
+│   │   ├── excel_store.py        # Excel file operations (for export)
+│   │   ├── data_store_excel.py   # Excel-based data operations (legacy)
+│   │   ├── github_storage.py     # GitHub Contents API integration
+│   │   ├── json_store.py         # GitHub JSON file operations (primary storage)
 │   │   ├── storage.py            # Storage abstraction (blob/local/memory)
 │   │   ├── scheduler.py          # Enhanced scheduling algorithm
 │   │   ├── auth.py               # JWT-based authentication
-│   │   ├── blob_config.py        # Vercel Blob storage configuration
 │   │   └── requirements.txt      # Python dependencies
 │   ├── index.py                  # Vercel serverless entry point
 │   └── requirements.txt          # Root Python dependencies
@@ -250,15 +285,26 @@ Navigate to "Floor Coverage" to:
 - Red = no coverage, Yellow = 1 person, Green = 2+ people
 
 ### 5. Managing Availability Requests (Manager)
-Navigate to "Schedule" and check the "Pending Requests" panel:
+Navigate to "Schedule" and check the notification bell (top right):
 - View all pending availability requests from employees
-- Each request shows: employee name, request type, days, date range, and comments
-- Click "Review" to open the approval modal
-- Approve or reject with optional manager comment
-- Approval creates locked shifts for the entire date range
+- Each request shows: employee name, request type, days, date range, time range, and comments
+- Click "Approve" or "Reject" to process requests
+- Approvals create locked shifts for the entire date range on the specific days requested
 - Employee preferences are stored and used by the auto-scheduler
+- Use "Mark all read" button to dismiss all notifications at once
+- Notifications update optimistically (dismiss immediately, sync in background)
 
-### 6. Hours Summary
+### 6. Employee Management (Manager)
+Navigate to "Employees" to:
+- Add new employees (student workers, interns, managers)
+- Set maximum hours per week
+- Edit or deactivate employees
+- Delete employees (automatically cleans up associated availability requests)
+- View employee availabilities in the "Availabilities" tab
+  - Shows actual availabilities and approved requests
+  - Displays detailed time ranges for approved requests
+
+### 7. Hours Summary
 At the bottom of the Schedule page, see:
 - Hours scheduled per employee
 - Remaining hours before hitting limits
@@ -266,15 +312,38 @@ At the bottom of the Schedule page, see:
 
 ## Data Storage
 
-Data is stored in JSON files in `api/backend/data/` for Vercel serverless compatibility:
-- employees.json - Employee records
-- availabilities.json - Weekly availability submissions
-- schedules.json - Weekly schedules with shifts
-- config.json - System configuration
-- availability_requests.json - Employee availability change requests
-- notifications.json - System notifications
+The system uses GitHub JSON files as the single source of truth for all data:
 
-**Note:** The system also supports Excel file storage for local development and portability. On Vercel, data is stored in-memory with JSON fallbacks due to the read-only filesystem.
+### GitHub JSON Files (Primary Storage)
+- Stored on GitHub data branch as per-entity JSON files:
+  - `employees.json` - Employee records
+  - `schedules.json` - Weekly schedules with shifts
+  - `availabilities.json` - Employee availability data
+  - `availability_requests.json` - Availability change requests
+  - `notifications.json` - User notifications
+  - `system_config.json` - System configuration including events and staffing targets
+- Optimistic locking with SHA caching to handle concurrent writes safely
+- Fast read/write operations via GitHub Contents API
+- Single source of truth - no Excel fallback or sync needed
+
+### Excel Export (On-Demand)
+- Available via `/api/excel/download` endpoint
+- Generates Excel file from current GitHub JSON data
+- Contains all entities as separate sheets (Employees, Schedules, Availabilities, etc.)
+- Used for historical records and data export
+
+### Nightly Excel Commit (Automated)
+- Vercel Cron job runs at midnight daily
+- Generates Excel from GitHub JSON data
+- Commits Excel file to GitHub data branch
+- Provides daily Excel snapshots for backup purposes
+
+**Benefits:**
+- Single source of truth (GitHub JSON files)
+- Fast user feedback (direct writes to GitHub JSON)
+- Data integrity (optimistic locking prevents race conditions)
+- Excel export available on-demand for historical records
+- Automated daily Excel backups via cron job
 
 ## Scheduling Algorithm
 

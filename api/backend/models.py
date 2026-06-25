@@ -82,6 +82,21 @@ class Availability(BaseModel):
     friday: AvailabilityType = AvailabilityType.BLANK
     saturday: AvailabilityType = AvailabilityType.BLANK
     sunday: AvailabilityType = AvailabilityType.OFF
+    # Time range fields for dynamic shift sizing
+    monday_start: Optional[str] = None
+    monday_end: Optional[str] = None
+    tuesday_start: Optional[str] = None
+    tuesday_end: Optional[str] = None
+    wednesday_start: Optional[str] = None
+    wednesday_end: Optional[str] = None
+    thursday_start: Optional[str] = None
+    thursday_end: Optional[str] = None
+    friday_start: Optional[str] = None
+    friday_end: Optional[str] = None
+    saturday_start: Optional[str] = None
+    saturday_end: Optional[str] = None
+    sunday_start: Optional[str] = None
+    sunday_end: Optional[str] = None
     submitted_at: datetime = Field(default_factory=datetime.now)
     notes: Optional[str] = None
     approved: bool = False
@@ -188,6 +203,7 @@ class AvailabilityRequest(BaseModel):
     approved_at: Optional[datetime] = None
 
 class NotificationType(str, Enum):
+    AVAILABILITY_REQUEST = "availability_request"
     AVAILABILITY_APPROVED = "availability_approved"
     AVAILABILITY_REJECTED = "availability_rejected"
     SCHEDULE_UPDATED = "schedule_updated"

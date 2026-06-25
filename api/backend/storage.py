@@ -113,7 +113,7 @@ def blob_exists(key: str) -> bool:
     try:
         data = blob_get(key)
         return data is not None
-    except:
+    except (Exception, OSError):
         return False
 
 def store_excel_data(data: bytes, filename: str = "ibu_schedule.xlsx") -> bool:
@@ -143,7 +143,7 @@ def store_excel_data(data: bytes, filename: str = "ibu_schedule.xlsx") -> bool:
         with open(upload_path, "wb") as f:
             f.write(data)
         return True
-    except:
+    except (OSError, IOError):
         pass
     
     # Memory storage is our fallback
@@ -181,7 +181,7 @@ def get_excel_data(filename: str = "ibu_schedule.xlsx") -> Optional[bytes]:
                 data = f.read()
                 EXCEL_DATA_STORE["current"] = data  # Cache it
                 return data
-    except:
+    except (OSError, IOError):
         pass
 
     return None
@@ -196,7 +196,7 @@ def excel_file_exists(filename: str = "ibu_schedule.xlsx") -> bool:
         upload_path = Path(__file__).parent / "uploads" / filename
         if upload_path.exists():
             return True
-    except:
+    except (OSError, IOError):
         pass
     
     return "current" in EXCEL_DATA_STORE

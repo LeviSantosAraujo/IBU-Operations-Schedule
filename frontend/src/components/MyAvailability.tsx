@@ -5,6 +5,7 @@ import { format, addDays, startOfWeek } from 'date-fns'
 import { createAvailabilityRequest, getMyAvailabilityRequests, getEmployee, updateEmployee } from '../api'
 import { auth } from '../auth'
 import { Plus, Calendar, Clock, X, Save } from 'lucide-react'
+import { ButtonWithLoading } from './ButtonWithLoading'
 
 const daysOfWeek = [
   { value: 'monday', label: 'Monday' },
@@ -182,7 +183,9 @@ export default function MyAvailability() {
 
     setLoading(true)
     try {
-      const dayName = daysOfWeek[dayOffDate.getDay()].value
+      // Proper mapping from getDay() index to day name
+      const dayNames = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday']
+      const dayName = dayNames[dayOffDate.getDay()]
       await createAvailabilityRequest({
         request_type: 'day_off',
         start_date: format(dayOffDate, 'yyyy-MM-dd'),
@@ -355,13 +358,13 @@ export default function MyAvailability() {
         </div>
 
         {/* Submit Button */}
-        <button
+        <ButtonWithLoading
           onClick={handleSubmitAvailability}
-          disabled={loading}
-          className="flex items-center gap-2 bg-blue-600 text-white px-6 py-2 rounded hover:bg-blue-700 disabled:opacity-50"
+          isLoading={loading}
+          className="flex items-center gap-2 bg-blue-600 text-white px-6 py-2 rounded hover:bg-blue-700"
         >
-          {loading ? 'Submitting...' : <><Plus className="w-4 h-4" /> Submit Availability</>}
-        </button>
+          <Plus className="w-4 h-4" /> Submit Availability
+        </ButtonWithLoading>
 
         {saved && (
           <div className="mt-2 text-green-600 text-sm">
@@ -410,13 +413,13 @@ export default function MyAvailability() {
                   placeholder="Reason for day off..."
                 />
               </div>
-              <button
+              <ButtonWithLoading
                 onClick={handleSubmitDayOff}
-                disabled={loading}
-                className="w-full flex items-center justify-center gap-2 bg-purple-600 text-white px-6 py-2 rounded hover:bg-purple-700 disabled:opacity-50"
+                isLoading={loading}
+                className="w-full flex items-center justify-center gap-2 bg-purple-600 text-white px-6 py-2 rounded hover:bg-purple-700"
               >
-                {loading ? 'Submitting...' : 'Submit Day Off Request'}
-              </button>
+                Submit Day Off Request
+              </ButtonWithLoading>
             </div>
           </div>
         </div>
@@ -454,12 +457,12 @@ export default function MyAvailability() {
                 requestDescription = `Available on ${daysDisplay}${timeRange}`
               }
 
-              // Format dates
+              // Format dates - use date-fns format to avoid timezone issues
               const startDate = request.start_date && request.start_date !== '1969-12-31' && request.start_date !== null
-                ? new Date(request.start_date).toLocaleDateString()
+                ? format(new Date(request.start_date + 'T00:00:00'), 'yyyy-MM-dd')
                 : 'Not set'
               const endDate = request.end_date && request.end_date !== '1969-12-31' && request.end_date !== null
-                ? new Date(request.end_date).toLocaleDateString()
+                ? format(new Date(request.end_date + 'T00:00:00'), 'yyyy-MM-dd')
                 : 'Not set'
 
               return (

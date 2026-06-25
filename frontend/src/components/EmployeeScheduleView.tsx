@@ -104,9 +104,18 @@ export default function EmployeeScheduleView() {
     try {
       const allRequests = await getMyAvailabilityRequests()
       const formattedDate = format(weekStart, 'yyyy-MM-dd')
-      const myRequests = allRequests.filter((r: any) => 
-        r.week_start_date === formattedDate
-      )
+      const weekEnd = format(addDays(weekStart, 6), 'yyyy-MM-dd')
+      const myRequests = allRequests.filter((r: any) => {
+        // Handle new schema with start_date/end_date
+        if (r.start_date && r.end_date) {
+          return r.start_date <= weekEnd && r.end_date >= formattedDate
+        }
+        // Handle old schema with week_start_date
+        if (r.week_start_date) {
+          return r.week_start_date === formattedDate
+        }
+        return false
+      })
       setMyAvailabilityRequests(myRequests)
     } catch (err) {
       console.error('Failed to load availability requests:', err)
@@ -275,9 +284,15 @@ export default function EmployeeScheduleView() {
                         const emp = employees.find((e: any) => e.id === shift.employee_id)
                         return shift.locked ? (
                           <div key={shift.id} className={`rounded p-1 mb-1 text-xs border ${
-                            shift.location === 'day off' ? 'border-black bg-black text-white' : 'border-gray-400 bg-gray-200 text-gray-600'
+                            shift.id.startsWith('pending_') 
+                              ? 'border-yellow-400 bg-yellow-100 text-yellow-800' 
+                              : shift.location === 'day off' 
+                                ? 'border-black bg-black text-white' 
+                                : 'border-gray-400 bg-gray-200 text-gray-600'
                           }`}>
-                            <div className="font-semibold">🔒 {shift.locked_availability_type || 'Approved'}</div>
+                            <div className="font-semibold">
+                              {shift.id.startsWith('pending_') ? '⏳ Pending' : '🔒'} {shift.locked_availability_type || 'Approved'}
+                            </div>
                             <div className="font-medium">{shift.start_time} – {shift.end_time}</div>
                             {shift.comment && <div className="italic text-xs">{shift.comment}</div>}
                           </div>
@@ -360,14 +375,19 @@ export default function EmployeeScheduleView() {
                               shift.locked ? (
                                 <div
                                   key={shift.id}
-                                  className={`p-2 rounded mb-1 text-xs border relative ${
-                                    shift.location === 'day off' ? 'border-black bg-black text-white' : 'border-gray-400 bg-gray-200 text-gray-600'
+                                  className={`rounded p-2 mb-1 text-xs border ${
+                                    shift.id.startsWith('pending_') 
+                                      ? 'border-yellow-400 bg-yellow-100 text-yellow-800' 
+                                      : shift.location === 'day off' 
+                                        ? 'border-black bg-black text-white' 
+                                        : 'border-gray-400 bg-gray-200 text-gray-600'
                                   }`}
-                                  title={`Approved availability: ${shift.locked_availability_type}`}
                                 >
-                                  <div className="font-semibold">🔒 {shift.locked_availability_type || 'Approved'}</div>
-                                  <div className="font-medium">{shift.start_time} - {shift.end_time}</div>
-                                  {shift.comment && <div className="italic text-xs mt-1">{shift.comment}</div>}
+                                  <div className="font-semibold">
+                                    {shift.id.startsWith('pending_') ? '⏳ Pending' : '🔒'} {shift.locked_availability_type || 'Approved'}
+                                  </div>
+                                  <div className="font-medium">{shift.start_time} – {shift.end_time}</div>
+                                  {shift.comment && <div className="italic text-xs">{shift.comment}</div>}
                                 </div>
                               ) : (
                                 <div

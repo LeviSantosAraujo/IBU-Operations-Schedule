@@ -5,16 +5,12 @@ from models import (
     Employee, Availability, WeeklySchedule, Shift, 
     JobType, Floor, AvailabilityType, EmployeeType, Event
 )
-from data_store_excel import (
-    get_all_employees, get_availabilities, get_availability_for_week,
-    save_schedule, get_system_config, get_availability_requests, get_events,
-    get_all_week_schedule_dates, get_schedule_by_week
-)
+import json_store
 from excel_store import get_location_color
 
 class SchedulingEngine:
     def __init__(self):
-        self.config = get_system_config()
+        self.config = json_store.get_system_config()
         self.day_order = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday"]  # Sunday excluded - only for events
         
         # Location operating hours
@@ -198,7 +194,7 @@ class SchedulingEngine:
         return preferences
     
     def can_assign_shift(self, employee: Employee, shift: Shift, schedule: WeeklySchedule, 
-                         availability: Availability, approved_requests: Dict = None) -> Tuple[bool, str]:
+                         availability: Optional[Availability], approved_requests: Dict = None) -> Tuple[bool, str]:
         """Check if shift can be assigned to employee"""
         
         # Validate shift data
@@ -230,6 +226,16 @@ class SchedulingEngine:
         if current_hours + shift.hours > max_hours:
             return False, f"Exceeds max hours ({max_hours})"
         
+        # Intern-specific: Max 6 continuous hours per shift
+        if employee.employee_type == EmployeeType.INTERN and shift.hours > 6:
+            return False, f"Intern shift exceeds 6 hours (shift: {shift.hours}h)"
+        
+        # Intern-specific: Restrict locations to ground floor, 2nd floor, 6th floor only
+        if employee.employee_type == EmployeeType.INTERN:
+            allowed_locations = {'ground floor', '2nd floor', '6th floor'}
+            if shift.location not in allowed_locations:
+                return False, f"Intern not allowed at {shift.location} (only: ground floor, 2nd floor, 6th floor)"
+        
         # Priority 2: Check Day Off constraints (approved requests)
         if approved_requests and employee.id in approved_requests:
             day_request = approved_requests[employee.id].get(shift.day_of_week)
@@ -252,19 +258,10 @@ class SchedulingEngine:
                 elif not self.is_time_within_availability(shift.start_time, shift.end_time, day_request):
                     print(f"[SCHEDULER] REJECTED: Employee {employee.id} not available on {shift.day_of_week} (approved availability type: {day_request})")
                     return False, f"Not available on {shift.day_of_week} (approved availability)"
-
-        # Priority 4: Fall back to general availability
-        # Default to BLANK (available all day) if no availability is set for the day
-        day_avail = getattr(availability, shift.day_of_week, AvailabilityType.BLANK)
-        if day_avail is None:
-            day_avail = AvailabilityType.BLANK
-        if not self.is_time_within_availability(shift.start_time, shift.end_time, day_avail):
-            print(f"[SCHEDULER] REJECTED: Employee {employee.id} shift {shift.start_time}-{shift.end_time} outside general availability {day_avail} on {shift.day_of_week}")
-            return False, f"Not available on {shift.day_of_week}"
         
         # Check for overlapping shifts
         for existing_shift in schedule.shifts:
-            if existing_shift.employee_id == employee.id and existing_shift.day_of_week == shift.day_of_week:
+            if existing_shift.employee_id == employee.id and existing_shift.day_of_week == shift.day_of_week and not existing_shift.locked:
                 # Check overlap
                 if (shift.start_time < existing_shift.end_time and 
                     shift.end_time > existing_shift.start_time):
@@ -273,7 +270,7 @@ class SchedulingEngine:
         return True, "OK"
     
     def score_employee_for_shift(self, employee: Employee, shift: Shift, 
-                                  availability: Availability, employee_preferences: Dict = None, 
+                                  availability: Optional[Availability], employee_preferences: Dict = None, 
                                   historical_preferences: Dict = None, current_hours: float = 0) -> float:
         """Score how good of a fit an employee is for a shift (higher = better)"""
         score = 0.0
@@ -281,18 +278,30 @@ class SchedulingEngine:
         # Job preference weight (1-10, default 5)
         # Priority: manager-set preferences (employee.manager_preferences) > employee-submitted preferences (employee.preferences) > availability request preferences > historical preferences > default
         pref_weight = 5
+        pref_source = "default"
+        
         if employee.manager_preferences and shift.job_type in employee.manager_preferences:
             # Manager-set preferences have highest priority
             pref_weight = employee.manager_preferences.get(shift.job_type, 5)
+            pref_source = "manager_preferences"
+            print(f"[SCHEDULER] Using manager_preferences for {employee.name}: {shift.job_type} = {pref_weight}")
         elif employee.preferences and shift.job_type in employee.preferences:
             # Employee-submitted preferences (fallback)
             pref_weight = employee.preferences.get(shift.job_type, 5)
+            pref_source = "employee_preferences"
+            print(f"[SCHEDULER] Using employee_preferences for {employee.name}: {shift.job_type} = {pref_weight}")
         elif employee_preferences and employee.id in employee_preferences:
             prefs = employee_preferences[employee.id]
             pref_weight = prefs.get(shift.job_type, 5)
+            pref_source = "availability_request_preferences"
+            print(f"[SCHEDULER] Using availability request preferences for {employee.name}: {shift.job_type} = {pref_weight}")
         elif historical_preferences and employee.id in historical_preferences:
             hist_prefs = historical_preferences[employee.id]
             pref_weight = hist_prefs.get(shift.job_type, 5)
+            pref_source = "historical_preferences"
+            print(f"[SCHEDULER] Using historical preferences for {employee.name}: {shift.job_type} = {pref_weight}")
+        else:
+            print(f"[SCHEDULER] Using default preference for {employee.name}: {shift.job_type} = {pref_weight}")
         
         # Reduce preference weight as employee gets more hours assigned
         # First shifts: strong preference (100% weight)
@@ -330,23 +339,33 @@ class SchedulingEngine:
         # Cache for schedules to avoid repeated loading
         schedule_cache = {}
 
+        # Load all schedules from JSON store
+        all_schedules_dict = json_store.get_schedules()
+        all_schedules = [WeeklySchedule(**s) for s in all_schedules_dict]
+
         def get_cached_schedule(week_date: date) -> Optional[WeeklySchedule]:
             """Get schedule with caching to avoid repeated loading"""
             week_str = week_date.isoformat()
             if week_str not in schedule_cache:
-                schedule_cache[week_str] = get_schedule_by_week(week_date)
+                # Find schedule for this week from JSON schedules
+                for sched in all_schedules:
+                    if str(sched.week_start_date) == week_str:
+                        schedule_cache[week_str] = sched
+                        return sched
+                schedule_cache[week_str] = None
             return schedule_cache[week_str]
 
-        employees = [e for e in get_all_employees() if e.active]
-        availabilities = {a.employee_id: a for a in get_availabilities(week_start_date)}
+        # Load employees from JSON store (single source of truth)
+        employee_dicts = json_store.get_employees()
+        employees = [Employee(**emp_dict) for emp_dict in employee_dicts if emp_dict.get('active', True)]
         
-        # Load approved availability requests for this week
+        # Load approved availability requests for this week (single source of truth)
         approved_requests = {}
         employee_preferences = {}
         days = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']
         day_map = {0: 'monday', 1: 'tuesday', 2: 'wednesday', 3: 'thursday', 4: 'friday', 5: 'saturday', 6: 'sunday'}
         try:
-            all_requests = get_availability_requests()
+            all_requests = json_store.get_availability_requests()
             week_end_date = week_start_date + timedelta(days=6)
 
             for req in all_requests:
@@ -420,15 +439,14 @@ class SchedulingEngine:
         except Exception as e:
             print(f"Warning: could not load approved availability requests: {e}")
 
-        # Load existing schedule to get preferences from locked shifts
-        existing_schedule = get_cached_schedule(week_start_date)
-        if existing_schedule:
-            for shift in existing_schedule.shifts:
-                if shift.locked and shift.preferences and shift.employee_id not in employee_preferences:
-                    employee_preferences[shift.employee_id] = shift.preferences
-
-        # Load events for this week
-        events = get_events(week_start_date)
+        # Load events from JSON store
+        try:
+            events_dict = json_store.get_events()
+            events = [Event(**e) for e in events_dict]
+            print(f"[SCHEDULER] Loaded {len(events)} events from JSON")
+        except Exception as e:
+            print(f"[SCHEDULER] Error loading events from JSON: {e}")
+            events = []
         
         # Calculate historical job preferences for all employees
         historical_job_preferences = {}
@@ -532,14 +550,6 @@ class SchedulingEngine:
                     if emp.id in assigned_employees:
                         continue
 
-                    avail = availabilities.get(emp.id)
-                    if not avail:
-                        avail = Availability(
-                            id=str(uuid.uuid4()),
-                            employee_id=emp.id,
-                            week_start_date=week_start_date
-                        )
-
                     # Create shift with exact event time
                     test_shift = Shift(
                         id="temp",
@@ -555,11 +565,11 @@ class SchedulingEngine:
                         color=get_location_color(event.location)
                     )
 
-                    can_assign, reason = self.can_assign_shift(emp, test_shift, schedule, avail, approved_requests)
+                    can_assign, reason = self.can_assign_shift(emp, test_shift, schedule, None, approved_requests)
                     if can_assign:
                         current_hours = self.get_employee_weekly_hours(schedule, emp.id)
-                        score = self.score_employee_for_shift(emp, test_shift, avail, employee_preferences, historical_job_preferences, current_hours)
-                        candidates.append((score, emp, avail, test_shift))
+                        score = self.score_employee_for_shift(emp, test_shift, None, employee_preferences, historical_job_preferences, current_hours)
+                        candidates.append((score, emp, test_shift))
                         print(f"[SCHEDULER] Candidate for event '{event.name}': {emp.name} (score={score:.2f})")
                     else:
                         print(f"[SCHEDULER] Rejected {emp.name} for event '{event.name}': {reason}")
@@ -568,7 +578,7 @@ class SchedulingEngine:
                 print(f"[SCHEDULER] Found {len(candidates)} candidates for event '{event.name}'")
 
                 if candidates:
-                    _, best_emp, best_avail, shift = candidates[0]
+                    _, best_emp, shift = candidates[0]
                     shift.id = str(uuid.uuid4())
                     schedule.shifts.append(shift)
 
@@ -598,7 +608,10 @@ class SchedulingEngine:
                 
                 # Get location operating hours
                 loc_hours = self.location_hours.get(location.lower(), ('08:00', '18:00'))
-                loc_start, loc_end = loc_hours
+                loc_start, loc_end = loc_hours if loc_hours and len(loc_hours) == 2 else ('08:00', '18:00')
+                # Ensure location hours are strings
+                loc_start = str(loc_start) if loc_start else '08:00'
+                loc_end = str(loc_end) if loc_end else '18:00'
                 
                 # Calculate total operating hours
                 from datetime import datetime
@@ -606,72 +619,66 @@ class SchedulingEngine:
                 end_dt = datetime.strptime(loc_end, "%H:%M")
                 total_hours = (end_dt - start_dt).total_seconds() / 3600
                 
-                # Calculate shift slots (3-hour intervals)
-                shift_hours = 3.0
-                num_slots = int(total_hours / shift_hours)
+                # Generate dynamic shifts based on employee availability
+                # Min shift: 15 minutes, Max shift: 8 hours
+                print(f"[SCHEDULER] Location '{location}' on {day}: {needed} people needed ({loc_start}-{loc_end})")
                 
-                print(f"[SCHEDULER] Location '{location}' on {day}: {needed} people needed, {num_slots} 3-hour slots ({loc_start}-{loc_end})")
+                # Skip managers in regular location staffing
+                regular_employees_phase1 = [e for e in employees if e.employee_type != EmployeeType.MANAGER]
                 
-                # If more people than slots, some will work longer shifts
-                # If fewer people than slots, distribute evenly
-                shifts_to_assign = []
-                
-                if needed >= num_slots:
-                    # More people than slots - assign 3-hour shifts to first (num_slots) people
-                    for i in range(num_slots):
-                        slot_start = start_dt + timedelta(hours=i * shift_hours)
-                        slot_end = min(slot_start + timedelta(hours=shift_hours), end_dt)
-                        shifts_to_assign.append((slot_start.strftime("%H:%M"), slot_end.strftime("%H:%M"), shift_hours))
-                    
-                    # Remaining people get longer shifts to cover gaps
-                    remaining = needed - num_slots
-                    if remaining > 0:
-                        # Distribute remaining people across the day
-                        for i in range(remaining):
-                            # Assign to middle of day for better coverage
-                            mid_slot = num_slots // 2
-                            slot_start = start_dt + timedelta(hours=mid_slot * shift_hours)
-                            slot_end = min(slot_start + timedelta(hours=shift_hours * 1.5), end_dt)
-                            shifts_to_assign.append((slot_start.strftime("%H:%M"), slot_end.strftime("%H:%M"), (slot_end - slot_start).total_seconds() / 3600))
-                else:
-                    # Fewer people than slots - distribute evenly
-                    slots_per_person = num_slots / needed
-                    for i in range(needed):
-                        # Calculate start position for this person
-                        start_pos = int(i * slots_per_person)
-                        end_pos = int((i + 1) * slots_per_person)
-                        
-                        slot_start = start_dt + timedelta(hours=start_pos * shift_hours)
-                        slot_end = min(start_dt + timedelta(hours=end_pos * shift_hours), end_dt)
-                        shift_len = (slot_end - slot_start).total_seconds() / 3600
-                        
-                        shifts_to_assign.append((slot_start.strftime("%H:%M"), slot_end.strftime("%H:%M"), shift_len))
-                
-                print(f"[SCHEDULER] Generated {len(shifts_to_assign)} shifts for {needed} people")
-                
-                # Assign one shift slot per unique employee - track who is already assigned this day/location
                 assigned = 0
-                assigned_emp_ids = set()  # Track employees already assigned to this location today
+                assigned_emp_ids = set()
                 
-                for start, end, hours in shifts_to_assign:
-                    if assigned >= needed:
-                        break
+                # Try to assign shifts until we meet the requirement
+                while assigned < needed:
+                    best_candidate = None
+                    best_score = -1
+                    best_shift = None
                     
-                    candidates = []
-                    # Skip managers in regular location staffing
-                    regular_employees_phase1 = [e for e in employees if e.employee_type != EmployeeType.MANAGER]
                     for emp in regular_employees_phase1:
                         # Skip employees already assigned to this location today
                         if emp.id in assigned_emp_ids:
                             continue
                         
-                        avail = availabilities.get(emp.id)
-                        if not avail:
-                            avail = Availability(
-                                id=str(uuid.uuid4()),
-                                employee_id=emp.id,
-                                week_start_date=week_start_date
-                            )
+                        # Get employee's availability for this day from approved requests
+                        day_attr = day.lower()
+                        day_request = approved_requests.get(emp.id, {}).get(day_attr)
+                        
+                        # Check if employee has day off
+                        if day_request == AvailabilityType.OFF:
+                            continue
+                        
+                        # Get time range from approved request
+                        if day_request and isinstance(day_request, dict) and day_request.get('type') == 'time_range':
+                            avail_start = day_request.get('start', loc_start)
+                            avail_end = day_request.get('end', loc_end)
+                        else:
+                            # No specific time range, use location hours
+                            avail_start = loc_start
+                            avail_end = loc_end
+                        
+                        # Calculate optimal shift within availability and location hours
+                        # Use availability start time (respect employee's availability)
+                        shift_start = avail_start
+                        # Use availability end time (respect employee's availability)
+                        shift_end = avail_end
+                        
+                        # Calculate available hours
+                        shift_start_dt = datetime.strptime(shift_start, "%H:%M")
+                        shift_end_dt = datetime.strptime(shift_end, "%H:%M")
+                        available_hours = (shift_end_dt - shift_start_dt).total_seconds() / 3600
+                        
+                        # Skip if less than 15 minutes available
+                        if available_hours < 0.25:
+                            continue
+                        
+                        # Cap at 8 hours max for regular employees, 6 hours for interns
+                        max_shift_hours = 6.0 if emp.employee_type == EmployeeType.INTERN else 8.0
+                        shift_hours = min(available_hours, max_shift_hours)
+                        
+                        # Calculate actual end time
+                        actual_end_dt = shift_start_dt + timedelta(hours=shift_hours)
+                        actual_end = actual_end_dt.strftime("%H:%M")
                         
                         job_type = self._location_to_job_type(location)
                         
@@ -679,50 +686,54 @@ class SchedulingEngine:
                             id="temp",
                             employee_id=emp.id,
                             day_of_week=day,
-                            start_time=start,
-                            end_time=end,
+                            start_time=shift_start,
+                            end_time=actual_end,
                             job_type=job_type,
                             location=location,
-                            hours=hours,
+                            hours=shift_hours,
                             color=get_location_color(location)
                         )
                         
-                        can_assign, reason = self.can_assign_shift(emp, test_shift, schedule, avail, approved_requests)
+                        can_assign, reason = self.can_assign_shift(emp, test_shift, schedule, None, approved_requests)
                         if can_assign:
                             current_hours = self.get_employee_weekly_hours(schedule, emp.id)
-                            score = self.score_employee_for_shift(emp, test_shift, avail, employee_preferences, historical_job_preferences, current_hours)
-                            candidates.append((score, emp, avail, test_shift))
+                            score = self.score_employee_for_shift(emp, test_shift, None, employee_preferences, historical_job_preferences, current_hours)
+                            if score > best_score:
+                                best_score = score
+                                best_candidate = emp
+                                best_shift = test_shift
                     
-                    candidates.sort(key=lambda x: x[0], reverse=True)
-                    
-                    if candidates:
-                        _, best_emp, best_avail, shift = candidates[0]
-                        shift.id = str(uuid.uuid4())
-                        schedule.shifts.append(shift)
+                    if best_candidate and best_shift:
+                        best_shift.id = str(uuid.uuid4())
+                        schedule.shifts.append(best_shift)
                         
-                        current = schedule.total_hours.get(best_emp.id, 0)
-                        schedule.total_hours[best_emp.id] = current + shift.hours
+                        current = schedule.total_hours.get(best_candidate.id, 0)
+                        schedule.total_hours[best_candidate.id] = current + best_shift.hours
                         
-                        employee_locations[best_emp.id].add(location)
-                        assigned_emp_ids.add(best_emp.id)
+                        employee_locations[best_candidate.id].add(location)
+                        assigned_emp_ids.add(best_candidate.id)
                         assigned += 1
                         location_assignments[location][day] += 1
-                        print(f"[SCHEDULER] Assigned {best_emp.name} to {location} on {day} ({start}-{end}, {hours}h)")
+                        print(f"[SCHEDULER] Assigned {best_candidate.name} to {location} on {day} ({best_shift.start_time}-{best_shift.end_time}, {best_shift.hours}h)")
                     else:
-                        print(f"[SCHEDULER] No candidates for {location} on {day} shift {start}-{end}")
+                        # No more candidates available
+                        print(f"[SCHEDULER] No more candidates for {location} on {day}")
+                        break
         
         # Separate managers from regular employees (needed for call center phase)
         managers = [e for e in employees if e.employee_type == EmployeeType.MANAGER]
+        interns = [e for e in employees if e.employee_type == EmployeeType.INTERN]
         regular_employees = [e for e in employees if e.employee_type != EmployeeType.MANAGER]
         
         # Phase: Call Center Role Assignment
         # Assign is_call_center flag to existing shifts based on call_center_target
+        # Interns are NOT eligible for call center roles
         if call_center_target > 0:
             print(f"[SCHEDULER] Call center role target: {call_center_target} people per day (Mon-Sat only)")
             cc_assigned_total = 0
             
-            # Get all existing shifts (excluding events and managers)
-            regular_shifts = [s for s in schedule.shifts if not s.is_event and s.employee_id not in [m.id for m in managers]]
+            # Get all existing shifts (excluding events, managers, and interns)
+            regular_shifts = [s for s in schedule.shifts if not s.is_event and s.employee_id not in [m.id for m in managers] and s.employee_id not in [i.id for i in interns]]
             
             # Group shifts by day (skip Sunday)
             shifts_by_day = {day: [] for day in days if day != 'sunday'}
@@ -793,15 +804,12 @@ class SchedulingEngine:
                     if hours_remaining <= 0:
                         continue
                     
-                    # Get availability, or use default if not submitted
-                    avail = availabilities.get(emp.id)
-                    if not avail:
-                        # Employees without availability get default full-day availability
-                        avail = Availability(
-                            id=str(uuid.uuid4()),
-                            employee_id=emp.id,
-                            week_start_date=week_start_date
-                        )
+                    # Use default availability (available all day)
+                    avail = Availability(
+                        id=str(uuid.uuid4()),
+                        employee_id=emp.id,
+                        week_start_date=week_start_date
+                    )
                     
                     # Try to mirror historical patterns first
                     historical_patterns = self.get_historical_shift_patterns(emp.id, week_start_date, schedule_cache)
@@ -900,6 +908,86 @@ class SchedulingEngine:
                             location_assignments[location][day] += 1
                             break  # Move to next shift pattern
         
+        # Phase 5: Ensure interns get their full 15 hours
+        # Interns have a hard requirement to get all 15 hours if possible
+        print("[SCHEDULER] Phase 5: Ensuring interns get full 15 hours")
+        interns = [emp for emp in employees if emp.employee_type == EmployeeType.INTERN]
+        for intern in interns:
+            current_hours = self.get_employee_weekly_hours(schedule, intern.id)
+            hours_needed = 15 - current_hours
+            if hours_needed <= 0:
+                continue
+            
+            print(f"[SCHEDULER] Intern {intern.name} needs {hours_needed} more hours (current: {current_hours})")
+            
+            # Try to assign remaining hours across available days
+            for day in self.day_order:
+                if hours_needed <= 0:
+                    break
+                
+                # Check if intern has availability for this day
+                day_request = approved_requests.get(intern.id, {}).get(day)
+                if day_request == AvailabilityType.OFF:
+                    continue
+                
+                # Get availability time range
+                if day_request and isinstance(day_request, dict) and day_request.get('type') == 'time_range':
+                    avail_start = day_request.get('start', '07:30')
+                    avail_end = day_request.get('end', '18:00')
+                else:
+                    # Default to full day if no specific time range
+                    avail_start = '07:30'
+                    avail_end = '18:00'
+                
+                # Try intern-allowed locations only
+                intern_locations = ['ground floor', '2nd floor', '6th floor']
+                for location in intern_locations:
+                    if hours_needed <= 0:
+                        break
+                    
+                    loc_start, loc_end = self.location_hours.get(location, ('07:30', '18:00'))
+                    
+                    # Calculate shift within availability and location hours
+                    shift_start = avail_start
+                    shift_end = avail_end
+                    
+                    shift_start_dt = datetime.strptime(shift_start, "%H:%M")
+                    shift_end_dt = datetime.strptime(shift_end, "%H:%M")
+                    available_hours = (shift_end_dt - shift_start_dt).total_seconds() / 3600
+                    
+                    if available_hours < 0.25:
+                        continue
+                    
+                    # Cap at 6 hours for interns
+                    shift_hours = min(available_hours, 6.0, hours_needed)
+                    
+                    actual_end_dt = shift_start_dt + timedelta(hours=shift_hours)
+                    actual_end = actual_end_dt.strftime("%H:%M")
+                    
+                    job_type = self._location_to_job_type(location)
+                    
+                    test_shift = Shift(
+                        id="temp",
+                        employee_id=intern.id,
+                        day_of_week=day,
+                        start_time=shift_start,
+                        end_time=actual_end,
+                        job_type=job_type,
+                        location=location,
+                        hours=shift_hours,
+                        color=get_location_color(location)
+                    )
+                    
+                    can_assign, reason = self.can_assign_shift(intern, test_shift, schedule, None, approved_requests)
+                    if can_assign:
+                        test_shift.id = str(uuid.uuid4())
+                        schedule.shifts.append(test_shift)
+                        current = schedule.total_hours.get(intern.id, 0)
+                        schedule.total_hours[intern.id] = current + test_shift.hours
+                        hours_needed -= shift_hours
+                        print(f"[SCHEDULER] Assigned intern {intern.name} to {location} on {day} ({shift_start}-{actual_end}, {shift_hours}h)")
+                        break  # Move to next day after assigning one shift
+        
         # Process managers separately (assign to management role, no location constraints)
         # Managers work Monday-Friday only (weekdays), one 8-hour shift per day
         weekday_order = ["monday", "tuesday", "wednesday", "thursday", "friday"]
@@ -919,14 +1007,12 @@ class SchedulingEngine:
                 if hours_remaining < 8:
                     break
                 
-                avail = availabilities.get(manager.id)
-                if not avail:
-                    # Managers without availability get default full-day availability
-                    avail = Availability(
-                        id=str(uuid.uuid4()),
-                        employee_id=manager.id,
-                        week_start_date=week_start_date
-                    )
+                # Use default availability (available all day)
+                avail = Availability(
+                    id=str(uuid.uuid4()),
+                    employee_id=manager.id,
+                    week_start_date=week_start_date
+                )
                 
                 # Assign one 8-hour shift (09:00-17:00) for this day
                 test_shift = Shift(

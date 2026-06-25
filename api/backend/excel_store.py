@@ -688,7 +688,7 @@ def get_availabilities(week_start_date: Optional[date] = None, employee_id: Opti
                     row_date = datetime.strptime(week_str, '%Y-%m-%d').date()
                     if row_date != week_start_date:
                         continue
-                except:
+                except (ValueError, TypeError):
                     continue
             
             avail = Availability(
@@ -1796,7 +1796,7 @@ def get_all_week_schedule_dates() -> List[date]:
                     date_str = sheet_name.replace('Schedule_', '').replace('_', '-')
                     week_date = datetime.strptime(date_str, '%Y-%m-%d').date()
                     dates.append(week_date)
-                except:
+                except (ValueError, TypeError):
                     pass
             else:
                 # Try native format (e.g., "June 1-7")
@@ -1862,7 +1862,7 @@ def get_availability_requests() -> List[Dict]:
                     try:
                         import json
                         request['days_of_week'] = json.loads(request['days_of_week'])
-                    except:
+                    except (json.JSONDecodeError, TypeError, ValueError):
                         pass
             else:
                 # Old schema for backward compatibility
@@ -1894,7 +1894,7 @@ def get_availability_requests() -> List[Dict]:
             if request['preferences']:
                 try:
                     request['preferences'] = json.loads(request['preferences'])
-                except:
+                except (json.JSONDecodeError, TypeError, ValueError):
                     request['preferences'] = None
             requests.append(request)
         

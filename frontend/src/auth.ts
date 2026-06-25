@@ -11,32 +11,6 @@ export interface User {
 }
 
 export const auth = {
-  login: async (employeeId: string): Promise<User> => {
-    const response = await fetch(`${API_BASE_URL}/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ employee_id: employeeId })
-    })
-    
-    if (!response.ok) {
-      throw new Error('Login failed')
-    }
-    
-    const data = await response.json()
-    localStorage.setItem(TOKEN_KEY, data.token)
-    
-    // Map backend employee_type to frontend role
-    const role = data.role || 'employee'
-    const user = {
-      employee_id: data.employee.id,
-      employee_name: data.employee.name,
-      role: role as 'admin' | 'manager' | 'employee' | 'intern' | 'student_worker'
-    }
-    localStorage.setItem(USER_KEY, JSON.stringify(user))
-    
-    return user
-  },
-  
   logout: async () => {
     const token = localStorage.getItem(TOKEN_KEY)
     if (token) {

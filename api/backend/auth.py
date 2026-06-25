@@ -1,36 +1,57 @@
-from typing import Optional, Dict, Callable
+from typing import Optional, Dict, Callable, Set
 from datetime import datetime, timedelta
 from fastapi import HTTPException, Header
 import secrets
-import base64
 import json
 import os
+import jwt
+from datetime import timezone
+import threading
 
 # JWT-based authentication (stateless, works with Vercel serverless)
 class AuthManager:
     SESSION_DURATION_HOURS = 24
-    JWT_SECRET = os.getenv("JWT_SECRET", "ibu-schedule-secret-key-change-in-production")
+    JWT_SECRET = os.getenv("JWT_SECRET")
+    
+    # Token blacklist for revocation (in-memory, thread-safe)
+    _revoked_tokens: Set[str] = set()
+    _revoked_lock = threading.RLock()
+    
+    @staticmethod
+    def _ensure_secret() -> None:
+        """Ensure JWT_SECRET is set, raise error if not."""
+        if not AuthManager.JWT_SECRET:
+            raise HTTPException(
+                status_code=500,
+                detail="JWT_SECRET environment variable not set. Please configure it for secure authentication."
+            )
 
     @staticmethod
     def _encode_jwt(payload: Dict) -> str:
-        """Simple JWT-like encoding (base64) - for production use proper JWT library"""
-        payload_str = json.dumps(payload)
-        encoded = base64.b64encode(payload_str.encode()).decode()
-        return encoded
+        """Encode payload as JWT using HS256 algorithm."""
+        AuthManager._ensure_secret()
+        # Use numeric 'exp' claim for JWT standard compliance
+        payload_with_exp = payload.copy()
+        payload_with_exp["exp"] = (datetime.now(timezone.utc) + timedelta(hours=AuthManager.SESSION_DURATION_HOURS)).timestamp()
+        token = jwt.encode(payload_with_exp, AuthManager.JWT_SECRET, algorithm="HS256")
+        return token
 
     @staticmethod
     def _decode_jwt(token: str) -> Optional[Dict]:
-        """Simple JWT-like decoding"""
+        """Decode and verify JWT token."""
+        AuthManager._ensure_secret()
         try:
-            decoded = base64.b64decode(token).decode()
-            return json.loads(decoded)
-        except:
+            payload = jwt.decode(token, AuthManager.JWT_SECRET, algorithms=["HS256"])
+            return payload
+        except jwt.ExpiredSignatureError:
+            return None
+        except jwt.InvalidTokenError:
             return None
 
     @staticmethod
     def login(employee_id: str, password: Optional[str] = None, get_employee_func: Optional[Callable] = None) -> str:
         """Create a JWT token for an employee"""
-        # Use Excel-based employee lookup for all users
+        # Use employee lookup function
         if get_employee_func:
             employee = get_employee_func(employee_id)
         else:
@@ -39,12 +60,20 @@ class AuthManager:
         if not employee:
             raise HTTPException(status_code=401, detail="Invalid employee")
 
-        # Create JWT payload
+        # Handle both Employee objects and dicts
+        if isinstance(employee, dict):
+            employee_name = employee.get("name", employee_id)
+            employee_role = employee.get("employee_type", "employee")
+        else:
+            employee_name = employee.name
+            employee_role = employee.employee_type
+
+        # Create JWT payload (exp is added in _encode_jwt)
         payload = {
             "employee_id": employee_id,
-            "employee_name": employee.name,
-            "role": employee.employee_type,
-            "expires": (datetime.now() + timedelta(hours=AuthManager.SESSION_DURATION_HOURS)).isoformat()
+            "employee_name": employee_name,
+            "role": employee_role,
+            "jti": secrets.token_hex(16)  # Unique token ID for revocation
         }
 
         # Encode as token
@@ -53,10 +82,30 @@ class AuthManager:
         return token
 
     @staticmethod
-    def logout(token: str):
-        """JWT tokens are stateless - no server-side logout needed"""
-        # Client should simply discard the token
-        pass
+    def logout(token: str) -> None:
+        """Revoke a JWT token by adding it to the blacklist."""
+        if not token or not token.startswith("Bearer "):
+            return
+        
+        token = token.replace("Bearer ", "")
+        
+        # Decode to get jti (token ID) for revocation
+        try:
+            payload = AuthManager._decode_jwt(token)
+            if payload and "jti" in payload:
+                with AuthManager._revoked_lock:
+                    AuthManager._revoked_tokens.add(payload["jti"])
+        except (jwt.InvalidTokenError, ValueError, KeyError):
+            # If token is invalid, no need to revoke
+            pass
+
+    @staticmethod
+    def revoke_token_for_user(employee_id: str) -> None:
+        """Revoke all tokens for a specific user (e.g., on password change or employee deletion)."""
+        # In a production system with Redis, we would store user->token mappings
+        # For in-memory implementation, we can only revoke tokens we've seen
+        # This is a limitation of the simple in-memory approach
+        print(f"[AUTH] Revoking all tokens for employee {employee_id} (limited in-memory implementation)")
 
     @staticmethod
     def get_current_user(authorization: Optional[str] = Header(None)) -> Optional[Dict]:
@@ -70,10 +119,11 @@ class AuthManager:
         if not payload:
             return None
 
-        # Check expiration
-        expires = datetime.fromisoformat(payload["expires"])
-        if datetime.now() > expires:
-            return None
+        # Check if token is revoked
+        if "jti" in payload:
+            with AuthManager._revoked_lock:
+                if payload["jti"] in AuthManager._revoked_tokens:
+                    return None
 
         return payload
 

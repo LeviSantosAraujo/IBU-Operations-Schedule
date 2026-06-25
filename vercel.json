@@ -21,5 +21,11 @@
       "src": "/(.*)",
       "dest": "/frontend/dist/$1"
     }
+  ],
+  "crons": [
+    {
+      "path": "/api/cron/nightly-excel-commit",
+      "schedule": "0 0 * * *"
+    }
   ]
 }

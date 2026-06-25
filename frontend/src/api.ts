@@ -17,13 +17,32 @@ api.interceptors.request.use((config) => {
   if (token) {
     config.headers.Authorization = `Bearer ${token}`
   }
+  console.log(`[API Request] ${config.method?.toUpperCase()} ${config.url}`, {
+    data: config.data,
+    params: config.params
+  })
   return config
 })
 
 // Handle auth errors - let React Router handle redirects via ProtectedRoute
 api.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    console.log(`[API Response] ${response.config.method?.toUpperCase()} ${response.config.url}`, {
+      status: response.status,
+      data: response.data
+    })
+    return response
+  },
   (error) => {
+    console.error(`[API Error] ${error.config?.method?.toUpperCase()} ${error.config?.url}`, {
+      status: error.response?.status,
+      message: error.message,
+      data: error.response?.data
+    })
+    
+    // Log to backend if available
+    logErrorToBackend(error)
+    
     // Clear token on 401, but let ProtectedRoute handle the redirect
     if (error.response?.status === 401) {
       auth.logout()
@@ -31,6 +50,29 @@ api.interceptors.response.use(
     return Promise.reject(error)
   }
 )
+
+// Log errors to backend
+async function logErrorToBackend(error: any) {
+  try {
+    const errorData = {
+      type: 'api_error',
+      url: error.config?.url,
+      method: error.config?.method,
+      status: error.response?.status,
+      message: error.message,
+      timestamp: new Date().toISOString(),
+      userAgent: navigator.userAgent
+    }
+    await fetch(`${API_BASE_URL}/log-error`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(errorData)
+    })
+  } catch (e) {
+    // Silent fail - don't break the app if error logging fails
+    console.error('Failed to log error to backend:', e)
+  }
+}
 
 // Employees
 export const getEmployees = (activeOnly = false) => 
@@ -146,6 +188,9 @@ export const getNotifications = () =>
 
 export const markNotificationAsRead = (notificationId: string) => 
   api.put(`/notifications/${notificationId}/read`).then(r => r.data)
+
+export const markAllNotificationsAsRead = () => 
+  api.put('/notifications/read-all').then(r => r.data)
 
 // Events
 export function getEvents() {
