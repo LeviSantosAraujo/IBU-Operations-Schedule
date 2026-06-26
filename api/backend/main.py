@@ -107,7 +107,6 @@ from data_store_excel import (
     get_all_schedules, get_schedule_by_week, save_schedule, delete_schedule,
     get_floor_coverage, get_system_config, save_system_config,
     get_availability_requests, save_availability_request,
-    get_events, save_event, delete_event,
     get_all_week_schedule_dates,
     set_manager_password, verify_manager_password, manager_has_password,
     get_coverage_requirements, save_coverage_requirement,
@@ -2680,9 +2679,8 @@ async def get_week_events():
     """Get all events"""
     try:
         # Read from GitHub JSON (single source of truth)
-        config = staging_store.get_system_config()
-        staging_events = config.get('events', [])
-        events = [Event(**e) for e in staging_events]
+        events_dict = staging_store.get_events()
+        events = [Event(**e) for e in events_dict]
         
         # Convert to dict with string dates
         return [
@@ -2731,20 +2729,13 @@ async def create_event(event_data: dict, authorization: str = Header(None)):
     
     # Create Event object
     event = Event(**event_data)
-    result = save_event(event)
     
-    # Update staging layer
-    # Events are stored in system config
-    config = staging_store.get_system_config()
-    if 'events' not in config:
-        config['events'] = []
-    config['events'].append(result.model_dump())
-    staging_store.set_system_config(config, user_id=user.get('employee_id'))
+    # Save to GitHub JSON (single source of truth)
+    events = staging_store.get_events()
+    events.append(event.model_dump())
+    staging_store.set_events(events, user_id=user.get('employee_id'))
     
-    # Add to action queue for Excel sync
-    # No action queue needed - GitHub JSON is single source of truth
-    
-    return result
+    return event
 
 @app.put("/api/events/{event_id}")
 async def update_event(event_id: str, event_data: dict, authorization: str = Header(None)):
@@ -2762,19 +2753,13 @@ async def update_event(event_id: str, event_data: dict, authorization: str = Hea
         event_data['date'] = date.fromisoformat(event_data['date'])
     
     event = Event(**event_data)
-    result = save_event(event)
     
-    # Update staging layer
-    config = staging_store.get_system_config()
-    if 'events' not in config:
-        config['events'] = []
-    config['events'] = [e if e['id'] != event_id else result.model_dump() for e in config['events']]
-    staging_store.set_system_config(config, user_id=user.get('employee_id'))
+    # Update in GitHub JSON (single source of truth)
+    events = staging_store.get_events()
+    events = [e if e['id'] != event_id else event.model_dump() for e in events]
+    staging_store.set_events(events, user_id=user.get('employee_id'))
     
-    # Add to action queue for Excel sync
-    # No action queue needed - GitHub JSON is single source of truth
-    
-    return result
+    return event
 
 @app.get("/api/cron/nightly-excel-commit")
 async def nightly_excel_commit():
@@ -2910,16 +2895,12 @@ async def remove_event(event_id: str, authorization: str = Header(None)):
     """Delete an event"""
     user = require_manager(authorization)
     
-    if delete_event(event_id):
-        # Update staging layer
-        config = staging_store.get_system_config()
-        if 'events' in config:
-            config['events'] = [e for e in config['events'] if e['id'] != event_id]
-            staging_store.set_system_config(config, user_id=user.get('employee_id'))
-        
-        # Add to action queue for Excel sync
-        # No action queue needed - GitHub JSON is single source of truth
-        
+    # Delete from GitHub JSON (single source of truth)
+    events = staging_store.get_events()
+    original_count = len(events)
+    events = [e for e in events if e['id'] != event_id]
+    if len(events) < original_count:
+        staging_store.set_events(events, user_id=user.get('employee_id'))
         return {"success": True}
     
     raise HTTPException(status_code=404, detail="Event not found")
