@@ -6,52 +6,12 @@ from dotenv import load_dotenv
 # Load environment variables from .env for local development BEFORE any imports
 load_dotenv('.env')
 
-from fastapi import FastAPI, HTTPException, Query, Header, Depends, UploadFile, File, Form, Cookie
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
-from contextlib import asynccontextmanager
-from typing import List, Optional, Dict
-from datetime import date, datetime, timedelta
-import uuid
-import threading
-import queue
-import time
-import shutil
-import io
-import re
-from pathlib import Path
-from pydantic import BaseModel
-
-from models import (
-    Employee, EmployeeUpdate, Availability, WeeklySchedule, Shift, JobType, Floor,
-    AvailabilityType, EmployeeType, FloorCoverageQuery, FloorCoverageResponse,
-    AVAILABILITY_COLORS, HourlyCoverageRequirement,
-    AvailabilityRequest, AvailabilityRequestStatus, Notification, NotificationType, Event
-)
+# Import log_storage first for print override
 import log_storage
-import sys
 from datetime import datetime, timezone
 from collections import defaultdict
-
-# In-memory session tracking
-_active_sessions = defaultdict(lambda: datetime.now(timezone.utc))
-_session_lock = threading.Lock()
-
-def track_session(user_id: str):
-    """Track a user session."""
-    with _session_lock:
-        _active_sessions[user_id] = datetime.now(timezone.utc)
-
-def get_active_session_count() -> int:
-    """Get count of active sessions (last 5 minutes)."""
-    with _session_lock:
-        now = datetime.now(timezone.utc)
-        cutoff = now - timedelta(minutes=5)
-        # Remove stale sessions
-        stale_users = [uid for uid, last_seen in _active_sessions.items() if last_seen < cutoff]
-        for uid in stale_users:
-            del _active_sessions[uid]
-        return len(_active_sessions)
+import threading
+from datetime import timedelta
 
 # Custom print function to capture logs for monitoring dashboard
 _original_print = print
@@ -73,8 +33,52 @@ def custom_print(*args, **kwargs):
     # Call original print
     _original_print(*args, **kwargs)
 
-# Override print globally
+# Override print globally BEFORE any other imports
 print = custom_print
+
+# In-memory session tracking
+_active_sessions = defaultdict(lambda: datetime.now(timezone.utc))
+_session_lock = threading.Lock()
+
+def track_session(user_id: str):
+    """Track a user session."""
+    with _session_lock:
+        _active_sessions[user_id] = datetime.now(timezone.utc)
+
+def get_active_session_count() -> int:
+    """Get count of active sessions (last 5 minutes)."""
+    with _session_lock:
+        now = datetime.now(timezone.utc)
+        cutoff = now - timedelta(minutes=5)
+        # Remove stale sessions
+        stale_users = [uid for uid, last_seen in _active_sessions.items() if last_seen < cutoff]
+        for uid in stale_users:
+            del _active_sessions[uid]
+        return len(_active_sessions)
+
+# Now import all other modules (they will use custom print)
+from fastapi import FastAPI, HTTPException, Query, Header, Depends, UploadFile, File, Form, Cookie
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
+from contextlib import asynccontextmanager
+from typing import List, Optional, Dict
+from datetime import date
+import uuid
+import queue
+import time
+import shutil
+import io
+import re
+from pathlib import Path
+from pydantic import BaseModel
+import sys
+
+from models import (
+    Employee, EmployeeUpdate, Availability, WeeklySchedule, Shift, JobType, Floor,
+    AvailabilityType, EmployeeType, FloorCoverageQuery, FloorCoverageResponse,
+    AVAILABILITY_COLORS, HourlyCoverageRequirement,
+    AvailabilityRequest, AvailabilityRequestStatus, Notification, NotificationType, Event
+)
 
 from excel_store import (
     set_blob_key, _clear_workbook_cache
@@ -4102,7 +4106,7 @@ async def admin_dashboard(admin_session: Optional[str] = Cookie(None)):
             <h1>IBU Operations - System Monitoring Dashboard</h1>
             <a href="/admin/logout" class="logout-btn">Logout</a>
         </div>
-        <div style="margin-bottom:15px; color:#666; font-size:13px;">Auto-refreshes every 5 minutes &nbsp;|&nbsp; <a href="#" onclick="loadDashboard(); return false;" style="color:#007bff;">Refresh now</a> &nbsp;|&nbsp; Last updated: <span id="last-updated">-</span></div>
+        <div style="margin-bottom:15px; color:#666; font-size:13px;">Auto-refreshes every 5 minutes &nbsp;|&nbsp; Last updated: <span id="last-updated">-</span></div>
         
         <div class="grid">
             <div class="card">
@@ -4358,7 +4362,7 @@ async def get_health_status():
     frontend_last_error = frontend_logs[-1].get('message') if frontend_logs else None
     
     # Get Vercel deploy time for frontend start time
-    frontend_start_time = os.getenv("VERCEL_DEPLOY_TIME", "N/A")
+    frontend_start_time = os.getenv("VERCEL_GIT_COMMIT_TIMESTAMP", "N/A")
     
     return {
         "backend_start_time": logs.get_server_start_time(),

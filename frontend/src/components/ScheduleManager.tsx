@@ -542,10 +542,10 @@ export default function ScheduleManager() {
       // Dispatch event after delay to ensure backend write completes
       setTimeout(() => {
         window.dispatchEvent(new CustomEvent('scheduleUpdate'))
+        setGlobalLoading(false)
       }, 3000)
     } catch (err) {
       alert('Error clearing schedule')
-    } finally {
       setGlobalLoading(false)
     }
   }
