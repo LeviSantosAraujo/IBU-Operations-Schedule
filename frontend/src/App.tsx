@@ -56,7 +56,7 @@ function AppLayout({ onLogout }: { onLogout: () => void }) {
         <div className="max-w-7xl mx-auto px-4">
           <div className="flex items-center justify-between h-16">
             <div className="flex items-center">
-              <div className="flex-shrink-0 font-bold text-xl">IBU Operations team schedule</div>
+              <div className="flex-shrink-0 font-bold text-xl md:text-xl text-base truncate max-w-[150px] md:max-w-none">IBU Operations schedule</div>
               {/* Desktop Navigation */}
               <div className="hidden md:flex ml-10 space-x-4">
                 {/* Employees see their schedule and availability */}

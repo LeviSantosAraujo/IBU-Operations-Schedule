@@ -973,7 +973,7 @@ export default function ScheduleManager() {
 
                   {/* Edit/Delete controls – only for event locations */}
                   {matchedEvent && (
-                    <div className="px-2 pb-2">
+                    <div className="px-2 pb-2 flex gap-1">
                       {isEditing ? (
                         <div className="flex flex-col gap-1">
                           <input

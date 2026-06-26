@@ -329,7 +329,7 @@ export default function EmployeeScheduleView() {
                 </tr>
               </thead>
               <tbody>
-                {employees.filter(emp => !user || emp.id === user.employee_id).map(emp => {
+                {employees.map(emp => {
                   const empHours = getEmployeeHours(emp.id)
                   
                   return (
@@ -359,11 +359,11 @@ export default function EmployeeScheduleView() {
                           })
                           .sort((a: any, b: any) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime()) : []
 
-                        // Only show request history if no shifts are set
-                        const showRequestHistory = dayRequests.length > 0 && shifts.length === 0
+                        // Only show request history for current user when no shifts are set
+                        const showRequestHistory = isCurrentUser && dayRequests.length > 0 && shifts.length === 0
                         
-                        // Dim other employees only if they have no shifts
-                        const shouldDim = !isCurrentUser && shifts.length === 0
+                        // Dim other employees only if they have no non-locked shifts
+                        const shouldDim = !isCurrentUser && shifts.filter((s: Shift) => !s.locked).length === 0
                         
                         return (
                           <td
@@ -373,6 +373,7 @@ export default function EmployeeScheduleView() {
                           >
                             {shifts.map((shift: Shift) => (
                               shift.locked ? (
+                                isCurrentUser ? (
                                 <div
                                   key={shift.id}
                                   className={`rounded p-2 mb-1 text-xs border ${
@@ -389,6 +390,7 @@ export default function EmployeeScheduleView() {
                                   <div className="font-medium">{shift.start_time} – {shift.end_time}</div>
                                   {shift.comment && <div className="italic text-xs">{shift.comment}</div>}
                                 </div>
+                                ) : null
                               ) : (
                                 <div
                                   key={shift.id}
