@@ -484,4 +484,6 @@ Internal use only for IBU scheduling operations.
 
 ## Support
 
-For issues or feature requests, contact the system administrator.
+For issues or feature requests, contact:
+- **Developer**: Levi Araujo
+- **Email**: laraujo.8304@myibu.ca
