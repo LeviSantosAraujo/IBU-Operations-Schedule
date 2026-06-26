@@ -17,6 +17,13 @@ api.interceptors.request.use((config) => {
   if (token) {
     config.headers.Authorization = `Bearer ${token}`
   }
+  
+  // Safeguard: strip leading /api/ to prevent double-prefix 404s
+  // (baseURL already includes /api, so relative URLs should not start with /api)
+  if (config.url && config.url.startsWith('/api/')) {
+    config.url = config.url.substring(5) // Remove leading '/api/'
+  }
+  
   console.log(`[API Request] ${config.method?.toUpperCase()} ${config.url}`, {
     data: config.data,
     params: config.params
@@ -79,19 +86,19 @@ export const getEmployees = (activeOnly = false) =>
   api.get(`/employees?active_only=${activeOnly}`).then(r => r.data)
 
 export const getEmployee = (id: string) => 
-  api.get(`/api/employees/${id}`).then(r => r.data)
+  api.get(`/employees/${id}`).then(r => r.data)
 
 export const createEmployee = (data: any) => 
-  api.post('/api/employees', data).then(r => r.data)
+  api.post('/employees', data).then(r => r.data)
 
 export const updateEmployee = (id: string, data: any) => 
-  api.put(`/api/employees/${id}`, data).then(r => r.data)
+  api.put(`/employees/${id}`, data).then(r => r.data)
 
 export const updateManagerPassword = (employeeId: string, password: string) =>
   api.put('/managers/update-password', { employee_id: employeeId, password }).then(r => r.data)
 
 export const deleteEmployee = (id: string) => 
-  api.delete(`/api/employees/${id}`).then(r => r.data)
+  api.delete(`/employees/${id}`).then(r => r.data)
 
 // Availability
 export const getAvailabilities = (weekStartDate?: string, employeeId?: string) => {
