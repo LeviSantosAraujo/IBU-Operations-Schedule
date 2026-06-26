@@ -6,9 +6,9 @@ from dotenv import load_dotenv
 # Load environment variables from .env for local development BEFORE any imports
 load_dotenv('.env')
 
-from fastapi import FastAPI, HTTPException, Query, Header, Depends, UploadFile, File, Form
+from fastapi import FastAPI, HTTPException, Query, Header, Depends, UploadFile, File, Form, Cookie
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from contextlib import asynccontextmanager
 from typing import List, Optional, Dict
 from datetime import date, datetime, timedelta
@@ -3933,11 +3933,95 @@ def verify_admin_auth(username: str, password: str) -> bool:
     """Verify admin credentials."""
     return username == "admin" and password == "ibu-admin-secret-2026"
 
-@app.get("/admin/dashboard")
-async def admin_dashboard(username: str = Query(...), password: str = Query(...)):
-    """Serve admin dashboard HTML page."""
+@app.get("/admin/login")
+async def admin_login():
+    """Serve admin login page."""
+    html_content = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Login - IBU Operations</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
+        .login-container { background: white; padding: 40px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); width: 100%; max-width: 400px; }
+        h1 { color: #333; margin-bottom: 20px; text-align: center; }
+        .form-group { margin-bottom: 20px; }
+        label { display: block; color: #666; margin-bottom: 8px; font-weight: 500; }
+        input { width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; }
+        input:focus { outline: none; border-color: #007bff; }
+        button { width: 100%; padding: 12px; background: #007bff; color: white; border: none; border-radius: 4px; font-size: 14px; font-weight: 500; cursor: pointer; }
+        button:hover { background: #0056b3; }
+        .error { color: #dc3545; text-align: center; margin-bottom: 20px; padding: 10px; background: #f8d7da; border-radius: 4px; display: none; }
+    </style>
+</head>
+<body>
+    <div class="login-container">
+        <h1>Admin Login</h1>
+        <div id="error" class="error">Invalid credentials</div>
+        <form id="loginForm">
+            <div class="form-group">
+                <label for="username">Username</label>
+                <input type="text" id="username" name="username" required autofocus>
+            </div>
+            <div class="form-group">
+                <label for="password">Password</label>
+                <input type="password" id="password" name="password" required>
+            </div>
+            <button type="submit">Login</button>
+        </form>
+    </div>
+    <script>
+        document.getElementById('loginForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+            
+            const response = await fetch('/admin/api/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username, password })
+            });
+            
+            if (response.ok) {
+                window.location.href = '/admin/dashboard';
+            } else {
+                document.getElementById('error').style.display = 'block';
+            }
+        });
+    </script>
+</body>
+</html>
+    """
+    return HTMLResponse(content=html_content)
+
+@app.post("/admin/api/login")
+async def admin_api_login(credentials: dict):
+    """Handle admin login."""
+    username = credentials.get('username')
+    password = credentials.get('password')
+    
     if not verify_admin_auth(username, password):
         raise HTTPException(status_code=401, detail="Invalid credentials")
+    
+    response = JSONResponse(content={"success": True})
+    response.set_cookie(key="admin_session", value="authenticated", httponly=True, secure=True, samesite="lax")
+    return response
+
+@app.get("/admin/logout")
+async def admin_logout():
+    """Handle admin logout."""
+    response = RedirectResponse(url="/admin/login")
+    response.delete_cookie(key="admin_session")
+    return response
+
+@app.get("/admin/dashboard")
+async def admin_dashboard(admin_session: Optional[str] = Cookie(None)):
+    """Serve admin dashboard HTML page."""
+    if admin_session != "authenticated":
+        return RedirectResponse(url="/admin/login")
     
     html_content = """
 <!DOCTYPE html>
@@ -3966,7 +4050,9 @@ async def admin_dashboard(username: str = Query(...), password: str = Query(...)
         .metric { display: flex; justify-content: space-between; margin-bottom: 10px; }
         .metric-label { color: #666; }
         .metric-value { font-weight: bold; color: #333; }
-        .log-container { background: #1e1e1e; color: #d4d4d4; padding: 15px; border-radius: 5px; max-height: 600px; overflow-y: auto; font-family: monospace; font-size: 12px; line-height: 1.5; }
+        .log-container { background: #1e1e1e; color: #d4d4d4; padding: 15px; border-radius: 5px; max-height: 360px; overflow-y: auto; font-family: monospace; font-size: 12px; line-height: 1.5; }
+        .logout-btn { background: #dc3545; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-size: 13px; text-decoration: none; }
+        .logout-btn:hover { background: #c82333; }
         .log-entry { margin-bottom: 5px; padding: 5px; border-bottom: 1px solid #333; }
         .log-entry.error { color: #f8d7da; }
         .log-entry.warning { color: #fff3cd; }
@@ -3978,7 +4064,10 @@ async def admin_dashboard(username: str = Query(...), password: str = Query(...)
 </head>
 <body>
     <div class="container">
-        <h1>IBU Operations - System Monitoring Dashboard</h1>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+            <h1>IBU Operations - System Monitoring Dashboard</h1>
+            <a href="/admin/logout" class="logout-btn">Logout</a>
+        </div>
         <div id="status-banner" class="status-banner green">System Healthy</div>
         <div style="margin-bottom:15px; color:#666; font-size:13px;">Auto-refreshes every 5 minutes &nbsp;|&nbsp; <a href="#" onclick="loadDashboard(); return false;" style="color:#007bff;">Refresh now</a> &nbsp;|&nbsp; Last updated: <span id="last-updated">-</span></div>
         
@@ -4079,11 +4168,25 @@ async def admin_dashboard(username: str = Query(...), password: str = Query(...)
     </div>
     
     <script>
+        function formatTimestamp(isoString) {
+            const date = new Date(isoString);
+            return date.toLocaleString('en-CA', {
+                timeZone: 'America/Toronto',
+                hour12: false,
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit',
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit'
+            }).replace(',', '');
+        }
+        
         function loadDashboard() {
             fetch('/api/health')
                 .then(r => r.json())
                 .then(data => {
-                    document.getElementById('backend-start-time').textContent = data.backend_start_time;
+                    document.getElementById('backend-start-time').textContent = formatTimestamp(data.backend_start_time);
                     document.getElementById('backend-errors').textContent = data.backend_has_errors ? 'Yes' : 'No';
                     
                     const frontendStatusEl = document.getElementById('frontend-status');
@@ -4097,11 +4200,11 @@ async def admin_dashboard(username: str = Query(...), password: str = Query(...)
                     document.getElementById('github-api-status').textContent = data.github_health.api_status;
                     document.getElementById('github-branch').textContent = data.github_health.branch;
                     document.getElementById('github-rate-limit').textContent = data.github_health.rate_limit;
-                    document.getElementById('github-last-commit').textContent = data.github_health.last_commit;
-                    document.getElementById('file-employees').textContent = data.github_health.file_updates['employees.json'] || 'N/A';
-                    document.getElementById('file-schedules').textContent = data.github_health.file_updates['schedules.json'] || 'N/A';
-                    document.getElementById('file-availabilities').textContent = data.github_health.file_updates['availabilities.json'] || 'N/A';
-                    document.getElementById('file-requests').textContent = data.github_health.file_updates['availability_requests.json'] || 'N/A';
+                    document.getElementById('github-last-commit').textContent = data.github_health.last_commit !== 'Unknown' && data.github_health.last_commit !== 'Error fetching' ? formatTimestamp(data.github_health.last_commit) : data.github_health.last_commit;
+                    document.getElementById('file-employees').textContent = data.github_health.file_updates['employees.json'] !== 'N/A' && data.github_health.file_updates['employees.json'] !== 'No commits' && data.github_health.file_updates['employees.json'] !== 'Error' ? formatTimestamp(data.github_health.file_updates['employees.json']) : data.github_health.file_updates['employees.json'];
+                    document.getElementById('file-schedules').textContent = data.github_health.file_updates['schedules.json'] !== 'N/A' && data.github_health.file_updates['schedules.json'] !== 'No commits' && data.github_health.file_updates['schedules.json'] !== 'Error' ? formatTimestamp(data.github_health.file_updates['schedules.json']) : data.github_health.file_updates['schedules.json'];
+                    document.getElementById('file-availabilities').textContent = data.github_health.file_updates['availabilities.json'] !== 'N/A' && data.github_health.file_updates['availabilities.json'] !== 'No commits' && data.github_health.file_updates['availabilities.json'] !== 'Error' ? formatTimestamp(data.github_health.file_updates['availabilities.json']) : data.github_health.file_updates['availabilities.json'];
+                    document.getElementById('file-requests').textContent = data.github_health.file_updates['availability_requests.json'] !== 'N/A' && data.github_health.file_updates['availability_requests.json'] !== 'No commits' && data.github_health.file_updates['availability_requests.json'] !== 'Error' ? formatTimestamp(data.github_health.file_updates['availability_requests.json']) : data.github_health.file_updates['availability_requests.json'];
                     document.getElementById('cache-hit-rate').textContent = data.metrics.cache_hit_rate;
                     document.getElementById('cache-hits').textContent = data.metrics.cache_hits;
                     document.getElementById('cache-misses').textContent = data.metrics.cache_misses;
@@ -4117,7 +4220,7 @@ async def admin_dashboard(username: str = Query(...), password: str = Query(...)
                         banner.textContent = 'System Healthy';
                     }
                     
-                    document.getElementById('last-updated').textContent = new Date().toLocaleTimeString();
+                    document.getElementById('last-updated').textContent = formatTimestamp(new Date().toISOString());
                 });
             
             fetch('/api/logs/backend')
@@ -4129,7 +4232,7 @@ async def admin_dashboard(username: str = Query(...), password: str = Query(...)
                     } else {
                         container.innerHTML = data.logs.map(log => 
                             `<div class="log-entry ${log.level.toLowerCase()}">
-                                <span class="timestamp">${log.timestamp}</span>
+                                <span class="timestamp">${formatTimestamp(log.timestamp)}</span>
                                 <span class="level">[${log.level}]</span>
                                 <span>${log.message}</span>
                             </div>`
