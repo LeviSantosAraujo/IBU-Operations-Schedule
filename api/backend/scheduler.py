@@ -504,7 +504,7 @@ class SchedulingEngine:
             
             event_keys = [
                 event.id,
-                f"event_{event.id}" if not str(event.id).startswith('event_') else str(event.id).replace('event_', 'event_event_', 1),
+                f"event_{event.id}" if not str(event.id).startswith('event_') else str(event.id),
                 f"event_{event.name.lower().replace(' ', '_')}",
                 event.name.lower().replace(' ', '_')
             ]

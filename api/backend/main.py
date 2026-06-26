@@ -1582,12 +1582,12 @@ async def create_or_update_schedule(
     """Save a schedule (manual editing) (managers only)"""
     schedule.updated_at = datetime.now()
     
-    # Update staging layer first (fast)
+    # Update staging layer with immediate write to prevent race conditions
     schedules = staging_store.get_schedules()
     schedules = [s if s['id'] != schedule.id else schedule.model_dump() for s in schedules]
     if not any(s['id'] == schedule.id for s in schedules):
         schedules.append(schedule.model_dump())
-    staging_store.set_schedules(schedules, user_id=user.get('employee_id'))
+    staging_store.set_schedules(schedules, user_id=user.get('employee_id'), immediate=True)
     
     # Add to action queue for Excel sync (async, no blocking)
     # No action queue needed - GitHub JSON is single source of truth
@@ -1631,10 +1631,10 @@ async def update_schedule_shifts(
     schedule.total_hours = total_hours
     schedule.updated_at = datetime.now()
     
-    # Update staging layer first (fast)
+    # Update staging layer with immediate write to prevent race conditions
     schedules = staging_store.get_schedules()
     schedules = [s if s['id'] != schedule.id else schedule.model_dump() for s in schedules]
-    staging_store.set_schedules(schedules, user_id=user.get('employee_id'))
+    staging_store.set_schedules(schedules, user_id=user.get('employee_id'), immediate=True)
     
     # Add to action queue for Excel sync (async, no blocking)
     # No action queue needed - GitHub JSON is single source of truth
@@ -1674,10 +1674,10 @@ async def mark_break_provided(
     shift.break_provided = break_provided
     schedule.updated_at = datetime.now()
     
-    # Update staging layer first (fast)
+    # Update staging layer with immediate write to prevent race conditions
     schedules = staging_store.get_schedules()
     schedules = [s if s['id'] != schedule.id else schedule.model_dump() for s in schedules]
-    staging_store.set_schedules(schedules, user_id=user.get('employee_id'))
+    staging_store.set_schedules(schedules, user_id=user.get('employee_id'), immediate=True)
     
     # Add to action queue for Excel sync (async, no blocking)
     # No action queue needed - GitHub JSON is single source of truth
@@ -1709,10 +1709,10 @@ async def publish_schedule(
         raise HTTPException(status_code=404, detail="Schedule not found")
     schedule.status = "published"
     
-    # Update staging layer first (fast)
+    # Update staging layer with immediate write to prevent race conditions
     schedules = staging_store.get_schedules()
     schedules = [s if s['id'] != schedule.id else schedule.model_dump() for s in schedules]
-    staging_store.set_schedules(schedules, user_id=user.get('employee_id'))
+    staging_store.set_schedules(schedules, user_id=user.get('employee_id'), immediate=True)
     
     # Add to action queue for Excel sync (async, no blocking)
     # No action queue needed - GitHub JSON is single source of truth
@@ -1731,8 +1731,8 @@ async def remove_schedule(
     staging_schedules = [s for s in staging_schedules if str(s.get('week_start_date')) != str(week_start_date)]
     
     if len(staging_schedules) < initial_count:
-        # Schedule was in staging, update staging
-        staging_store.set_schedules(staging_schedules, user_id=user.get('employee_id'))
+        # Schedule was in staging, update staging with immediate write
+        staging_store.set_schedules(staging_schedules, user_id=user.get('employee_id'), immediate=True)
         return {"message": "Schedule deleted"}
     
     raise HTTPException(status_code=404, detail="Schedule not found")
@@ -1980,10 +1980,10 @@ async def create_availability_request(request: Dict, authorization: str = Header
         request['status'] = AvailabilityRequestStatus.PENDING
         request['created_at'] = datetime.now()
 
-        # Update staging layer first (fast)
+        # Update staging layer with immediate write to prevent race conditions
         requests = staging_store.get_availability_requests()
         requests.append(request)
-        staging_store.set_availability_requests(requests, user_id=user.get('employee_id'))
+        staging_store.set_availability_requests(requests, user_id=user.get('employee_id'), immediate=True)
         
         # Add to action queue for Excel sync (async, no blocking)
         # No action queue needed - GitHub JSON is single source of truth
@@ -2131,7 +2131,7 @@ async def create_availability_request(request: Dict, authorization: str = Header
                 notifications.append(notification)
             
             # Save all notifications at once to avoid duplicate writes
-            staging_store.set_notifications(notifications, user_id=user.get('employee_id'))
+            staging_store.set_notifications(notifications, user_id=user.get('employee_id'), immediate=True)
             print(f"[API] Created {len(managers)} manager notifications for request {request['id']}")
                 
         except Exception as e:
@@ -2192,10 +2192,10 @@ async def approve_availability_request(request_id: str, body: Dict = {}, authori
         request_data['approved_by'] = user.get('employee_id')
         request_data['approved_at'] = datetime.now()
 
-        # Update staging layer first (fast)
+        # Update staging layer with immediate write to prevent race conditions
         requests = staging_store.get_availability_requests()
         requests = [r if r['id'] != request_id else request_data for r in requests]
-        staging_store.set_availability_requests(requests, user_id=user.get('employee_id'))
+        staging_store.set_availability_requests(requests, user_id=user.get('employee_id'), immediate=True)
         
         # Add to action queue for Excel sync (async, no blocking)
         # No action queue needed - GitHub JSON is single source of truth
@@ -2340,7 +2340,7 @@ async def approve_availability_request(request_id: str, body: Dict = {}, authori
                 )
             ]
             if len(cleaned) < len(notifications):
-                staging_store.set_notifications(cleaned, user_id=user.get('employee_id'))
+                staging_store.set_notifications(cleaned, user_id=user.get('employee_id'), immediate=True)
         except Exception as e:
             print(f"[APPROVAL] Warning: could not clean up manager notifications: {e}")
 
@@ -2377,7 +2377,7 @@ async def approve_availability_request(request_id: str, body: Dict = {}, authori
             # Update staging layer
             notifications = staging_store.get_notifications()
             notifications.append(notification)
-            staging_store.set_notifications(notifications, user_id=user.get('employee_id'))
+            staging_store.set_notifications(notifications, user_id=user.get('employee_id'), immediate=True)
             
             # Add to action queue for Excel sync (async, no blocking)
             # No action queue needed - GitHub JSON is single source of truth
@@ -2425,10 +2425,10 @@ async def reject_availability_request(request_id: str, body: Dict = {}, authoriz
         request_data['manager_comment'] = body.get('comment', '')
         request_data['updated_at'] = datetime.now()
 
-        # Update staging layer first (fast)
+        # Update staging layer with immediate write to prevent race conditions
         requests = staging_store.get_availability_requests()
         requests = [r if r['id'] != request_id else request_data for r in requests]
-        staging_store.set_availability_requests(requests, user_id=user.get('employee_id'))
+        staging_store.set_availability_requests(requests, user_id=user.get('employee_id'), immediate=True)
 
         # Remove locked shifts for this request (cleanup if it was previously approved)
         try:
@@ -2497,7 +2497,7 @@ async def reject_availability_request(request_id: str, body: Dict = {}, authoriz
                 )
             ]
             if len(cleaned) < len(notifications):
-                staging_store.set_notifications(cleaned, user_id=user.get('employee_id'))
+                staging_store.set_notifications(cleaned, user_id=user.get('employee_id'), immediate=True)
                 print(f"[REJECTION] Removed {len(notifications) - len(cleaned)} manager notifications for request {request_id}")
         except Exception as e:
             print(f"[REJECTION] Warning: could not clean up manager notifications: {e}")
@@ -2532,7 +2532,7 @@ async def reject_availability_request(request_id: str, body: Dict = {}, authoriz
             # Update staging layer
             notifications = staging_store.get_notifications()
             notifications.append(notification)
-            staging_store.set_notifications(notifications, user_id=user.get('employee_id'))
+            staging_store.set_notifications(notifications, user_id=user.get('employee_id'), immediate=True)
             
             # Add to action queue for Excel sync (async, no blocking)
             # No action queue needed - GitHub JSON is single source of truth
@@ -2604,7 +2604,7 @@ async def mark_notification_as_read(notification_id: str, authorization: str = H
             break
     
     if notification_found:
-        staging_store.set_notifications(notifications, user_id=user.get('employee_id'))
+        staging_store.set_notifications(notifications, user_id=user.get('employee_id'), immediate=True)
         # Add to action queue for Excel sync
         # No action queue needed - GitHub JSON is single source of truth
         return {"success": True}
@@ -2627,7 +2627,7 @@ async def mark_all_notifications_as_read(authorization: str = Header(None)):
             updated_count += 1
     
     if updated_count > 0:
-        staging_store.set_notifications(notifications, user_id=user.get('employee_id'))
+        staging_store.set_notifications(notifications, user_id=user.get('employee_id'), immediate=True)
         # Add to action queue for Excel sync
         # No action queue needed - GitHub JSON is single source of truth
     
@@ -2669,7 +2669,7 @@ async def cleanup_processed_notifications(authorization: str = Header(None)):
         removed_count = len(notifications) - len(cleaned)
         
         if removed_count > 0:
-            staging_store.set_notifications(cleaned, user_id=user.get('employee_id'))
+            staging_store.set_notifications(cleaned, user_id=user.get('employee_id'), immediate=True)
             print(f"[CLEANUP] Removed {removed_count} processed/old request notifications")
         
         return {"success": True, "removed_count": removed_count}

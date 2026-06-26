@@ -305,9 +305,15 @@ def get_employee_by_id(employee_id: str) -> Optional[Dict]:
     return None
 
 
-def set_employees(employees: List[Dict], user_id: Optional[str] = None) -> bool:
-    """Set employees in employees.json with audit logging."""
-    result = _write_json_file("employees.json", employees)
+def set_employees(employees: List[Dict], user_id: Optional[str] = None, immediate: bool = False) -> bool:
+    """Set employees in employees.json with audit logging.
+    
+    Args:
+        employees: List of employee dictionaries
+        user_id: Optional user ID for audit logging
+        immediate: If True, bypass debouncing and write immediately
+    """
+    result = _write_json_file("employees.json", employees, user_id=user_id, immediate=immediate)
     if result and user_id:
         import audit_logger
         audit_logger.log_write_operation("employee", "update", None, user_id, {"count": len(employees)})
@@ -341,9 +347,15 @@ def get_availability_requests() -> List[Dict]:
     return data if data else []
 
 
-def set_availability_requests(requests: List[Dict], user_id: Optional[str] = None) -> bool:
-    """Set availability requests in availability_requests.json with audit logging."""
-    result = _write_json_file("availability_requests.json", requests)
+def set_availability_requests(requests: List[Dict], user_id: Optional[str] = None, immediate: bool = False) -> bool:
+    """Set availability requests in availability_requests.json with audit logging.
+    
+    Args:
+        requests: List of availability request dictionaries
+        user_id: Optional user ID for audit logging
+        immediate: If True, bypass debouncing and write immediately
+    """
+    result = _write_json_file("availability_requests.json", requests, user_id=user_id, immediate=immediate)
     if result and user_id:
         import audit_logger
         audit_logger.log_write_operation("availability_request", "update", None, user_id, {"count": len(requests)})
@@ -356,9 +368,15 @@ def get_notifications() -> List[Dict]:
     return data if data else []
 
 
-def set_notifications(notifications: List[Dict], user_id: Optional[str] = None) -> bool:
-    """Set notifications in notifications.json with audit logging."""
-    result = _write_json_file("notifications.json", notifications)
+def set_notifications(notifications: List[Dict], user_id: Optional[str] = None, immediate: bool = False) -> bool:
+    """Set notifications in notifications.json with audit logging.
+    
+    Args:
+        notifications: List of notification dictionaries
+        user_id: Optional user ID for audit logging
+        immediate: If True, bypass debouncing and write immediately
+    """
+    result = _write_json_file("notifications.json", notifications, user_id=user_id, immediate=immediate)
     if result and user_id:
         import audit_logger
         audit_logger.log_write_operation("notification", "update", None, user_id, {"count": len(notifications)})
@@ -371,9 +389,15 @@ def get_system_config() -> Dict:
     return data if data else {}
 
 
-def set_system_config(config: Dict, user_id: Optional[str] = None) -> bool:
-    """Set system config in system_config.json with audit logging."""
-    result = _write_json_file("system_config.json", config)
+def set_system_config(config: Dict, user_id: Optional[str] = None, immediate: bool = False) -> bool:
+    """Set system config in system_config.json with audit logging.
+    
+    Args:
+        config: System configuration dictionary
+        user_id: Optional user ID for audit logging
+        immediate: If True, bypass debouncing and write immediately
+    """
+    result = _write_json_file("system_config.json", config, user_id=user_id, immediate=immediate)
     if result and user_id:
         import audit_logger
         audit_logger.log_write_operation("system_config", "update", None, user_id, {"keys": list(config.keys())})
@@ -386,9 +410,15 @@ def get_availabilities() -> List[Dict]:
     return data if data else []
 
 
-def set_availabilities(availabilities: List[Dict], user_id: Optional[str] = None) -> bool:
-    """Set availabilities in availabilities.json with audit logging."""
-    result = _write_json_file("availabilities.json", availabilities)
+def set_availabilities(availabilities: List[Dict], user_id: Optional[str] = None, immediate: bool = False) -> bool:
+    """Set availabilities in availabilities.json with audit logging.
+    
+    Args:
+        availabilities: List of availability dictionaries
+        user_id: Optional user ID for audit logging
+        immediate: If True, bypass debouncing and write immediately
+    """
+    result = _write_json_file("availabilities.json", availabilities, user_id=user_id, immediate=immediate)
     if result and user_id:
         import audit_logger
         audit_logger.log_write_operation("availability", "update", None, user_id, {"count": len(availabilities)})
