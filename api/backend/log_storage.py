@@ -1,6 +1,6 @@
 """In-memory log storage for monitoring dashboard.
 
-Stores last 200 logs in circular buffer.
+Stores last 500 logs in circular buffer.
 Logs are lost on server restart.
 """
 
@@ -13,7 +13,7 @@ from collections import deque
 class LogStorage:
     """Thread-safe in-memory log storage with circular buffer."""
     
-    def __init__(self, max_logs: int = 200):
+    def __init__(self, max_logs: int = 500):
         self.max_logs = max_logs
         self.backend_logs = deque(maxlen=max_logs)
         self.frontend_logs = deque(maxlen=max_logs)

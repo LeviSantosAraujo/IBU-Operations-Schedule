@@ -94,11 +94,21 @@ def _update_rate_limit_from_headers(headers: dict) -> None:
 
 
 def _read_json_file(filename: str, current_sha: Optional[str] = None) -> Any:
-    """Read a JSON file from GitHub with caching. Returns None if not found."""
+    """Read a JSON file from GitHub with caching and SHA-based invalidation. Returns None if not found."""
     import cache_manager
     
     cache = cache_manager.get_cache()
     cache_key = cache_manager.cache_key_for_file(filename)
+    
+    # Fetch current SHA from GitHub for cache invalidation
+    if not current_sha and GITHUB_AVAILABLE:
+        try:
+            url = _file_url(filename)
+            head_resp = github_storage.requests.head(url, headers=_headers(), timeout=5)
+            if head_resp.status_code == 200:
+                current_sha = head_resp.headers.get("X-GitHub-Sha") or head_resp.headers.get("ETag", "").strip('"')
+        except:
+            pass  # If HEAD fails, fall back to cache without SHA
     
     # Check cache first with SHA for invalidation
     cached_value = cache.get(cache_key, current_sha)
@@ -111,7 +121,7 @@ def _read_json_file(filename: str, current_sha: Optional[str] = None) -> Any:
     
     # Double-check cache after acquiring lock (another thread may have populated it)
     with key_lock:
-        cached_value = cache.get(cache_key)
+        cached_value = cache.get(cache_key, current_sha)
         if cached_value is not None:
             print(f"[JSON_STORE] Cache hit after lock for {filename}")
             return cached_value
@@ -148,6 +158,7 @@ def _read_json_file(filename: str, current_sha: Optional[str] = None) -> Any:
                 
                 # Cache the result with SHA for invalidation
                 cache.set(cache_key, deserialized, sha)
+                print(f"[JSON_STORE] Cached {filename} with SHA {sha[:8] if sha else 'unknown'}")
                 
                 return deserialized
             
@@ -162,6 +173,7 @@ def _read_json_file(filename: str, current_sha: Optional[str] = None) -> Any:
                     
                     # Cache the result with SHA for invalidation
                     cache.set(cache_key, deserialized, sha)
+                    print(f"[JSON_STORE] Cached {filename} with SHA {sha[:8] if sha else 'unknown'}")
                     
                     return deserialized
                 else:

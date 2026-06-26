@@ -4156,7 +4156,7 @@ async def admin_dashboard(admin_session: Optional[str] = Cookie(None)):
         
         <div class="grid">
             <div class="card full-width">
-                <h2>Backend Logs (Last 200)</h2>
+                <h2>Backend Logs (Last 500)</h2>
                 <div class="log-container" id="backend-logs">Loading...</div>
             </div>
         </div>
