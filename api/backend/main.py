@@ -357,6 +357,7 @@ app = FastAPI(title="IBU Operations team schedule", version="2.0.0", lifespan=li
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
+        "https://ibu-operations-schedule-frontend.vercel.app",
         "https://ibu-operations-schedule-frontend-2dbzrj86d.vercel.app",
         "https://ibu-operations-schedule-frontend-ju3it15eq.vercel.app",
         "https://ibu-operations-schedule-frontend-jcrrl3bmx.vercel.app",
