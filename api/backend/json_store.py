@@ -252,8 +252,20 @@ def _execute_write(filename: str, data: Any, user_id: Optional[str] = None) -> b
         return False
 
 
-def _write_json_file(filename: str, data: Any, user_id: Optional[str] = None) -> bool:
-    """Write a JSON file to GitHub with debouncing, optimistic locking, retry, and cache invalidation."""
+def _write_json_file(filename: str, data: Any, user_id: Optional[str] = None, immediate: bool = False) -> bool:
+    """Write a JSON file to GitHub with debouncing, optimistic locking, retry, and cache invalidation.
+    
+    Args:
+        filename: Name of the file to write
+        data: Data to write
+        user_id: Optional user ID for audit logging
+        immediate: If True, bypass debouncing and write immediately
+    """
+    if immediate:
+        # Write immediately without debouncing
+        print(f"[JSON_STORE] Immediate write for {filename}")
+        return _execute_write(filename, data, user_id)
+    
     with _pending_write_lock:
         # Cancel existing timer if any
         if filename in _pending_write_timers:
@@ -308,9 +320,15 @@ def get_schedules() -> List[Dict]:
     return data if data else []
 
 
-def set_schedules(schedules: List[Dict], user_id: Optional[str] = None) -> bool:
-    """Set schedules in schedules.json with audit logging."""
-    result = _write_json_file("schedules.json", schedules)
+def set_schedules(schedules: List[Dict], user_id: Optional[str] = None, immediate: bool = False) -> bool:
+    """Set schedules in schedules.json with audit logging.
+    
+    Args:
+        schedules: List of schedule dictionaries
+        user_id: Optional user ID for audit logging
+        immediate: If True, bypass debouncing and write immediately
+    """
+    result = _write_json_file("schedules.json", schedules, user_id=user_id, immediate=immediate)
     if result and user_id:
         import audit_logger
         audit_logger.log_write_operation("schedule", "update", None, user_id, {"count": len(schedules)})

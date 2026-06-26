@@ -1786,13 +1786,13 @@ async def clear_schedule_shifts(
     cache_manager.clear_cache()
     print(f"[CLEAR SCHEDULE] Cleared cache")
     
-    # Update staging layer
+    # Update staging layer with immediate write (bypass debouncing)
     schedules = staging_store.get_schedules()
     schedules = [s for s in schedules if str(s.get('week_start_date')) != str(week_start_date)]
     schedules.append(schedule.model_dump())
     print(f"[CLEAR SCHEDULE] Updating staging with {len(schedules)} schedules")
     
-    result = staging_store.set_schedules(schedules, user_id=user.get('employee_id'))
+    result = staging_store.set_schedules(schedules, user_id=user.get('employee_id'), immediate=True)
     print(f"[CLEAR SCHEDULE] set_schedules returned: {result}")
     
     return schedule
@@ -4269,7 +4269,7 @@ async def admin_dashboard(admin_session: Optional[str] = Cookie(None)):
                     }
                     
                     const systemStatus = document.getElementById('system-status');
-                    if (data.metrics.error_rate > 0) {
+                    if (data.metrics.error_rate !== "0%") {
                         systemStatus.className = 'status-indicator red';
                     } else {
                         systemStatus.className = 'status-indicator green';
@@ -4285,7 +4285,9 @@ async def admin_dashboard(admin_session: Optional[str] = Cookie(None)):
                     if (data.logs.length === 0) {
                         container.innerHTML = '<div class="empty-logs">No backend logs yet. Logs will appear as the server processes requests.</div>';
                     } else {
-                        container.innerHTML = data.logs.map(log => 
+                        // Reverse to show newest logs first
+                        const reversedLogs = [...data.logs].reverse();
+                        container.innerHTML = reversedLogs.map(log => 
                             `<div class="log-entry ${log.level.toLowerCase()}">
                                 <span class="timestamp">${formatTimestamp(log.timestamp)}</span>
                                 <span class="level">[${log.level}]</span>
@@ -4361,8 +4363,8 @@ async def get_health_status():
     frontend_has_errors = logs.has_errors("frontend")
     frontend_last_error = frontend_logs[-1].get('message') if frontend_logs else None
     
-    # Get Vercel deploy time for frontend start time
-    frontend_start_time = os.getenv("VERCEL_GIT_COMMIT_TIMESTAMP", "N/A")
+    # Get frontend start time from GitHub last commit (proxy for deploy time)
+    frontend_start_time = github_health.get("last_commit", "N/A")
     
     return {
         "backend_start_time": logs.get_server_start_time(),

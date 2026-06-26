@@ -132,6 +132,21 @@ This ensures:
   - Displays both actual availabilities and approved availability requests
   - Day off requests show as "OFF"
 
+### System Monitoring Dashboard (Admin)
+- **Access**: `/admin/dashboard` (requires admin authentication with employee ID and password)
+- **Real-time System Health**: Monitor backend, frontend, GitHub, and system metrics
+- **Backend Logs**: View last 200 backend log entries in real-time
+  - Logs are stored in-memory and reset on server restart
+  - Newest logs appear first
+  - Color-coded by log level (ERROR in red, WARNING in yellow, INFO in blue)
+- **GitHub Health**: Monitor GitHub API status, rate limits, and file update timestamps
+- **System Metrics**: Track cache performance, active sessions, and error rates
+- **Per-Card Status Indicators**: Green/red status dots for each dashboard section
+- **Auto-Refresh**: Dashboard refreshes every 5 minutes automatically
+- **Session Tracking**: In-memory tracking of active user sessions (last 5 minutes)
+- **Timestamp Display**: All timestamps shown in Toronto timezone (HH:MM:SS YYYY-MM-DD)
+- **Frontend Start Time**: Shows last GitHub commit timestamp as proxy for deploy time
+
 ### Locations
 - Ground Floor (GR) - 7:30 AM - 6:00 PM
 - 2nd Floor (2F) - 08:00 AM - 6:00 PM
