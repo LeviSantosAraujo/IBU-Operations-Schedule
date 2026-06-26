@@ -2856,10 +2856,10 @@ async def remove_event(event_id: str, authorization: str = Header(None)):
     
     raise HTTPException(status_code=404, detail="Event not found")
 
-# ============ Health Check ============
+# ============ Health Check (simple) ============
 
-@app.get("/api/health")
-async def health_check():
+@app.get("/api/ping")
+async def health_ping():
     return {"status": "healthy", "timestamp": datetime.now()}
 
 
@@ -3943,7 +3943,7 @@ async def admin_dashboard(username: str = Query(...), password: str = Query(...)
     <div class="container">
         <h1>IBU Operations - System Monitoring Dashboard</h1>
         <div id="status-banner" class="status-banner green">System Healthy</div>
-        <button class="refresh-btn" onclick="loadDashboard()">Refresh</button>
+        <div style="margin-bottom:15px; color:#666; font-size:13px;">Auto-refreshes every 5 minutes &nbsp;|&nbsp; <a href="#" onclick="loadDashboard(); return false;" style="color:#007bff;">Refresh now</a> &nbsp;|&nbsp; Last updated: <span id="last-updated">-</span></div>
         
         <div class="grid">
             <div class="card">
@@ -4082,6 +4082,8 @@ async def admin_dashboard(username: str = Query(...), password: str = Query(...)
                         banner.className = 'status-banner green';
                         banner.textContent = 'System Healthy';
                     }
+                    
+                    document.getElementById('last-updated').textContent = new Date().toLocaleTimeString();
                 });
             
             fetch('/api/logs/backend')
@@ -4113,7 +4115,7 @@ async def admin_dashboard(username: str = Query(...), password: str = Query(...)
         }
         
         loadDashboard();
-        setInterval(loadDashboard, 10000);
+        setInterval(loadDashboard, 300000);
     </script>
 </body>
 </html>
@@ -4138,38 +4140,38 @@ async def get_health_status():
     }
     
     try:
-        import github_storage
-        if github_storage.GITHUB_AVAILABLE:
+        import json_store
+        import requests as req
+        if json_store.GITHUB_AVAILABLE:
             github_health["api_status"] = "OK"
+            # Get last commit time for the data branch
+            try:
+                commit_url = f"https://api.github.com/repos/{os.getenv('GITHUB_REPO', 'LeviSantosAraujo/IBU-Operations-Schedule')}/commits?sha={os.getenv('GITHUB_DATA_BRANCH', 'data')}&per_page=1"
+                cr = req.get(commit_url, headers=json_store._headers(), timeout=5)
+                if cr.status_code == 200:
+                    commits = cr.json()
+                    if commits:
+                        github_health["last_commit"] = commits[0].get("commit", {}).get("committer", {}).get("date", "Unknown")
+            except:
+                github_health["last_commit"] = "Error fetching"
             # Get last update times for key files
             files = ["employees.json", "schedules.json", "availabilities.json", "availability_requests.json"]
             for filename in files:
                 try:
-                    url = f"https://api.github.com/repos/{os.getenv('GITHUB_REPO')}/contents/{filename}?ref={os.getenv('GITHUB_DATA_BRANCH', 'data')}"
-                    resp = github_storage.requests.get(url, headers=github_storage._headers(), timeout=5)
+                    url = f"https://api.github.com/repos/{os.getenv('GITHUB_REPO', 'LeviSantosAraujo/IBU-Operations-Schedule')}/commits?sha={os.getenv('GITHUB_DATA_BRANCH', 'data')}&path={filename}&per_page=1"
+                    resp = req.get(url, headers=json_store._headers(), timeout=5)
                     if resp.status_code == 200:
-                        data = resp.json()
-                        github_health["file_updates"][filename] = data.get("updated_at", "Unknown")
+                        commits = resp.json()
+                        if commits:
+                            github_health["file_updates"][filename] = commits[0].get("commit", {}).get("committer", {}).get("date", "Unknown")
+                        else:
+                            github_health["file_updates"][filename] = "No commits"
                 except:
                     github_health["file_updates"][filename] = "Error"
         else:
             github_health["api_status"] = "Not Configured"
-            # Simulated data for local environment
-            github_health["file_updates"] = {
-                "employees.json": "2026-06-26T12:00:00Z",
-                "schedules.json": "2026-06-26T12:05:00Z",
-                "availabilities.json": "2026-06-26T12:10:00Z",
-                "availability_requests.json": "2026-06-26T12:15:00Z"
-            }
-    except:
-        github_health["api_status"] = "Error"
-        # Simulated data for local environment
-        github_health["file_updates"] = {
-            "employees.json": "2026-06-26T12:00:00Z",
-            "schedules.json": "2026-06-26T12:05:00Z",
-            "availabilities.json": "2026-06-26T12:10:00Z",
-            "availability_requests.json": "2026-06-26T12:15:00Z"
-        }
+    except Exception as e:
+        github_health["api_status"] = f"Error: {str(e)}"
     
     # Get frontend status
     frontend_logs = logs.get_frontend_logs()
@@ -4183,7 +4185,11 @@ async def get_health_status():
         "frontend_last_error": frontend_last_error,
         "github_health": github_health,
         "metrics": {
-            "cache_hit_rate": f"{cache_stats.get('hit_rate', 0):.1%}",
+            "cache_hit_rate": f"{cache_stats.get('hit_rate_percent', 0):.1f}%",
+            "cache_hits": cache_stats.get('total_hits', 0),
+            "cache_misses": cache_stats.get('total_misses', 0),
+            "rate_limit_remaining": cache_stats.get('rate_limit_remaining', 'N/A'),
+            "rate_limit_total": cache_stats.get('rate_limit_total', 'N/A'),
             "active_sessions": "N/A",
             "error_rate": "0%" if not logs.has_errors("backend") else ">0%"
         }
