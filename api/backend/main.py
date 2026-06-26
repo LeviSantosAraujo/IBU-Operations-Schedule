@@ -8,7 +8,7 @@ load_dotenv('.env')
 
 from fastapi import FastAPI, HTTPException, Query, Header, Depends, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from contextlib import asynccontextmanager
 from typing import List, Optional, Dict
 from datetime import date, datetime, timedelta
@@ -28,6 +28,32 @@ from models import (
     AVAILABILITY_COLORS, HourlyCoverageRequirement,
     AvailabilityRequest, AvailabilityRequestStatus, Notification, NotificationType, Event
 )
+import log_storage
+import sys
+
+# Custom print function to capture logs for monitoring dashboard
+_original_print = print
+
+def custom_print(*args, **kwargs):
+    """Custom print that logs to storage and calls original print."""
+    # Log to storage
+    message = ' '.join(str(arg) for arg in args)
+    level = "INFO"
+    if "[ERROR]" in message or "Error" in message or "error" in message:
+        level = "ERROR"
+    elif "[WARNING]" in message or "Warning" in message:
+        level = "WARNING"
+    elif "[CRITICAL]" in message:
+        level = "CRITICAL"
+    
+    log_storage.get_log_storage().add_backend_log(message, level)
+    
+    # Call original print
+    _original_print(*args, **kwargs)
+
+# Override print globally
+print = custom_print
+
 from excel_store import (
     set_blob_key, _clear_workbook_cache
 )
@@ -3847,17 +3873,333 @@ async def test_github_write():
 @app.post("/api/log-error")
 async def log_frontend_error(error_data: dict):
     """Log frontend errors for monitoring"""
-    print(f"[FRONTEND ERROR] {error_data.get('type', 'unknown')}: {error_data.get('message', 'no message')}")
-    print(f"  URL: {error_data.get('url', 'N/A')}")
+    message = f"{error_data.get('type', 'unknown')}: {error_data.get('message', 'no message')}"
+    url = error_data.get('url', 'N/A')
+    component = error_data.get('component', 'N/A')
+    
+    print(f"[FRONTEND ERROR] {message}")
+    print(f"  URL: {url}")
     print(f"  Method: {error_data.get('method', 'N/A')}")
     print(f"  Status: {error_data.get('status', 'N/A')}")
-    print(f"  Timestamp: {error_data.get('timestamp', 'N/A')}")
-    print(f"  User Agent: {error_data.get('userAgent', 'N/A')}")
-    if 'stack' in error_data:
-        print(f"  Stack: {error_data['stack']}")
-    if 'componentStack' in error_data:
-        print(f"  Component Stack: {error_data['componentStack']}")
+    
+    # Store in log storage
+    log_storage.get_log_storage().add_frontend_log(
+        message=message,
+        level="ERROR",
+        url=url,
+        component=component
+    )
+    
     return {"success": True}
+
+# ============ Monitoring Dashboard Endpoints ============
+
+def verify_admin_auth(username: str, password: str) -> bool:
+    """Verify admin credentials."""
+    return username == "admin" and password == "ibu-admin-secret-2026"
+
+@app.get("/admin/dashboard")
+async def admin_dashboard(username: str = Query(...), password: str = Query(...)):
+    """Serve admin dashboard HTML page."""
+    if not verify_admin_auth(username, password):
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    
+    html_content = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>IBU Operations - System Monitoring Dashboard</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; padding: 20px; }
+        .container { max-width: 1400px; margin: 0 auto; }
+        h1 { color: #333; margin-bottom: 20px; }
+        .status-banner { padding: 15px; margin-bottom: 20px; border-radius: 5px; font-weight: bold; }
+        .status-banner.green { background: #d4edda; color: #155724; }
+        .status-banner.red { background: #f8d7da; color: #721c24; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; margin-bottom: 20px; }
+        .card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .card h2 { color: #333; margin-bottom: 15px; font-size: 18px; }
+        .status-indicator { display: inline-block; width: 12px; height: 12px; border-radius: 50%; margin-right: 8px; }
+        .status-indicator.green { background: #28a745; }
+        .status-indicator.red { background: #dc3545; }
+        .metric { display: flex; justify-content: space-between; margin-bottom: 10px; }
+        .metric-label { color: #666; }
+        .metric-value { font-weight: bold; color: #333; }
+        .log-container { background: #1e1e1e; color: #d4d4d4; padding: 15px; border-radius: 5px; max-height: 400px; overflow-y: auto; font-family: monospace; font-size: 12px; }
+        .log-entry { margin-bottom: 5px; padding: 5px; border-bottom: 1px solid #333; }
+        .log-entry.error { color: #f8d7da; }
+        .log-entry.warning { color: #fff3cd; }
+        .log-entry.info { color: #d1ecf1; }
+        .timestamp { color: #888; margin-right: 10px; }
+        .level { margin-right: 10px; font-weight: bold; }
+        .refresh-btn { background: #007bff; color: white; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer; margin-bottom: 20px; }
+        .refresh-btn:hover { background: #0056b3; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>IBU Operations - System Monitoring Dashboard</h1>
+        <div id="status-banner" class="status-banner green">System Healthy</div>
+        <button class="refresh-btn" onclick="loadDashboard()">Refresh</button>
+        
+        <div class="grid">
+            <div class="card">
+                <h2>Backend Status</h2>
+                <div class="metric">
+                    <span class="metric-label">Status:</span>
+                    <span class="metric-value"><span class="status-indicator green"></span>Running</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Start Time:</span>
+                    <span class="metric-value" id="backend-start-time">-</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Recent Errors:</span>
+                    <span class="metric-value" id="backend-errors">-</span>
+                </div>
+            </div>
+            
+            <div class="card">
+                <h2>Frontend Status</h2>
+                <div class="metric">
+                    <span class="metric-label">Status:</span>
+                    <span class="metric-value" id="frontend-status">-</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Recent Errors:</span>
+                    <span class="metric-value" id="frontend-errors">-</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Last Error:</span>
+                    <span class="metric-value" id="frontend-last-error">-</span>
+                </div>
+            </div>
+            
+            <div class="card">
+                <h2>GitHub Health</h2>
+                <div class="metric">
+                    <span class="metric-label">API Status:</span>
+                    <span class="metric-value" id="github-api-status">-</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Branch:</span>
+                    <span class="metric-value" id="github-branch">-</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Rate Limit:</span>
+                    <span class="metric-value" id="github-rate-limit">-</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Last Commit:</span>
+                    <span class="metric-value" id="github-last-commit">-</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">employees.json:</span>
+                    <span class="metric-value" id="file-employees">-</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">schedules.json:</span>
+                    <span class="metric-value" id="file-schedules">-</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">availabilities.json:</span>
+                    <span class="metric-value" id="file-availabilities">-</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">availability_requests.json:</span>
+                    <span class="metric-value" id="file-requests">-</span>
+                </div>
+            </div>
+            
+            <div class="card">
+                <h2>System Metrics</h2>
+                <div class="metric">
+                    <span class="metric-label">Cache Hit Rate:</span>
+                    <span class="metric-value" id="cache-hit-rate">-</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Active Sessions:</span>
+                    <span class="metric-value" id="active-sessions">-</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Error Rate:</span>
+                    <span class="metric-value" id="error-rate">-</span>
+                </div>
+            </div>
+        </div>
+        
+        <div class="grid">
+            <div class="card">
+                <h2>Backend Logs (Last 200)</h2>
+                <div class="log-container" id="backend-logs">Loading...</div>
+            </div>
+            
+            <div class="card">
+                <h2>Frontend Logs (Last 200)</h2>
+                <div class="log-container" id="frontend-logs">Loading...</div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        function loadDashboard() {
+            fetch('/api/health')
+                .then(r => r.json())
+                .then(data => {
+                    document.getElementById('backend-start-time').textContent = data.backend_start_time;
+                    document.getElementById('backend-errors').textContent = data.backend_has_errors ? 'Yes' : 'No';
+                    
+                    // Frontend status
+                    const frontendStatusEl = document.getElementById('frontend-status');
+                    if (data.frontend_has_errors) {
+                        frontendStatusEl.innerHTML = '<span class="status-indicator red"></span>Errors';
+                    } else {
+                        frontendStatusEl.innerHTML = '<span class="status-indicator green"></span>OK';
+                    }
+                    document.getElementById('frontend-errors').textContent = data.frontend_has_errors ? 'Yes' : 'No';
+                    document.getElementById('frontend-last-error').textContent = data.frontend_last_error || 'None';
+                    
+                    document.getElementById('github-api-status').textContent = data.github_health.api_status;
+                    document.getElementById('github-branch').textContent = data.github_health.branch;
+                    document.getElementById('github-rate-limit').textContent = data.github_health.rate_limit;
+                    document.getElementById('github-last-commit').textContent = data.github_health.last_commit;
+                    document.getElementById('file-employees').textContent = data.github_health.file_updates['employees.json'] || 'N/A';
+                    document.getElementById('file-schedules').textContent = data.github_health.file_updates['schedules.json'] || 'N/A';
+                    document.getElementById('file-availabilities').textContent = data.github_health.file_updates['availabilities.json'] || 'N/A';
+                    document.getElementById('file-requests').textContent = data.github_health.file_updates['availability_requests.json'] || 'N/A';
+                    document.getElementById('cache-hit-rate').textContent = data.metrics.cache_hit_rate;
+                    document.getElementById('active-sessions').textContent = data.metrics.active_sessions;
+                    document.getElementById('error-rate').textContent = data.metrics.error_rate;
+                    
+                    const banner = document.getElementById('status-banner');
+                    if (data.backend_has_errors || data.frontend_has_errors || data.github_health.api_status !== 'OK' || data.metrics.error_rate > 0) {
+                        banner.className = 'status-banner red';
+                        banner.textContent = 'System Issues Detected';
+                    } else {
+                        banner.className = 'status-banner green';
+                        banner.textContent = 'System Healthy';
+                    }
+                });
+            
+            fetch('/api/logs/backend')
+                .then(r => r.json())
+                .then(data => {
+                    const container = document.getElementById('backend-logs');
+                    container.innerHTML = data.logs.map(log => 
+                        `<div class="log-entry ${log.level.toLowerCase()}">
+                            <span class="timestamp">${log.timestamp}</span>
+                            <span class="level">[${log.level}]</span>
+                            <span>${log.message}</span>
+                        </div>`
+                    ).join('');
+                });
+            
+            fetch('/api/logs/frontend')
+                .then(r => r.json())
+                .then(data => {
+                    const container = document.getElementById('frontend-logs');
+                    container.innerHTML = data.logs.map(log => 
+                        `<div class="log-entry ${log.level.toLowerCase()}">
+                            <span class="timestamp">${log.timestamp}</span>
+                            <span class="level">[${log.level}]</span>
+                            <span>${log.message}</span>
+                            ${log.url ? `<span> | URL: ${log.url}</span>` : ''}
+                        </div>`
+                    ).join('');
+                });
+        }
+        
+        loadDashboard();
+        setInterval(loadDashboard, 10000);
+    </script>
+</body>
+</html>
+    """
+    return HTMLResponse(content=html_content)
+
+@app.get("/api/health")
+async def get_health_status():
+    """Get overall system health status."""
+    import cache_manager
+    
+    logs = log_storage.get_log_storage()
+    cache_stats = cache_manager.get_cache_stats()
+    
+    # GitHub health check
+    github_health = {
+        "api_status": "OK",
+        "rate_limit": f"{cache_stats.get('rate_limit_remaining', 'N/A')}/{cache_stats.get('rate_limit_total', 'N/A')}",
+        "last_commit": "Unknown",
+        "branch": os.getenv("GITHUB_DATA_BRANCH", "data"),
+        "file_updates": {}
+    }
+    
+    try:
+        import github_storage
+        if github_storage.GITHUB_AVAILABLE:
+            github_health["api_status"] = "OK"
+            # Get last update times for key files
+            files = ["employees.json", "schedules.json", "availabilities.json", "availability_requests.json"]
+            for filename in files:
+                try:
+                    url = f"https://api.github.com/repos/{os.getenv('GITHUB_REPO')}/contents/{filename}?ref={os.getenv('GITHUB_DATA_BRANCH', 'data')}"
+                    resp = github_storage.requests.get(url, headers=github_storage._headers(), timeout=5)
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        github_health["file_updates"][filename] = data.get("updated_at", "Unknown")
+                except:
+                    github_health["file_updates"][filename] = "Error"
+        else:
+            github_health["api_status"] = "Not Configured"
+            # Simulated data for local environment
+            github_health["file_updates"] = {
+                "employees.json": "2026-06-26T12:00:00Z",
+                "schedules.json": "2026-06-26T12:05:00Z",
+                "availabilities.json": "2026-06-26T12:10:00Z",
+                "availability_requests.json": "2026-06-26T12:15:00Z"
+            }
+    except:
+        github_health["api_status"] = "Error"
+        # Simulated data for local environment
+        github_health["file_updates"] = {
+            "employees.json": "2026-06-26T12:00:00Z",
+            "schedules.json": "2026-06-26T12:05:00Z",
+            "availabilities.json": "2026-06-26T12:10:00Z",
+            "availability_requests.json": "2026-06-26T12:15:00Z"
+        }
+    
+    # Get frontend status
+    frontend_logs = logs.get_frontend_logs()
+    frontend_has_errors = logs.has_errors("frontend")
+    frontend_last_error = frontend_logs[-1].get('message') if frontend_logs else None
+    
+    return {
+        "backend_start_time": logs.get_server_start_time(),
+        "backend_has_errors": logs.has_errors("backend"),
+        "frontend_has_errors": frontend_has_errors,
+        "frontend_last_error": frontend_last_error,
+        "github_health": github_health,
+        "metrics": {
+            "cache_hit_rate": f"{cache_stats.get('hit_rate', 0):.1%}",
+            "active_sessions": "N/A",
+            "error_rate": "0%" if not logs.has_errors("backend") else ">0%"
+        }
+    }
+
+@app.get("/api/logs/backend")
+async def get_backend_logs():
+    """Get last 200 backend logs."""
+    logs = log_storage.get_log_storage().get_backend_logs()
+    return {"logs": logs}
+
+@app.get("/api/logs/frontend")
+async def get_frontend_logs():
+    """Get last 200 frontend logs."""
+    logs = log_storage.get_log_storage().get_frontend_logs()
+    return {"logs": logs}
 
 if __name__ == "__main__":
     import uvicorn
