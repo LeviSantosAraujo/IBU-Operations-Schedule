@@ -306,41 +306,8 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"[STARTUP] Error checking GitHub config: {e}")
     
-    # Cleanup orphaned availability records
-    try:
-        if staging_availabilities:
-            orphaned_count = 0
-            valid_availabilities = []
-            for avail in staging_availabilities:
-                if avail.get('employee_id') in employee_ids:
-                    valid_availabilities.append(avail)
-                else:
-                    orphaned_count += 1
-                    print(f"[STARTUP] Removing orphaned availability for employee {avail.get('employee_id')}")
-            
-            if orphaned_count > 0:
-                print(f"[STARTUP] Found {orphaned_count} orphaned availability records, cleaning up...")
-                staging_store.set_availabilities(valid_availabilities, user_id="system")
-                print(f"[STARTUP] Cleaned up {orphaned_count} orphaned availability records")
-        
-        # Cleanup orphaned availability requests
-        staging_requests = staging_store.get_availability_requests()
-        if staging_requests:
-            orphaned_requests = 0
-            valid_requests = []
-            for req in staging_requests:
-                if req.get('employee_id') in employee_ids:
-                    valid_requests.append(req)
-                else:
-                    orphaned_requests += 1
-                    print(f"[STARTUP] Removing orphaned request for employee {req.get('employee_id')}")
-            
-            if orphaned_requests > 0:
-                print(f"[STARTUP] Found {orphaned_requests} orphaned availability requests, cleaning up...")
-                staging_store.set_availability_requests(valid_requests, user_id="system")
-                print(f"[STARTUP] Cleaned up {orphaned_requests} orphaned availability requests")
-    except Exception as e:
-        print(f"[STARTUP] Error cleaning up orphaned records: {e}")
+    # Note: Orphaned cleanup removed from startup to prevent deleting valid requests
+    # Cleanup only happens when employees are explicitly deleted (in delete endpoint)
     
     yield
     _clear_workbook_cache()
@@ -4110,7 +4077,7 @@ async def admin_dashboard(admin_session: Optional[str] = Cookie(None)):
         
         <div class="grid">
             <div class="card">
-                <h2>Backend & Frontend Status <span id="backend-frontend-status" class="status-indicator green"></span></h2>
+                <h2>Backend Status <span id="backend-frontend-status" class="status-indicator green"></span></h2>
                 <h3>Backend</h3>
                 <div class="metric">
                     <span class="metric-label">Status:</span>
@@ -4123,19 +4090,6 @@ async def admin_dashboard(admin_session: Optional[str] = Cookie(None)):
                 <div class="metric">
                     <span class="metric-label">Recent Errors:</span>
                     <span class="metric-value" id="backend-errors">-</span>
-                </div>
-                <h3>Frontend</h3>
-                <div class="metric">
-                    <span class="metric-label">Status:</span>
-                    <span class="metric-value" id="frontend-status">-</span>
-                </div>
-                <div class="metric">
-                    <span class="metric-label">Start Time:</span>
-                    <span class="metric-value" id="frontend-start-time">-</span>
-                </div>
-                <div class="metric">
-                    <span class="metric-label">Recent Errors:</span>
-                    <span class="metric-value" id="frontend-errors">-</span>
                 </div>
             </div>
             
@@ -4230,15 +4184,6 @@ async def admin_dashboard(admin_session: Optional[str] = Cookie(None)):
                     document.getElementById('backend-start-time').textContent = formatTimestamp(data.backend_start_time);
                     document.getElementById('backend-errors').textContent = data.backend_has_errors ? 'Yes' : 'No';
                     
-                    const frontendStatusEl = document.getElementById('frontend-status');
-                    if (data.frontend_has_errors) {
-                        frontendStatusEl.innerHTML = '<span class="status-indicator red"></span>Errors';
-                    } else {
-                        frontendStatusEl.innerHTML = '<span class="status-indicator green"></span>OK';
-                    }
-                    document.getElementById('frontend-errors').textContent = data.frontend_has_errors ? 'Yes' : 'No';
-                    document.getElementById('frontend-start-time').textContent = data.frontend_start_time !== 'N/A' ? formatTimestamp(data.frontend_start_time) : 'N/A';
-                    
                     document.getElementById('github-api-status').textContent = data.github_health.api_status;
                     document.getElementById('github-branch').textContent = data.github_health.branch;
                     document.getElementById('github-rate-limit').textContent = data.github_health.rate_limit;
@@ -4255,7 +4200,7 @@ async def admin_dashboard(admin_session: Optional[str] = Cookie(None)):
                     
                     // Update per-card status indicators
                     const backendFrontendStatus = document.getElementById('backend-frontend-status');
-                    if (data.backend_has_errors || data.frontend_has_errors) {
+                    if (data.backend_has_errors) {
                         backendFrontendStatus.className = 'status-indicator red';
                     } else {
                         backendFrontendStatus.className = 'status-indicator green';
@@ -4358,19 +4303,11 @@ async def get_health_status():
     except Exception as e:
         github_health["api_status"] = f"Error: {str(e)}"
     
-    # Get frontend status
-    frontend_logs = logs.get_frontend_logs()
-    frontend_has_errors = logs.has_errors("frontend")
-    frontend_last_error = frontend_logs[-1].get('message') if frontend_logs else None
-    
-    # Get frontend start time from GitHub last commit (proxy for deploy time)
-    frontend_start_time = github_health.get("last_commit", "N/A")
-    
     return {
         "backend_start_time": logs.get_server_start_time(),
         "backend_has_errors": logs.has_errors("backend"),
-        "frontend_has_errors": frontend_has_errors,
-        "frontend_last_error": frontend_last_error,
+        "frontend_has_errors": False,  # Removed - frontend errors are client-side only
+        "frontend_last_error": None,
         "frontend_start_time": frontend_start_time,
         "github_health": github_health,
         "metrics": {
@@ -4380,7 +4317,7 @@ async def get_health_status():
             "rate_limit_remaining": cache_stats.get('rate_limit_remaining', 'N/A'),
             "rate_limit_total": cache_stats.get('rate_limit_total', 'N/A'),
             "active_sessions": auth.AuthManager.get_active_session_count(),
-            "error_rate": "0%" if not logs.has_errors("backend") else ">0%"
+            "error_rate": ">0%" if logs.has_errors("backend") else "0%"
         }
     }
 

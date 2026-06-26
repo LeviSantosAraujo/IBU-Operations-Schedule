@@ -79,19 +79,19 @@ export const getEmployees = (activeOnly = false) =>
   api.get(`/employees?active_only=${activeOnly}`).then(r => r.data)
 
 export const getEmployee = (id: string) => 
-  api.get(`/employees/${id}`).then(r => r.data)
+  api.get(`/api/employees/${id}`).then(r => r.data)
 
 export const createEmployee = (data: any) => 
-  api.post('/employees', data).then(r => r.data)
+  api.post('/api/employees', data).then(r => r.data)
 
 export const updateEmployee = (id: string, data: any) => 
-  api.put(`/employees/${id}`, data).then(r => r.data)
+  api.put(`/api/employees/${id}`, data).then(r => r.data)
 
 export const updateManagerPassword = (employeeId: string, password: string) =>
   api.put('/managers/update-password', { employee_id: employeeId, password }).then(r => r.data)
 
 export const deleteEmployee = (id: string) => 
-  api.delete(`/employees/${id}`).then(r => r.data)
+  api.delete(`/api/employees/${id}`).then(r => r.data)
 
 // Availability
 export const getAvailabilities = (weekStartDate?: string, employeeId?: string) => {
