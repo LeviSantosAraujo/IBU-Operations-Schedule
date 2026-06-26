@@ -3919,8 +3919,11 @@ async def admin_dashboard(username: str = Query(...), password: str = Query(...)
         .status-banner { padding: 15px; margin-bottom: 20px; border-radius: 5px; font-weight: bold; }
         .status-banner.green { background: #d4edda; color: #155724; }
         .status-banner.red { background: #f8d7da; color: #721c24; }
-        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; margin-bottom: 20px; }
+        .grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; margin-bottom: 20px; }
         .card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .card.full-width { grid-column: 1 / -1; }
+        .card h3 { color: #555; margin: 15px 0 10px 0; font-size: 15px; border-bottom: 1px solid #eee; padding-bottom: 5px; }
+        .card h3:first-child { margin-top: 0; }
         .card h2 { color: #333; margin-bottom: 15px; font-size: 18px; }
         .status-indicator { display: inline-block; width: 12px; height: 12px; border-radius: 50%; margin-right: 8px; }
         .status-indicator.green { background: #28a745; }
@@ -3928,15 +3931,14 @@ async def admin_dashboard(username: str = Query(...), password: str = Query(...)
         .metric { display: flex; justify-content: space-between; margin-bottom: 10px; }
         .metric-label { color: #666; }
         .metric-value { font-weight: bold; color: #333; }
-        .log-container { background: #1e1e1e; color: #d4d4d4; padding: 15px; border-radius: 5px; max-height: 400px; overflow-y: auto; font-family: monospace; font-size: 12px; }
+        .log-container { background: #1e1e1e; color: #d4d4d4; padding: 15px; border-radius: 5px; max-height: 600px; overflow-y: auto; font-family: monospace; font-size: 12px; line-height: 1.5; }
         .log-entry { margin-bottom: 5px; padding: 5px; border-bottom: 1px solid #333; }
         .log-entry.error { color: #f8d7da; }
         .log-entry.warning { color: #fff3cd; }
         .log-entry.info { color: #d1ecf1; }
         .timestamp { color: #888; margin-right: 10px; }
         .level { margin-right: 10px; font-weight: bold; }
-        .refresh-btn { background: #007bff; color: white; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer; margin-bottom: 20px; }
-        .refresh-btn:hover { background: #0056b3; }
+        .empty-logs { color: #888; font-style: italic; padding: 20px; text-align: center; }
     </style>
 </head>
 <body>
@@ -3947,7 +3949,8 @@ async def admin_dashboard(username: str = Query(...), password: str = Query(...)
         
         <div class="grid">
             <div class="card">
-                <h2>Backend Status</h2>
+                <h2>Backend & Frontend Status</h2>
+                <h3>Backend</h3>
                 <div class="metric">
                     <span class="metric-label">Status:</span>
                     <span class="metric-value"><span class="status-indicator green"></span>Running</span>
@@ -3960,10 +3963,7 @@ async def admin_dashboard(username: str = Query(...), password: str = Query(...)
                     <span class="metric-label">Recent Errors:</span>
                     <span class="metric-value" id="backend-errors">-</span>
                 </div>
-            </div>
-            
-            <div class="card">
-                <h2>Frontend Status</h2>
+                <h3>Frontend</h3>
                 <div class="metric">
                     <span class="metric-label">Status:</span>
                     <span class="metric-value" id="frontend-status">-</span>
@@ -3971,10 +3971,6 @@ async def admin_dashboard(username: str = Query(...), password: str = Query(...)
                 <div class="metric">
                     <span class="metric-label">Recent Errors:</span>
                     <span class="metric-value" id="frontend-errors">-</span>
-                </div>
-                <div class="metric">
-                    <span class="metric-label">Last Error:</span>
-                    <span class="metric-value" id="frontend-last-error">-</span>
                 </div>
             </div>
             
@@ -4021,6 +4017,14 @@ async def admin_dashboard(username: str = Query(...), password: str = Query(...)
                     <span class="metric-value" id="cache-hit-rate">-</span>
                 </div>
                 <div class="metric">
+                    <span class="metric-label">Cache Hits:</span>
+                    <span class="metric-value" id="cache-hits">-</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Cache Misses:</span>
+                    <span class="metric-value" id="cache-misses">-</span>
+                </div>
+                <div class="metric">
                     <span class="metric-label">Active Sessions:</span>
                     <span class="metric-value" id="active-sessions">-</span>
                 </div>
@@ -4032,14 +4036,9 @@ async def admin_dashboard(username: str = Query(...), password: str = Query(...)
         </div>
         
         <div class="grid">
-            <div class="card">
+            <div class="card full-width">
                 <h2>Backend Logs (Last 200)</h2>
                 <div class="log-container" id="backend-logs">Loading...</div>
-            </div>
-            
-            <div class="card">
-                <h2>Frontend Logs (Last 200)</h2>
-                <div class="log-container" id="frontend-logs">Loading...</div>
             </div>
         </div>
     </div>
@@ -4052,7 +4051,6 @@ async def admin_dashboard(username: str = Query(...), password: str = Query(...)
                     document.getElementById('backend-start-time').textContent = data.backend_start_time;
                     document.getElementById('backend-errors').textContent = data.backend_has_errors ? 'Yes' : 'No';
                     
-                    // Frontend status
                     const frontendStatusEl = document.getElementById('frontend-status');
                     if (data.frontend_has_errors) {
                         frontendStatusEl.innerHTML = '<span class="status-indicator red"></span>Errors';
@@ -4060,7 +4058,6 @@ async def admin_dashboard(username: str = Query(...), password: str = Query(...)
                         frontendStatusEl.innerHTML = '<span class="status-indicator green"></span>OK';
                     }
                     document.getElementById('frontend-errors').textContent = data.frontend_has_errors ? 'Yes' : 'No';
-                    document.getElementById('frontend-last-error').textContent = data.frontend_last_error || 'None';
                     
                     document.getElementById('github-api-status').textContent = data.github_health.api_status;
                     document.getElementById('github-branch').textContent = data.github_health.branch;
@@ -4071,6 +4068,8 @@ async def admin_dashboard(username: str = Query(...), password: str = Query(...)
                     document.getElementById('file-availabilities').textContent = data.github_health.file_updates['availabilities.json'] || 'N/A';
                     document.getElementById('file-requests').textContent = data.github_health.file_updates['availability_requests.json'] || 'N/A';
                     document.getElementById('cache-hit-rate').textContent = data.metrics.cache_hit_rate;
+                    document.getElementById('cache-hits').textContent = data.metrics.cache_hits;
+                    document.getElementById('cache-misses').textContent = data.metrics.cache_misses;
                     document.getElementById('active-sessions').textContent = data.metrics.active_sessions;
                     document.getElementById('error-rate').textContent = data.metrics.error_rate;
                     
@@ -4090,27 +4089,17 @@ async def admin_dashboard(username: str = Query(...), password: str = Query(...)
                 .then(r => r.json())
                 .then(data => {
                     const container = document.getElementById('backend-logs');
-                    container.innerHTML = data.logs.map(log => 
-                        `<div class="log-entry ${log.level.toLowerCase()}">
-                            <span class="timestamp">${log.timestamp}</span>
-                            <span class="level">[${log.level}]</span>
-                            <span>${log.message}</span>
-                        </div>`
-                    ).join('');
-                });
-            
-            fetch('/api/logs/frontend')
-                .then(r => r.json())
-                .then(data => {
-                    const container = document.getElementById('frontend-logs');
-                    container.innerHTML = data.logs.map(log => 
-                        `<div class="log-entry ${log.level.toLowerCase()}">
-                            <span class="timestamp">${log.timestamp}</span>
-                            <span class="level">[${log.level}]</span>
-                            <span>${log.message}</span>
-                            ${log.url ? `<span> | URL: ${log.url}</span>` : ''}
-                        </div>`
-                    ).join('');
+                    if (data.logs.length === 0) {
+                        container.innerHTML = '<div class="empty-logs">No backend logs yet. Logs will appear as the server processes requests.</div>';
+                    } else {
+                        container.innerHTML = data.logs.map(log => 
+                            `<div class="log-entry ${log.level.toLowerCase()}">
+                                <span class="timestamp">${log.timestamp}</span>
+                                <span class="level">[${log.level}]</span>
+                                <span>${log.message}</span>
+                            </div>`
+                        ).join('');
+                    }
                 });
         }
         
