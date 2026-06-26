@@ -329,7 +329,7 @@ export default function EmployeeScheduleView() {
                 </tr>
               </thead>
               <tbody>
-                {employees.map(emp => {
+                {employees.filter(emp => !user || emp.id === user.employee_id).map(emp => {
                   const empHours = getEmployeeHours(emp.id)
                   
                   return (
