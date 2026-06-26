@@ -830,10 +830,10 @@ async def create_employee(
     if not employee.id:
         employee.id = f"emp_{uuid.uuid4().hex[:8]}"
     
-    # Update staging layer first (fast)
+    # Update staging layer with immediate write to prevent race conditions
     employees = staging_store.get_employees()
     employees.append(employee.model_dump())
-    staging_store.set_employees(employees, user_id=user.get('employee_id'))
+    staging_store.set_employees(employees, user_id=user.get('employee_id'), immediate=True)
     
     # No action queue needed - GitHub JSON is single source of truth
     
@@ -872,10 +872,10 @@ async def update_employee(
         created_at=existing.created_at
     )
     
-    # Update staging layer first (fast)
+    # Update staging layer with immediate write to prevent race conditions
     employees = staging_store.get_employees()
     employees = [e if e["id"] != employee_id else updated_employee.model_dump() for e in employees]
-    staging_store.set_employees(employees, user_id=user.get('employee_id'))
+    staging_store.set_employees(employees, user_id=user.get('employee_id'), immediate=True)
     
     # Add to action queue for Excel sync (async, no blocking)
     # No action queue needed - GitHub JSON is single source of truth
@@ -888,32 +888,32 @@ async def remove_employee(
     user: Dict = Depends(require_manager)
 ):
     """Delete an employee (managers only)"""
-    # Update staging layer first (fast)
+    # Update staging layer with immediate write to prevent race conditions
     employees = staging_store.get_employees()
     was_in_staging = any(e["id"] == employee_id for e in employees)
     employees = [e for e in employees if e["id"] != employee_id]
-    staging_store.set_employees(employees, user_id=user.get('employee_id'))
+    staging_store.set_employees(employees, user_id=user.get('employee_id'), immediate=True)
     
-    # Clean up availability records for deleted employee
+    # Clean up availability records for deleted employee with immediate write
     availabilities = staging_store.get_availabilities()
     cleaned_availabilities = [a for a in availabilities if a.get("employee_id") != employee_id]
     if len(cleaned_availabilities) != len(availabilities):
         print(f"[DELETE] Cleaning up {len(availabilities) - len(cleaned_availabilities)} availability records for deleted employee {employee_id}")
-        staging_store.set_availabilities(cleaned_availabilities, user_id=user.get('employee_id'))
+        staging_store.set_availabilities(cleaned_availabilities, user_id=user.get('employee_id'), immediate=True)
     
-    # Clean up availability requests for deleted employee
+    # Clean up availability requests for deleted employee with immediate write
     requests = staging_store.get_availability_requests()
     cleaned_requests = [r for r in requests if r.get("employee_id") != employee_id]
     if len(cleaned_requests) != len(requests):
         print(f"[DELETE] Cleaning up {len(requests) - len(cleaned_requests)} availability requests for deleted employee {employee_id}")
-        staging_store.set_availability_requests(cleaned_requests, user_id=user.get('employee_id'))
+        staging_store.set_availability_requests(cleaned_requests, user_id=user.get('employee_id'), immediate=True)
     
-    # Clean up notifications for deleted employee
+    # Clean up notifications for deleted employee with immediate write
     notifications = staging_store.get_notifications()
     cleaned_notifications = [n for n in notifications if n.get("employee_id") != employee_id]
     if len(cleaned_notifications) != len(notifications):
         print(f"[DELETE] Cleaning up {len(notifications) - len(cleaned_notifications)} notifications for deleted employee {employee_id}")
-        staging_store.set_notifications(cleaned_notifications, user_id=user.get('employee_id'))
+        staging_store.set_notifications(cleaned_notifications, user_id=user.get('employee_id'), immediate=True)
     
     # Note: Excel cleanup removed - GitHub JSON is now the single source of truth
     
