@@ -4308,7 +4308,7 @@ async def get_health_status():
         "backend_has_errors": logs.has_errors("backend"),
         "frontend_has_errors": False,  # Removed - frontend errors are client-side only
         "frontend_last_error": None,
-        "frontend_start_time": frontend_start_time,
+        "frontend_start_time": None,  # Removed - not tracking frontend errors
         "github_health": github_health,
         "metrics": {
             "cache_hit_rate": f"{cache_stats.get('hit_rate_percent', 0):.1f}%",

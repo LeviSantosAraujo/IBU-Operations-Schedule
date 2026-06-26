@@ -24,20 +24,12 @@ load_dotenv('.env')
 
 import json
 import base64
-import threading
 from typing import List, Dict, Any, Optional
 from datetime import date, datetime
 import github_storage
-import time
 
 GITHUB_AVAILABLE = github_storage.GITHUB_AVAILABLE
 _API_BASE = "https://api.github.com"
-
-# Write debouncing
-_DEBOUNCE_DELAY_MS = 500  # 500ms debounce delay
-_pending_writes: Dict[str, Any] = {}  # filename -> data
-_pending_write_timers: Dict[str, threading.Timer] = {}
-_pending_write_lock = threading.Lock()
 
 
 def _headers() -> dict:
@@ -253,41 +245,19 @@ def _execute_write(filename: str, data: Any, user_id: Optional[str] = None) -> b
 
 
 def _write_json_file(filename: str, data: Any, user_id: Optional[str] = None, immediate: bool = False) -> bool:
-    """Write a JSON file to GitHub with debouncing, optimistic locking, retry, and cache invalidation.
+    """Write a JSON file to GitHub with optimistic locking, retry, and cache invalidation.
+    
+    In serverless environments, all writes must be immediate to prevent data loss.
+    The 'immediate' parameter is kept for API compatibility but is ignored.
     
     Args:
         filename: Name of the file to write
         data: Data to write
         user_id: Optional user ID for audit logging
-        immediate: If True, bypass debouncing and write immediately
+        immediate: Ignored - all writes are immediate in serverless
     """
-    if immediate:
-        # Write immediately without debouncing
-        print(f"[JSON_STORE] Immediate write for {filename}")
-        return _execute_write(filename, data, user_id)
-    
-    with _pending_write_lock:
-        # Cancel existing timer if any
-        if filename in _pending_write_timers:
-            _pending_write_timers[filename].cancel()
-        
-        # Store the latest data
-        _pending_writes[filename] = data
-        
-        # Create new timer for debounced write
-        def debounced_write():
-            with _pending_write_lock:
-                if filename in _pending_writes:
-                    latest_data = _pending_writes.pop(filename)
-                    _pending_write_timers.pop(filename, None)
-                    _execute_write(filename, latest_data, user_id)
-        
-        timer = threading.Timer(_DEBOUNCE_DELAY_MS / 1000.0, debounced_write)
-        _pending_write_timers[filename] = timer
-        timer.start()
-        
-        print(f"[JSON_STORE] Debounced write scheduled for {filename} ({_DEBOUNCE_DELAY_MS}ms)")
-        return True
+    print(f"[JSON_STORE] Immediate write for {filename}")
+    return _execute_write(filename, data, user_id)
 
 
 def get_employees() -> List[Dict]:
