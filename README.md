@@ -171,6 +171,12 @@ This ensures:
 - Increased backend log retention from 200 to 500 rows
 - Improved mobile responsiveness across all views
 
+### Security Hardening
+- Removed weak default ADMIN_SECRET_KEY (now requires environment variable)
+- Removed wildcard CORS origin (only allows specific frontend domains)
+- Added rate limiting to auth endpoints (10 attempts per 5 minutes per IP)
+- Added ADMIN_SECRET_KEY to Vercel environment variables
+
 ### Locations
 - Ground Floor (GR) - 7:30 AM - 6:00 PM
 - 2nd Floor (2F) - 08:00 AM - 6:00 PM
