@@ -46,3 +46,9 @@ Thumbs.db
 .vercel/
 .vercel
 .env*
+
+# Sensitive data files
+api/backend/data/passwords.json
+
+# Historical Excel files
+Last OPS Schedule June-Dec 2026.xlsx

@@ -135,7 +135,7 @@ This ensures:
 ### System Monitoring Dashboard (Admin)
 - **Access**: `/admin/dashboard` (requires admin authentication with employee ID and password)
 - **Real-time System Health**: Monitor backend, frontend, GitHub, and system metrics
-- **Backend Logs**: View last 200 backend log entries in real-time
+- **Backend Logs**: View last 500 backend log entries in real-time
   - Logs are stored in-memory and reset on server restart
   - Newest logs appear first
   - Color-coded by log level (ERROR in red, WARNING in yellow, INFO in blue)
@@ -146,6 +146,30 @@ This ensures:
 - **Session Tracking**: In-memory tracking of active user sessions (last 5 minutes)
 - **Timestamp Display**: All timestamps shown in Toronto timezone (HH:MM:SS YYYY-MM-DD)
 - **Frontend Start Time**: Shows last GitHub commit timestamp as proxy for deploy time
+
+## Recent Improvements
+
+### Cache Consistency (Serverless)
+- Implemented SHA-based cache invalidation in `json_store.py`
+- Fetches current SHA from GitHub on read to detect changes
+- Prevents stale data across ephemeral serverless instances
+- Ensures immediate data consistency after employee deletions/updates
+
+### Employee View Privacy
+- Fixed EmployeeScheduleView to show all employees' schedules
+- Hides locked availability blocks (Pending/Approved/Rejected) for other employees
+- Only shows own availability status to maintain privacy
+- Managers still see all data
+
+### Mobile Layout Improvements
+- Shortened header title on mobile to prevent truncation
+- Fixed NotificationBell dropdown positioning (fixed on mobile, absolute on desktop)
+- Added proper spacing to location edit/delete controls
+- All changes use responsive breakpoints (sm:, lg:) to preserve desktop layout
+
+### Dashboard Enhancements
+- Increased backend log retention from 200 to 500 rows
+- Improved mobile responsiveness across all views
 
 ### Locations
 - Ground Floor (GR) - 7:30 AM - 6:00 PM
