@@ -40,6 +40,24 @@ print = custom_print
 _active_sessions = defaultdict(lambda: datetime.now(timezone.utc))
 _session_lock = threading.Lock()
 
+# In-memory rate limiting for auth endpoints
+_auth_attempts = defaultdict(list)  # IP -> list of timestamps
+_auth_lock = threading.Lock()
+MAX_AUTH_ATTEMPTS = 10
+AUTH_WINDOW_SECONDS = 300  # 5 minutes
+
+def check_rate_limit(client_ip: str) -> bool:
+    """Check if client has exceeded rate limit for auth attempts."""
+    with _auth_lock:
+        now = datetime.now(timezone.utc)
+        attempts = _auth_attempts[client_ip]
+        # Remove attempts older than window
+        _auth_attempts[client_ip] = [t for t in attempts if (now - t).total_seconds() < AUTH_WINDOW_SECONDS]
+        if len(_auth_attempts[client_ip]) >= MAX_AUTH_ATTEMPTS:
+            return False
+        _auth_attempts[client_ip].append(now)
+        return True
+
 def track_session(user_id: str):
     """Track a user session."""
     with _session_lock:
@@ -339,7 +357,6 @@ app = FastAPI(title="IBU Operations team schedule", version="2.0.0", lifespan=li
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "*",
         "https://ibu-operations-schedule-frontend-2dbzrj86d.vercel.app",
         "https://ibu-operations-schedule-frontend-ju3it15eq.vercel.app",
         "https://ibu-operations-schedule-frontend-jcrrl3bmx.vercel.app",
@@ -593,8 +610,12 @@ async def check_has_password(employee_id: str):
 # ============ Auth Endpoints ============
 
 @app.post("/api/login")
-async def login(request: LoginRequest):
+async def login(request: LoginRequest, client_ip: str = Header(None, alias="X-Forwarded-For")):
     """Login as an employee with optional password for managers"""
+    # Rate limiting
+    ip = client_ip or "unknown"
+    if not check_rate_limit(ip):
+        raise HTTPException(status_code=429, detail="Too many login attempts. Please try again later.")
 
     # Check if system has employees configured (using JSON/blob storage)
     employees = staging_store.get_employees()
@@ -627,9 +648,16 @@ async def login(request: LoginRequest):
     }
 
 @app.post("/api/admin-login")
-async def admin_login(request: AdminLoginRequest):
+async def admin_login(request: AdminLoginRequest, client_ip: str = Header(None, alias="X-Forwarded-For")):
     """Secret admin login endpoint - requires secret key"""
-    ADMIN_SECRET_KEY = os.getenv("ADMIN_SECRET_KEY", "ibu-admin-secret-2026")
+    # Rate limiting
+    ip = client_ip or "unknown"
+    if not check_rate_limit(ip):
+        raise HTTPException(status_code=429, detail="Too many login attempts. Please try again later.")
+
+    ADMIN_SECRET_KEY = os.getenv("ADMIN_SECRET_KEY")
+    if not ADMIN_SECRET_KEY:
+        raise HTTPException(status_code=500, detail="Server misconfigured: ADMIN_SECRET_KEY not set")
 
     if request.secret_key != ADMIN_SECRET_KEY:
         raise HTTPException(status_code=403, detail="Invalid secret key")
