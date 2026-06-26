@@ -233,6 +233,8 @@ async def lifespan(app: FastAPI):
     """Startup: do not load Excel file - all data is served from JSON/blob storage"""
     _clear_workbook_cache()
     print("[STARTUP] Server starting - using JSON/blob storage for all data")
+    print("[STARTUP] Initializing log storage for monitoring dashboard")
+    print("[STARTUP] Starting background sync worker")
     
     # GitHub JSON is the single source of truth - no Excel fallback needed
     print(f"[STARTUP] Using GitHub JSON as single source of truth")
@@ -240,13 +242,46 @@ async def lifespan(app: FastAPI):
     # Start background sync worker
     start_sync_worker()
     
-    # Cleanup orphaned availability records
+    print("[STARTUP] Server ready - monitoring dashboard available at /admin/dashboard")
+    
+    # Load and check data
+    print("[STARTUP] Loading employee data...")
     try:
         employees_dicts = staging_store.get_employees()
+        print(f"[STARTUP] Loaded {len(employees_dicts)} employees")
         employees = [Employee(**e) for e in employees_dicts]
         employee_ids = {e.id for e in employees}
-        
+    except Exception as e:
+        print(f"[STARTUP] Error loading employees: {e}")
+        employees = []
+        employee_ids = set()
+    
+    print("[STARTUP] Loading availability data...")
+    try:
         staging_availabilities = staging_store.get_availabilities()
+        print(f"[STARTUP] Loaded {len(staging_availabilities) if staging_availabilities else 0} availability records")
+    except Exception as e:
+        print(f"[STARTUP] Error loading availabilities: {e}")
+        staging_availabilities = []
+    
+    print("[STARTUP] Loading schedule data...")
+    try:
+        staging_schedules = staging_store.get_schedules()
+        print(f"[STARTUP] Loaded {len(staging_schedules) if staging_schedules else 0} schedule records")
+    except Exception as e:
+        print(f"[STARTUP] Error loading schedules: {e}")
+    
+    print("[STARTUP] Checking GitHub configuration...")
+    try:
+        github_repo = os.getenv("GITHUB_REPO", "Not configured")
+        github_branch = os.getenv("GITHUB_DATA_BRANCH", "Not configured")
+        print(f"[STARTUP] GitHub repository: {github_repo}")
+        print(f"[STARTUP] GitHub data branch: {github_branch}")
+    except Exception as e:
+        print(f"[STARTUP] Error checking GitHub config: {e}")
+    
+    # Cleanup orphaned availability records
+    try:
         if staging_availabilities:
             orphaned_count = 0
             valid_availabilities = []
