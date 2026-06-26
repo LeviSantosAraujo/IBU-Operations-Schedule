@@ -7,6 +7,7 @@ import os
 import jwt
 from datetime import timezone
 import threading
+from collections import defaultdict
 
 # JWT-based authentication (stateless, works with Vercel serverless)
 class AuthManager:
@@ -16,6 +17,10 @@ class AuthManager:
     # Token blacklist for revocation (in-memory, thread-safe)
     _revoked_tokens: Set[str] = set()
     _revoked_lock = threading.RLock()
+    
+    # Active session tracking (in-memory, thread-safe)
+    _active_sessions: Dict[str, datetime] = defaultdict(lambda: datetime.now(timezone.utc))
+    _session_lock = threading.RLock()
     
     @staticmethod
     def _ensure_secret() -> None:
@@ -133,6 +138,13 @@ class AuthManager:
         user = AuthManager.get_current_user(authorization)
         if not user:
             raise HTTPException(status_code=401, detail="Not authenticated")
+        
+        # Track active session
+        employee_id = user.get("employee_id")
+        if employee_id:
+            with AuthManager._session_lock:
+                AuthManager._active_sessions[employee_id] = datetime.now(timezone.utc)
+        
         return user
 
     @staticmethod
@@ -142,6 +154,18 @@ class AuthManager:
         if user["role"] not in ["manager", "admin"]:
             raise HTTPException(status_code=403, detail="Manager access required")
         return user
+
+    @staticmethod
+    def get_active_session_count() -> int:
+        """Get count of active sessions (last 5 minutes)."""
+        with AuthManager._session_lock:
+            now = datetime.now(timezone.utc)
+            cutoff = now - timedelta(minutes=5)
+            # Remove stale sessions
+            stale_users = [uid for uid, last_seen in AuthManager._active_sessions.items() if last_seen < cutoff]
+            for uid in stale_users:
+                del AuthManager._active_sessions[uid]
+            return len(AuthManager._active_sessions)
 
     @staticmethod
     def can_edit_employee(authorization: Optional[str], target_employee_id: str) -> bool:

@@ -5,7 +5,7 @@ Logs are lost on server restart.
 """
 
 import threading
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Dict, Optional
 from collections import deque
 
@@ -18,13 +18,13 @@ class LogStorage:
         self.backend_logs = deque(maxlen=max_logs)
         self.frontend_logs = deque(maxlen=max_logs)
         self.lock = threading.Lock()
-        self.server_start_time = datetime.now()
+        self.server_start_time = datetime.now(timezone.utc)
     
     def add_backend_log(self, message: str, level: str = "INFO"):
         """Add a backend log entry."""
         with self.lock:
             self.backend_logs.append({
-                "timestamp": datetime.now().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
                 "level": level,
                 "message": message
             })
@@ -33,7 +33,7 @@ class LogStorage:
         """Add a frontend log entry."""
         with self.lock:
             self.frontend_logs.append({
-                "timestamp": datetime.now().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
                 "level": level,
                 "message": message,
                 "url": url,

@@ -30,6 +30,28 @@ from models import (
 )
 import log_storage
 import sys
+from datetime import datetime, timezone
+from collections import defaultdict
+
+# In-memory session tracking
+_active_sessions = defaultdict(lambda: datetime.now(timezone.utc))
+_session_lock = threading.Lock()
+
+def track_session(user_id: str):
+    """Track a user session."""
+    with _session_lock:
+        _active_sessions[user_id] = datetime.now(timezone.utc)
+
+def get_active_session_count() -> int:
+    """Get count of active sessions (last 5 minutes)."""
+    with _session_lock:
+        now = datetime.now(timezone.utc)
+        cutoff = now - timedelta(minutes=5)
+        # Remove stale sessions
+        stale_users = [uid for uid, last_seen in _active_sessions.items() if last_seen < cutoff]
+        for uid in stale_users:
+            del _active_sessions[uid]
+        return len(_active_sessions)
 
 # Custom print function to capture logs for monitoring dashboard
 _original_print = print
@@ -1726,8 +1748,12 @@ async def clear_schedule_shifts(
     user: Dict = Depends(require_manager)
 ):
     """Clear all shifts from a schedule while preserving events (managers only)"""
+    print(f"[CLEAR SCHEDULE] Starting clear for week {week_start_date} by user {user.get('employee_id')}")
+    
     # Try to read from staging first
     staging_schedules = staging_store.get_schedules()
+    print(f"[CLEAR SCHEDULE] Found {len(staging_schedules)} schedules in staging")
+    
     schedule = None
     for s in staging_schedules:
         # Handle both string and date objects
@@ -1739,24 +1765,31 @@ async def clear_schedule_shifts(
         
         if week_start_str == str(week_start_date):
             schedule = WeeklySchedule(**s)
+            print(f"[CLEAR SCHEDULE] Found schedule for week {week_start_date} with {len(schedule.shifts)} shifts")
             break
     
     if not schedule:
+        print(f"[CLEAR SCHEDULE] Schedule not found for week {week_start_date}")
         raise HTTPException(status_code=404, detail="Schedule not found")
     
     # Clear all shifts - approved/pending availability markers are derived from requests
     schedule.shifts = []
     schedule.total_hours = {}
+    print(f"[CLEAR SCHEDULE] Cleared shifts from schedule")
     
     # Force cache invalidation to ensure fresh data
     import cache_manager
     cache_manager.clear_cache()
+    print(f"[CLEAR SCHEDULE] Cleared cache")
     
     # Update staging layer
     schedules = staging_store.get_schedules()
     schedules = [s for s in schedules if str(s.get('week_start_date')) != str(week_start_date)]
     schedules.append(schedule.model_dump())
-    staging_store.set_schedules(schedules, user_id=user.get('employee_id'))
+    print(f"[CLEAR SCHEDULE] Updating staging with {len(schedules)} schedules")
+    
+    result = staging_store.set_schedules(schedules, user_id=user.get('employee_id'))
+    print(f"[CLEAR SCHEDULE] set_schedules returned: {result}")
     
     return schedule
 
@@ -4047,6 +4080,7 @@ async def admin_dashboard(admin_session: Optional[str] = Cookie(None)):
         .status-indicator { display: inline-block; width: 12px; height: 12px; border-radius: 50%; margin-right: 8px; }
         .status-indicator.green { background: #28a745; }
         .status-indicator.red { background: #dc3545; }
+        .card h2 .status-indicator { float: right; margin-top: 4px; }
         .metric { display: flex; justify-content: space-between; margin-bottom: 10px; }
         .metric-label { color: #666; }
         .metric-value { font-weight: bold; color: #333; }
@@ -4068,12 +4102,11 @@ async def admin_dashboard(admin_session: Optional[str] = Cookie(None)):
             <h1>IBU Operations - System Monitoring Dashboard</h1>
             <a href="/admin/logout" class="logout-btn">Logout</a>
         </div>
-        <div id="status-banner" class="status-banner green">System Healthy</div>
         <div style="margin-bottom:15px; color:#666; font-size:13px;">Auto-refreshes every 5 minutes &nbsp;|&nbsp; <a href="#" onclick="loadDashboard(); return false;" style="color:#007bff;">Refresh now</a> &nbsp;|&nbsp; Last updated: <span id="last-updated">-</span></div>
         
         <div class="grid">
             <div class="card">
-                <h2>Backend & Frontend Status</h2>
+                <h2>Backend & Frontend Status <span id="backend-frontend-status" class="status-indicator green"></span></h2>
                 <h3>Backend</h3>
                 <div class="metric">
                     <span class="metric-label">Status:</span>
@@ -4093,13 +4126,17 @@ async def admin_dashboard(admin_session: Optional[str] = Cookie(None)):
                     <span class="metric-value" id="frontend-status">-</span>
                 </div>
                 <div class="metric">
+                    <span class="metric-label">Start Time:</span>
+                    <span class="metric-value" id="frontend-start-time">-</span>
+                </div>
+                <div class="metric">
                     <span class="metric-label">Recent Errors:</span>
                     <span class="metric-value" id="frontend-errors">-</span>
                 </div>
             </div>
             
             <div class="card">
-                <h2>GitHub Health</h2>
+                <h2>GitHub Health <span id="github-status" class="status-indicator green"></span></h2>
                 <div class="metric">
                     <span class="metric-label">API Status:</span>
                     <span class="metric-value" id="github-api-status">-</span>
@@ -4135,7 +4172,7 @@ async def admin_dashboard(admin_session: Optional[str] = Cookie(None)):
             </div>
             
             <div class="card">
-                <h2>System Metrics</h2>
+                <h2>System Metrics <span id="system-status" class="status-indicator green"></span></h2>
                 <div class="metric">
                     <span class="metric-label">Cache Hit Rate:</span>
                     <span class="metric-value" id="cache-hit-rate">-</span>
@@ -4196,6 +4233,7 @@ async def admin_dashboard(admin_session: Optional[str] = Cookie(None)):
                         frontendStatusEl.innerHTML = '<span class="status-indicator green"></span>OK';
                     }
                     document.getElementById('frontend-errors').textContent = data.frontend_has_errors ? 'Yes' : 'No';
+                    document.getElementById('frontend-start-time').textContent = data.frontend_start_time !== 'N/A' ? formatTimestamp(data.frontend_start_time) : 'N/A';
                     
                     document.getElementById('github-api-status').textContent = data.github_health.api_status;
                     document.getElementById('github-branch').textContent = data.github_health.branch;
@@ -4211,13 +4249,26 @@ async def admin_dashboard(admin_session: Optional[str] = Cookie(None)):
                     document.getElementById('active-sessions').textContent = data.metrics.active_sessions;
                     document.getElementById('error-rate').textContent = data.metrics.error_rate;
                     
-                    const banner = document.getElementById('status-banner');
-                    if (data.backend_has_errors || data.frontend_has_errors || data.github_health.api_status !== 'OK' || data.metrics.error_rate > 0) {
-                        banner.className = 'status-banner red';
-                        banner.textContent = 'System Issues Detected';
+                    // Update per-card status indicators
+                    const backendFrontendStatus = document.getElementById('backend-frontend-status');
+                    if (data.backend_has_errors || data.frontend_has_errors) {
+                        backendFrontendStatus.className = 'status-indicator red';
                     } else {
-                        banner.className = 'status-banner green';
-                        banner.textContent = 'System Healthy';
+                        backendFrontendStatus.className = 'status-indicator green';
+                    }
+                    
+                    const githubStatus = document.getElementById('github-status');
+                    if (data.github_health.api_status !== 'OK') {
+                        githubStatus.className = 'status-indicator red';
+                    } else {
+                        githubStatus.className = 'status-indicator green';
+                    }
+                    
+                    const systemStatus = document.getElementById('system-status');
+                    if (data.metrics.error_rate > 0) {
+                        systemStatus.className = 'status-indicator red';
+                    } else {
+                        systemStatus.className = 'status-indicator green';
                     }
                     
                     document.getElementById('last-updated').textContent = formatTimestamp(new Date().toISOString());
@@ -4253,6 +4304,7 @@ async def admin_dashboard(admin_session: Optional[str] = Cookie(None)):
 async def get_health_status():
     """Get overall system health status."""
     import cache_manager
+    import auth
     
     logs = log_storage.get_log_storage()
     cache_stats = cache_manager.get_cache_stats()
@@ -4305,11 +4357,15 @@ async def get_health_status():
     frontend_has_errors = logs.has_errors("frontend")
     frontend_last_error = frontend_logs[-1].get('message') if frontend_logs else None
     
+    # Get Vercel deploy time for frontend start time
+    frontend_start_time = os.getenv("VERCEL_DEPLOY_TIME", "N/A")
+    
     return {
         "backend_start_time": logs.get_server_start_time(),
         "backend_has_errors": logs.has_errors("backend"),
         "frontend_has_errors": frontend_has_errors,
         "frontend_last_error": frontend_last_error,
+        "frontend_start_time": frontend_start_time,
         "github_health": github_health,
         "metrics": {
             "cache_hit_rate": f"{cache_stats.get('hit_rate_percent', 0):.1f}%",
@@ -4317,7 +4373,7 @@ async def get_health_status():
             "cache_misses": cache_stats.get('total_misses', 0),
             "rate_limit_remaining": cache_stats.get('rate_limit_remaining', 'N/A'),
             "rate_limit_total": cache_stats.get('rate_limit_total', 'N/A'),
-            "active_sessions": "N/A",
+            "active_sessions": auth.AuthManager.get_active_session_count(),
             "error_rate": "0%" if not logs.has_errors("backend") else ">0%"
         }
     }
