@@ -202,7 +202,7 @@ export default function NotificationBell() {
             className="fixed inset-0 z-40"
             onClick={() => setIsOpen(false)}
           />
-          <div className="absolute right-0 top-12 w-full sm:w-96 max-w-[calc(100vw-2rem)] bg-white rounded-lg shadow-xl border z-50 max-h-[80vh] overflow-y-auto">
+          <div className="fixed top-16 right-2 left-2 sm:absolute sm:left-auto sm:right-0 sm:top-12 sm:w-96 bg-white rounded-lg shadow-xl border z-50 max-h-[80vh] overflow-y-auto">
             <div className="p-4 border-b flex justify-between items-center">
               <h3 className="font-semibold">Notifications</h3>
               <div className="flex gap-2">
