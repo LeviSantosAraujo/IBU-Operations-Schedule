@@ -303,7 +303,10 @@ export default function ScheduleManager() {
       await approveAvailabilityRequest(requestId, comment)
       loadAvailabilityRequests()
       loadSchedule()
-      window.dispatchEvent(new CustomEvent('scheduleUpdate'))
+      // Wait for backend debounce (500ms) before refreshing
+      setTimeout(() => {
+        window.dispatchEvent(new CustomEvent('scheduleUpdate'))
+      }, 1000)
       setShowApprovalModal(false)
       setManagerComment('')
       setSelectedRequest(null)
@@ -316,7 +319,10 @@ export default function ScheduleManager() {
     try {
       await rejectAvailabilityRequest(requestId, comment)
       loadAvailabilityRequests()
-      window.dispatchEvent(new CustomEvent('scheduleUpdate'))
+      // Wait for backend debounce (500ms) before refreshing
+      setTimeout(() => {
+        window.dispatchEvent(new CustomEvent('scheduleUpdate'))
+      }, 1000)
       setShowApprovalModal(false)
       setManagerComment('')
       setSelectedRequest(null)

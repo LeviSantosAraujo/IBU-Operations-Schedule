@@ -133,8 +133,10 @@ export default function NotificationBell() {
     approveAvailabilityRequest(requestId, comment)
       .then(() => {
         loadNotifications()
-        // Dispatch schedule update event immediately
-        window.dispatchEvent(new CustomEvent('scheduleUpdate'))
+        // Wait for backend debounce (500ms) before refreshing
+        setTimeout(() => {
+          window.dispatchEvent(new CustomEvent('scheduleUpdate'))
+        }, 1000)
       })
       .catch((err) => {
         console.error('Error approving request:', err)

@@ -1687,15 +1687,15 @@ async def clear_schedule_shifts(
     schedule.shifts = []
     schedule.total_hours = {}
     
-    # Force cache invalidation to ensure fresh data
-    import cache_manager
-    cache_manager.clear_cache()
-    
     # Update staging layer
     schedules = staging_store.get_schedules()
     schedules = [s for s in schedules if str(s.get('week_start_date')) != str(week_start_date)]
     schedules.append(schedule.model_dump())
     staging_store.set_schedules(schedules, user_id=user.get('employee_id'))
+    
+    # Invalidate cache for schedules.json after write completes
+    import cache_manager
+    cache_manager.invalidate_cache_key(cache_manager.cache_key_for_file('schedules.json'))
     
     return schedule
 
