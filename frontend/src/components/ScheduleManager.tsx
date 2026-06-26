@@ -498,7 +498,10 @@ export default function ScheduleManager() {
       setSaving(true)
       await saveSchedule(schedule)
       setSaved(true)
-      window.dispatchEvent(new CustomEvent('scheduleUpdate'))
+      // Wait for backend debounce (500ms) before refreshing
+      setTimeout(() => {
+        window.dispatchEvent(new CustomEvent('scheduleUpdate'))
+      }, 1000)
       setTimeout(() => setSaved(false), 3000)
     } catch (err) {
       alert('Error saving schedule')
