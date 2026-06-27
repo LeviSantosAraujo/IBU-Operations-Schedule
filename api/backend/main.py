@@ -1641,8 +1641,9 @@ async def clear_schedule_shifts(
         print(f"[CLEAR SCHEDULE] Schedule not found for week {week_start_date}")
         raise HTTPException(status_code=404, detail="Schedule not found")
 
-    # Preserve locked shifts (both approved and pending) - they should not be cleared
-    locked_shifts = [s for s in schedule.shifts if s.locked]
+    # Preserve locked shifts (both approved and pending) - identified by ID prefix
+    # locked_* = approved shifts, pending_* = pending shifts
+    locked_shifts = [s for s in schedule.shifts if s.id and (s.id.startswith('locked_') or s.id.startswith('pending_'))]
     print(f"[CLEAR SCHEDULE] Preserving {len(locked_shifts)} locked shifts")
 
     # Clear only non-locked shifts
