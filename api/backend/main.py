@@ -1640,11 +1640,15 @@ async def clear_schedule_shifts(
     if not schedule:
         print(f"[CLEAR SCHEDULE] Schedule not found for week {week_start_date}")
         raise HTTPException(status_code=404, detail="Schedule not found")
-    
-    # Clear all shifts - approved/pending availability markers are derived from requests
-    schedule.shifts = []
+
+    # Preserve locked shifts (both approved and pending) - they should not be cleared
+    locked_shifts = [s for s in schedule.shifts if s.locked]
+    print(f"[CLEAR SCHEDULE] Preserving {len(locked_shifts)} locked shifts")
+
+    # Clear only non-locked shifts
+    schedule.shifts = locked_shifts
     schedule.total_hours = {}
-    print(f"[CLEAR SCHEDULE] Cleared shifts from schedule")
+    print(f"[CLEAR SCHEDULE] Cleared non-locked shifts from schedule")
     
     # Force cache invalidation to ensure fresh data
     import cache_manager
