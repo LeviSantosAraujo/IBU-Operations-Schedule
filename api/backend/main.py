@@ -1446,17 +1446,23 @@ async def create_or_update_schedule(
 ):
     """Save a schedule (manual editing) (managers only)"""
     schedule.updated_at = datetime.now()
-    
+
+    # Log what we're receiving
+    print(f"[SAVE SCHEDULE] Saving schedule {schedule.id} for week {schedule.week_start_date}")
+    print(f"[SAVE SCHEDULE] Total shifts received: {len(schedule.shifts)}")
+    locked_count = len([s for s in schedule.shifts if s.id and (s.id.startswith('locked_') or s.id.startswith('pending_'))])
+    print(f"[SAVE SCHEDULE] Locked shifts: {locked_count}, Auto-generated shifts: {len(schedule.shifts) - locked_count}")
+
     # Update staging layer with immediate write to prevent race conditions
     schedules = staging_store.get_schedules()
     schedules = [s if s['id'] != schedule.id else schedule.model_dump() for s in schedules]
     if not any(s['id'] == schedule.id for s in schedules):
         schedules.append(schedule.model_dump())
     staging_store.set_schedules(schedules, user_id=user.get('employee_id'), immediate=True)
-    
+
     # Add to action queue for Excel sync (async, no blocking)
     # No action queue needed - GitHub JSON is single source of truth
-    
+
     return schedule
 
 @app.put("/api/schedules/{week_start_date}/shifts", response_model=WeeklySchedule)
@@ -3619,32 +3625,28 @@ async def check_staging():
 async def cleanup_orphaned_records():
     """Clean up availability requests and notifications from deleted employees"""
     try:
-        from excel_store import _get_workbook, _save_workbook, get_availability_requests, get_notifications
-        
         # Get current employees
         employees_dicts = staging_store.get_employees()
         employees = [Employee(**e) for e in employees_dicts]
         active_employee_ids = {e.id for e in employees}
         print(f"[CLEANUP] Active employee IDs: {active_employee_ids}")
-        
-        # Clean up staging layer FIRST (frontend reads from here)
+
+        # Clean up staging layer (GitHub JSON is single source of truth)
         staging_requests = staging_store.get_availability_requests()
         print(f"[CLEANUP] Staging requests before: {len(staging_requests)}")
         print(f"[CLEANUP] Staging request employee IDs: {[r.get('employee_id') for r in staging_requests]}")
         cleaned_staging_requests = [r for r in staging_requests if r.get('employee_id') in active_employee_ids]
         print(f"[CLEANUP] Staging requests after: {len(cleaned_staging_requests)}")
         staging_store.set_availability_requests(cleaned_staging_requests)
-        
+
         staging_notifications = staging_store.get_notifications()
         print(f"[CLEANUP] Staging notifications before: {len(staging_notifications)}")
         cleaned_staging_notifications = [n for n in staging_notifications if n.get('employee_id') in active_employee_ids]
         print(f"[CLEANUP] Staging notifications after: {len(cleaned_staging_notifications)}")
         staging_store.set_notifications(cleaned_staging_notifications)
-        
-        # Note: Excel cleanup removed - GitHub JSON is now the single source of truth
-        
+
         print(f"[CLEANUP] Staging layer: removed {len(staging_requests) - len(cleaned_staging_requests)} requests, {len(staging_notifications) - len(cleaned_staging_notifications)} notifications")
-        
+
         return {
             "success": True,
             "removed_requests": len(staging_requests) - len(cleaned_staging_requests),
