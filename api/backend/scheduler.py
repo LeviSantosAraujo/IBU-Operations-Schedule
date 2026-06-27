@@ -1,12 +1,18 @@
+# DATA SOURCE = json_store ONLY. Excel is EXPORT-ONLY.
+# Do NOT import data_store_excel or excel_store for data operations.
+# Excel is permitted ONLY for generating .xlsx download/export files.
+# See ARCHITECTURE.md for details.
+
 from typing import List, Dict, Optional, Tuple
 from datetime import date, timedelta
 import uuid
 from models import (
-    Employee, Availability, WeeklySchedule, Shift, 
+    Employee, Availability, WeeklySchedule, Shift,
     JobType, Floor, AvailabilityType, EmployeeType, Event
 )
 import json_store
-from excel_store import get_location_color
+from json_data import get_schedule_by_week
+from utils import get_location_color
 
 class SchedulingEngine:
     def __init__(self):

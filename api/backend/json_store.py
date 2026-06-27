@@ -366,8 +366,12 @@ def set_notifications(notifications: List[Dict], user_id: Optional[str] = None, 
 
 
 def get_system_config() -> Dict:
-    """Get system config from system_config.json."""
+    """Get system config from system_config.json (fallback to config.json)."""
     data = _read_json_file("system_config.json")
+    if data:
+        return data
+    # Fallback to config.json for backward compatibility
+    data = _read_json_file("config.json")
     return data if data else {}
 
 
@@ -436,4 +440,27 @@ def set_coverage_requirements(requirements: List[Dict], user_id: Optional[str] =
     if result and user_id:
         import audit_logger
         audit_logger.log_write_operation("coverage_requirement", "update", None, user_id, {"count": len(requirements)})
+    return result
+
+
+# ============ Password Management ============
+
+def get_passwords() -> List[Dict]:
+    """Get passwords from passwords.json."""
+    data = _read_json_file("passwords.json")
+    return data if data else []
+
+
+def set_passwords(passwords: List[Dict], user_id: Optional[str] = None, immediate: bool = False) -> bool:
+    """Set passwords in passwords.json with audit logging.
+
+    Args:
+        passwords: List of password dictionaries (employee_id, password_hash)
+        user_id: Optional user ID for audit logging
+        immediate: If True, bypass debouncing and write immediately
+    """
+    result = _write_json_file("passwords.json", passwords, user_id=user_id, immediate=immediate)
+    if result and user_id:
+        import audit_logger
+        audit_logger.log_write_operation("password", "update", None, user_id, {"count": len(passwords)})
     return result

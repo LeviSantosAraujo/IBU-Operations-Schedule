@@ -1,5 +1,10 @@
 # IBU Operations Schedule API
 # GitHub persistence enabled - data stored in data branch
+#
+# DATA SOURCE = json_store ONLY. Excel is EXPORT-ONLY.
+# Do NOT import data_store_excel or excel_store for data operations.
+# Excel is permitted ONLY for generating .xlsx download/export files.
+# See ARCHITECTURE.md for details.
 import os
 from dotenv import load_dotenv
 
@@ -101,7 +106,7 @@ from models import (
 from excel_store import (
     set_blob_key, _clear_workbook_cache
 )
-from data_store_excel import (
+from json_data import (
     save_employee, delete_employee,
     get_availabilities, get_availability_for_week, save_availability,
     get_all_schedules, get_schedule_by_week, save_schedule, delete_schedule,
@@ -764,8 +769,8 @@ async def reset_staging_from_excel(authorization: str = Header(None)):
     user = require_manager(authorization)
     
     try:
-        # Load all employees from Excel (intentional Excel read for this utility)
-        from data_store_excel import get_all_employees
+        # Load all employees from json_store
+        from json_data import get_all_employees
         all_employees = get_all_employees()
         employees_data = [e.model_dump() for e in all_employees]
         
@@ -2997,8 +3002,8 @@ async def upload_excel_file(
             from datetime import datetime
             import re
             import uuid
-            from data_store_excel import get_all_employees
-            
+            from json_data import get_all_employees
+
             # Get employee name to ID mapping (exact + normalized fallback)
             employees = get_all_employees()
             print(f"[MERGE] Loaded {len(employees)} employees from system")
@@ -3377,11 +3382,11 @@ async def test_saturday_approval():
             print(f"  Employee shift details: {employee_shifts}")
         else:
             print(f"[TEST] No schedule in staging for week {week_start}")
-            # Check Excel
-            from data_store_excel import get_schedule_by_week
+            # Check json_store
+            from json_data import get_schedule_by_week
             schedule_obj = get_schedule_by_week(week_start)
             if schedule_obj:
-                print(f"[TEST] Schedule exists in Excel for week {week_start}")
+                print(f"[TEST] Schedule exists in json_store for week {week_start}")
                 print(f"  Total shifts: {len(schedule_obj.shifts)}")
                 employee_shifts = [s for s in schedule_obj.shifts if s.employee_id == saturday_request.get('employee_id')]
                 print(f"  Employee shifts: {len(employee_shifts)}")
@@ -3408,50 +3413,35 @@ async def test_saturday_approval():
 async def check_week_shifts(week_start_date: str):
     """Check shifts for a specific week"""
     try:
-        from excel_store import _get_workbook, _invalidate_cache
-        
         print(f"[DIAGNOSTIC] Checking shifts for week {week_start_date}")
-        
-        # Get schedule from staging first
-        staging_schedules = staging_store.get_schedules()
-        print(f"[DIAGNOSTIC] Found {len(staging_schedules)} schedules in staging")
-        print(f"[DIAGNOSTIC] Staging week starts: {[s.get('week_start_date') for s in staging_schedules]}")
-        
-        schedule = None
-        source = None
-        for s in staging_schedules:
-            # Handle both string and date objects
-            week_start = s.get('week_start_date')
-            if isinstance(week_start, date):
-                week_start_str = str(week_start)
-            else:
-                week_start_str = week_start
-            
-            if week_start_str == week_start_date:
-                schedule = s
-                source = "staging"
-                print(f"[DIAGNOSTIC] Found schedule in staging for week {week_start_date}")
-                break
-        
+
+        # Get schedule from json_store
+        from json_data import get_schedule_by_week
+        from datetime import date
+
+        week_date = date.fromisoformat(week_start_date)
+        schedule = get_schedule_by_week(week_date)
+
         if not schedule:
             print(f"[DIAGNOSTIC] Schedule not found for week {week_start_date}")
-        
-        if not schedule:
             return {"error": "No schedule found for this week"}
-        
+
+        source = "json_store"
+        print(f"[DIAGNOSTIC] Found schedule in json_store for week {week_start_date}")
+
         # Filter shifts for the employee
         employee_id = "emp_1781999606683"
-        employee_shifts = [s for s in schedule.get('shifts', []) if s.get('employee_id') == employee_id]
-        
-        print(f"[DIAGNOSTIC] Source: {source}, Total shifts: {len(schedule.get('shifts', []))}, Employee shifts: {len(employee_shifts)}")
-        
+        employee_shifts = [s for s in schedule.shifts if s.employee_id == employee_id]
+
+        print(f"[DIAGNOSTIC] Source: {source}, Total shifts: {len(schedule.shifts)}, Employee shifts: {len(employee_shifts)}")
+
         return {
             "week_start_date": week_start_date,
             "source": source,
-            "total_shifts": len(schedule.get('shifts', [])),
-            "employee_shifts": employee_shifts,
+            "total_shifts": len(schedule.shifts),
+            "employee_shifts": [s.model_dump() for s in employee_shifts],
             "employee_shifts_count": len(employee_shifts),
-            "all_shifts": schedule.get('shifts', [])
+            "all_shifts": [s.model_dump() for s in schedule.shifts]
         }
     except Exception as e:
         import traceback
@@ -3461,103 +3451,23 @@ async def check_week_shifts(week_start_date: str):
 
 @app.get("/api/diagnostic/schedules-data")
 async def diagnostic_schedules_data():
-    """Diagnostic endpoint to inspect schedules data in Excel"""
-    from excel_store import _get_workbook, get_all_schedules, _invalidate_cache
-    
-    wb = _get_workbook()
-    if not wb:
-        return {"error": "Failed to load workbook"}
-    
+    """Diagnostic endpoint to inspect schedules data in json_store"""
+    from json_data import get_all_schedules
+
+    schedules = get_all_schedules()
+
     result = {
-        "sheet_names": wb.sheetnames,
-        "schedules_data": [],
-        "schedule_sheets": {},
-        "weekly_sheets": {},
+        "schedules_count": len(schedules),
         "parsed_schedules": []
     }
-    
-    # Check for Schedule_ sheets
-    for sheet_name in wb.sheetnames:
-        if sheet_name.startswith('Schedule_'):
-            sheet = wb[sheet_name]
-            rows = []
-            for i, row in enumerate(sheet.iter_rows(values_only=True)):
-                if i < 5:  # First 5 rows
-                    rows.append(list(row))
-                elif i == 5:
-                    rows.append(["... (truncated)"])
-                    break
-            result["schedule_sheets"][sheet_name] = {
-                "rows": rows,
-                "total_rows": sheet.max_row,
-                "total_cols": sheet.max_column
-            }
-    
-    # Check for weekly sheets (non-Schedule_, non-PWDs)
-    for sheet_name in wb.sheetnames:
-        if not sheet_name.startswith('Schedule_') and sheet_name != 'PWDs' and sheet_name != 'Employees':
-            sheet = wb[sheet_name]
-            rows = []
-            for i, row in enumerate(sheet.iter_rows(values_only=True)):
-                if i < 10:  # First 10 rows
-                    rows.append(list(row))
-                elif i == 10:
-                    rows.append(["... (truncated)"])
-                    break
-            result["weekly_sheets"][sheet_name] = {
-                "rows": rows,
-                "total_rows": sheet.max_row,
-                "total_cols": sheet.max_column
-            }
-    
-    if "Schedules" in wb.sheetnames:
-        sheet = wb["Schedules"]
-        rows = []
-        for i, row in enumerate(sheet.iter_rows(values_only=True)):
-            if i < 10:  # First 10 rows
-                rows.append(list(row))
-            elif i == 10:
-                rows.append(["... (truncated)"])
-                break
-        result["schedules_data"] = rows
-        result["total_rows"] = sheet.max_row
-        result["total_cols"] = sheet.max_column
-    
-    wb.close()
-    
-    # Test name matching with sample names from weekly sheets
-    from data_store_excel import get_all_employees
-    employees = get_all_employees()
-    exact_map, base_map = build_employee_lookup(employees)
-    test_names = ['Fran', 'Aashima', 'NAHIM ', 'Pablo 2', 'Kavya C', 'Mickaela  C', 'Viviana 3', 'Fran SManager', 'Aashima Supervisor', 'Sagar C', 'Daria C', 'Chinnesha C', 'Anastasia B', 'Iqra B', 'Viviana B', 'Osmaro last day']
-    name_test_results = {}
-    for name in test_names:
-        matched_id = match_employee_id(name, exact_map, base_map)
-        norm = normalize_employee_name(name)
-        name_test_results[name] = {
-            'normalized': norm,
-            'matched_id': matched_id,
-            'in_exact': norm in exact_map or name.lower().strip() in exact_map,
-            'in_base': norm in base_map
-        }
-    result['name_matching_test'] = name_test_results
-    result['system_employees'] = [e.name for e in employees[:10]]  # First 10
-    
-    # Invalidate cache and try to parse schedules
-    _invalidate_cache()
-    try:
-        schedules = get_all_schedules()
-        result["parsed_schedules"] = [
-            {
-                "week_start_date": str(s.week_start_date),
-                "shifts_count": len(s.shifts)
-            }
-            for s in schedules
-        ]
-        result["parsed_count"] = len(schedules)
-    except Exception as e:
-        result["parse_error"] = str(e)
-    
+
+    for schedule in schedules:
+        result["parsed_schedules"].append({
+            "week_start_date": str(schedule.week_start_date),
+            "total_shifts": len(schedule.shifts),
+            "total_hours": schedule.total_hours
+        })
+
     return result
 
 @app.get("/api/diagnostic/github-storage")
@@ -3607,8 +3517,9 @@ async def diagnostic_github_storage():
 async def diagnostic_password_check(employee_id: str, password: str):
     """Diagnostic endpoint to test password verification"""
     from github_storage import GITHUB_AVAILABLE
-    from excel_store import verify_manager_password, manager_has_password, hash_password
-    
+    from json_data import verify_manager_password, manager_has_password
+    from utils import hash_password
+
     result = {
         "github_available": GITHUB_AVAILABLE,
         "employee_id": employee_id,
@@ -3660,38 +3571,22 @@ async def cleanup_duplicate_schedules():
 
 @app.get("/api/diagnostic/check-staging")
 async def check_staging():
-    """Check what's in the staging layer and Excel"""
+    """Check what's in the json_store layer"""
     try:
-        from excel_store import _get_workbook, get_availability_requests
-        
+        from json_data import get_availability_requests, get_notifications
+
         employees_dicts = staging_store.get_employees()
         employees = [Employee(**e) for e in employees_dicts]
         active_employee_ids = {e.id for e in employees}
-        
+
         staging_requests = staging_store.get_availability_requests()
         staging_notifications = staging_store.get_notifications()
         staging_schedules = staging_store.get_schedules()
-        
-        # Check Excel directly
-        excel_requests = get_availability_requests()
-        
-        # Check Excel notifications directly
-        wb = _get_workbook()
-        excel_notifications = []
-        if wb and 'Notifications' in wb.sheetnames:
-            sheet = wb['Notifications']
-            for row in range(2, sheet.max_row + 1):
-                notif = {
-                    'id': sheet.cell(row=row, column=1).value,
-                    'employee_id': sheet.cell(row=row, column=2).value,
-                    'type': sheet.cell(row=row, column=3).value,
-                    'message': sheet.cell(row=row, column=4).value,
-                    'read': sheet.cell(row=row, column=5).value,
-                    'created_at': sheet.cell(row=row, column=6).value
-                }
-                if notif['employee_id']:  # Skip empty rows
-                    excel_notifications.append(notif)
-        
+
+        # Check json_store directly
+        json_requests = get_availability_requests()
+        json_notifications = get_notifications()
+
         return {
             "active_employee_ids": list(active_employee_ids),
             "staging_requests_count": len(staging_requests),
@@ -3702,12 +3597,12 @@ async def check_staging():
             "staging_schedules_count": len(staging_schedules),
             "staging_schedules_week_starts": [s.get('week_start_date') for s in staging_schedules],
             "staging_schedules_shift_counts": [{"week": s.get('week_start_date'), "shifts": len(s.get('shifts', []))} for s in staging_schedules],
-            "excel_requests_count": len(excel_requests),
-            "excel_request_employee_ids": [r.get('employee_id') for r in excel_requests],
-            "excel_request_details": [{"id": r.get('id'), "employee_id": r.get('employee_id'), "status": r.get('status'), "days": r.get('days_of_week')} for r in excel_requests],
-            "excel_notifications_count": len(excel_notifications),
-            "excel_notification_employee_ids": [n.get('employee_id') for n in excel_notifications],
-            "excel_notification_details": excel_notifications
+            "json_requests_count": len(json_requests),
+            "json_request_employee_ids": [r.employee_id for r in json_requests],
+            "json_request_details": [{"id": r.id, "employee_id": r.employee_id, "status": r.status, "days": r.days_of_week} for r in json_requests],
+            "json_notifications_count": len(json_notifications),
+            "json_notification_employee_ids": [n.get('employee_id') for n in json_notifications],
+            "json_notification_details": json_notifications
         }
     except Exception as e:
         import traceback
@@ -3759,7 +3654,7 @@ async def cleanup_orphaned_records():
 @app.get("/api/diagnostic/reset-admin-password")
 async def reset_admin_password():
     """Reset admin password to admin123 (emergency fix)"""
-    from excel_store import set_manager_password
+    from json_data import set_manager_password
     set_manager_password('admin_001', 'System Admin', 'admin123')
     return {"success": True, "message": "Admin password reset to admin123"}
 
