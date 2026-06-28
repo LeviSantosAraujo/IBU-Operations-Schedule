@@ -1,5 +1,6 @@
 # IBU Operations Schedule API
 # GitHub persistence enabled - data stored in data branch
+# CORS wildcard origin enabled for Excel download (temporary fix)
 #
 # DATA SOURCE = json_store ONLY. Excel is EXPORT-ONLY.
 # Do NOT import data_store_excel or excel_store for data operations.

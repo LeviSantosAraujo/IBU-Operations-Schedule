@@ -325,6 +325,10 @@ Schedule Sheet IBU/
 
 ## Usage Guide
 
+**User Guides:**
+- **EMPLOYEE_GUIDE.docx** - Comprehensive guide for employees (availability, requests, schedule view)
+- **MANAGER_GUIDE.docx** - Comprehensive guide for managers (scheduling, approvals, employee management, database export)
+
 ### 1. Employee Management
 Navigate to "Employees" to:
 - Add new employees (student workers, interns, managers)
