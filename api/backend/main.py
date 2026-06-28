@@ -3598,7 +3598,8 @@ async def admin_dashboard(admin_session: Optional[str] = Cookie(None)):
         }
         
         loadDashboard();
-        setInterval(loadDashboard, 300000);
+        // Auto-refresh removed to reduce GitHub API rate limit usage
+        // Refresh manually by reloading the page
     </script>
 </body>
 </html>

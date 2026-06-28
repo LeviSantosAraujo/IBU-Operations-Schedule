@@ -3,5 +3,11 @@
     "deploymentEnabled": {
       "main": true
     }
-  }
+  },
+  "crons": [
+    {
+      "path": "/api/cron/nightly-excel-commit",
+      "schedule": "0 0 * * *"
+    }
+  ]
 }
