@@ -1,10 +1,10 @@
 fastapi==0.104.1
 uvicorn==0.24.0
-pydantic==2.5.3
+pydantic==2.10.0
 python-multipart==0.0.6
 python-dateutil==2.8.2
 openpyxl==3.1.2
 vercel-blob==0.4.2
-python-dotenv==1.0.0
+requests>=2.32.3
 PyJWT==2.8.0
-requests==2.32.3
+python-dotenv==1.0.0
