@@ -1234,9 +1234,11 @@ export default function ScheduleManager() {
           {schedule && selectedLocation !== 'all' && (() => {
             const locLabel = locations.find(l => l.id === selectedLocation)?.name || selectedLocation
             const filteredShifts = schedule.shifts.filter((s: Shift) => isShiftHighlighted(s))
+            // Filter out shifts from deleted employees
+            const validShifts = filteredShifts.filter((s: Shift) => employees.some((e: any) => e.id === s.employee_id))
             const byDay: Record<string, Shift[]> = {}
             days.forEach(d => { byDay[d] = [] })
-            filteredShifts.forEach((s: Shift) => { byDay[s.day_of_week]?.push(s) })
+            validShifts.forEach((s: Shift) => { byDay[s.day_of_week]?.push(s) })
 
             return (
               <div className="mb-6 rounded-lg border-2 p-4"
@@ -1244,7 +1246,7 @@ export default function ScheduleManager() {
                 <div className="flex items-center justify-between mb-3">
                   <h3 className="font-bold text-base flex items-center gap-2">
                     <MapPin className="w-4 h-4" />
-                    {locLabel} — {filteredShifts.length} shift{filteredShifts.length !== 1 ? 's' : ''} this week
+                    {locLabel} — {validShifts.length} shift{validShifts.length !== 1 ? 's' : ''} this week
                   </h3>
                 </div>
                 <div className="grid grid-cols-7 gap-2">
