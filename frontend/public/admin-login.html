@@ -45,19 +45,12 @@
                     placeholder="Enter password if set"
                 >
             </div>
-            <div class="flex items-center justify-between gap-2">
+            <div class="flex items-center justify-between">
                 <button 
-                    class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline flex-1" 
+                    class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline w-full" 
                     type="submit"
                 >
                     Login as Admin
-                </button>
-                <button 
-                    id="viewDashboardBtn"
-                    class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline flex-1 hidden"
-                    type="button"
-                >
-                    View Dashboard
                 </button>
             </div>
         </form>
@@ -104,17 +97,12 @@
                     };
                     localStorage.setItem('ibu_schedule_user', JSON.stringify(user));
                     
-                    messageDiv.textContent = 'Login successful!';
+                    messageDiv.textContent = 'Login successful! Redirecting...';
                     messageDiv.className = 'mt-4 text-center text-sm text-green-400';
                     
-                    // Show View Dashboard button
-                    const viewDashboardBtn = document.getElementById('viewDashboardBtn');
-                    viewDashboardBtn.classList.remove('hidden');
-                    
-                    // Add click handler for dashboard button
-                    viewDashboardBtn.onclick = () => {
-                        window.location.href = '/admin/dashboard';
-                    };
+                    setTimeout(() => {
+                        window.location.href = '/';
+                    }, 1000);
                 } else {
                     messageDiv.textContent = data.detail || 'Login failed';
                     messageDiv.className = 'mt-4 text-center text-sm text-red-400';

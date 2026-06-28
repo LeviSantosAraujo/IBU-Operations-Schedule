@@ -390,7 +390,8 @@ app.add_middleware(
         "https://ibu-operations-schedule.vercel.app",
         "http://localhost:3000",
         "http://localhost:5173",
-        "http://localhost:8000"
+        "http://localhost:8000",
+        "*"  # Allow all origins temporarily to fix CORS issues
     ],
     allow_credentials=False,
     allow_methods=["*"],
