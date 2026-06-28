@@ -492,79 +492,111 @@ async def excel_status():
 
 @app.get("/api/excel/download")
 async def download_excel():
-    """Export current GitHub JSON data to Excel file for download"""
+    """Export current GitHub JSON data to Excel file with weekly sheet format"""
     from fastapi.responses import StreamingResponse
     import io
     from openpyxl import Workbook
+    from datetime import datetime, timedelta
 
     # Create Excel workbook
     wb = Workbook()
     
-    # Employees sheet - read from GitHub JSON
-    emp_sheet = wb.active
-    emp_sheet.title = "Employees"
-    emp_sheet.append(["ID", "Name", "Email", "Type", "Max Hours", "Active", "Created At"])
-    employees = staging_store.get_employees()
-    for emp in employees:
-        emp_sheet.append([
-            emp.get('id'), emp.get('name'), emp.get('email') or "", emp.get('employee_type'),
-            emp.get('max_hours_per_week'), emp.get('active'), emp.get('created_at')
-        ])
+    # Remove default sheet
+    if "Sheet" in wb.sheetnames:
+        wb.remove(wb["Sheet"])
     
-    # Schedules sheet - read from GitHub JSON
+    # Get all schedules from GitHub JSON
     schedules = staging_store.get_schedules()
-    if schedules:
-        sched_sheet = wb.create_sheet("Schedules")
-        sched_sheet.append(["Week Start", "Schedule ID", "Employee ID", "Day", "Location", "Start Time", "End Time", "Hours", "Break Provided"])
-        for schedule in schedules:
-            for shift in schedule.get('shifts', []):
-                sched_sheet.append([
-                    schedule.get('week_start_date'), schedule.get('id'), shift.get('employee_id'), shift.get('day_of_week'),
-                    shift.get('floor'), shift.get('start_time'), shift.get('end_time'), shift.get('hours'), shift.get('break_provided')
-                ])
+    employees = staging_store.get_employees()
     
-    # Availability Requests sheet - read from GitHub JSON
-    requests = staging_store.get_availability_requests()
-    if requests:
-        req_sheet = wb.create_sheet("Availability Requests")
-        req_sheet.append(["ID", "Employee ID", "Request Type", "Start Date", "End Date", "Days of Week", "Start Time", "End Time", "Status", "Created At"])
-        for req in requests:
-            req_sheet.append([
-                req.get('id'), req.get('employee_id'), req.get('request_type'),
-                req.get('start_date'), req.get('end_date'), ', '.join(req.get('days_of_week', [])),
-                req.get('start_time'), req.get('end_time'), req.get('status'), req.get('created_at')
-            ])
+    # Create employee lookup
+    employee_map = {emp['id']: emp['name'] for emp in employees}
     
-    # Notifications sheet - read from GitHub JSON
-    notifications = staging_store.get_notifications()
-    if notifications:
-        notif_sheet = wb.create_sheet("Notifications")
-        notif_sheet.append(["ID", "Employee ID", "Type", "Message", "Read", "Created At"])
-        for notif in notifications:
-            notif_sheet.append([
-                notif.get('id'), notif.get('employee_id'), notif.get('type'),
-                notif.get('message'), notif.get('read'), notif.get('created_at')
-            ])
+    # Group schedules by week
+    for schedule in schedules:
+        week_start_date = schedule.get('week_start_date')
+        if not week_start_date:
+            continue
+        
+        # Parse week start date
+        try:
+            week_start = datetime.strptime(week_start_date, '%Y-%m-%d')
+        except:
+            continue
+        
+        # Calculate week end (6 days later)
+        week_end = week_start + timedelta(days=6)
+        
+        # Format sheet name like "June 15-21"
+        month_name = week_start.strftime('%B')
+        start_day = week_start.day
+        end_day = week_end.day
+        sheet_name = f"{month_name} {start_day}-{end_day}"
+        
+        # Create weekly sheet
+        ws = wb.create_sheet(sheet_name)
+        
+        # Header row
+        headers = ["Employee", "Mon", "", "Tue", "", "Wed", "", "Thu", "", "Fri", "", "Sat", "", "Sun", ""]
+        ws.append(headers)
+        
+        # Group shifts by employee
+        shifts_by_employee = {}
+        for shift in schedule.get('shifts', []):
+            emp_id = shift.get('employee_id')
+            if emp_id not in shifts_by_employee:
+                shifts_by_employee[emp_id] = {}
+            day = shift.get('day_of_week', '').lower()
+            if day not in shifts_by_employee[emp_id]:
+                shifts_by_employee[emp_id][day] = []
+            shifts_by_employee[emp_id][day].append(shift)
+        
+        # Map day names to column indices (0-based)
+        day_columns = {
+            'monday': 1,
+            'tuesday': 3,
+            'wednesday': 5,
+            'thursday': 7,
+            'friday': 9,
+            'saturday': 11,
+            'sunday': 13
+        }
+        
+        # Add rows for each employee
+        for emp_id, emp_name in employee_map.items():
+            row = [emp_name] + [""] * 14
+            
+            # Add shifts for each day
+            if emp_id in shifts_by_employee:
+                for day, shifts in shifts_by_employee[emp_id].items():
+                    col_idx = day_columns.get(day)
+                    if col_idx is not None:
+                        # Combine multiple shifts with '/'
+                        shift_texts = []
+                        total_hours = 0
+                        for shift in shifts:
+                            start_time = shift.get('start_time', '')
+                            end_time = shift.get('end_time', '')
+                            hours = shift.get('hours', 0)
+                            
+                            # Format time as "9a-5p" style
+                            shift_text = format_time_range(start_time, end_time)
+                            shift_texts.append(shift_text)
+                            total_hours += hours
+                        
+                        # Put shift text in day column, hours in next column
+                        if shift_texts:
+                            row[col_idx] = '/'.join(shift_texts)
+                            row[col_idx + 1] = total_hours if total_hours > 0 else ""
+            
+            ws.append(row)
     
-    # Config sheet - read from GitHub JSON
-    config_sheet = wb.create_sheet("Config")
-    config = staging_store.get_system_config()
-    config_sheet.append(["Setting", "Value"])
-    for key, value in config.items():
-        config_sheet.append([key, str(value)])
-    
-    # Events sheet - read from GitHub JSON
-    events = config.get('events', [])
-    if events:
-        event_sheet = wb.create_sheet("Events")
-        event_sheet.append(["ID", "Name", "Week Start Date", "Date", "Start Time", "End Time", "Location", "People Needed", "Description", "Created By"])
-        for event in events:
-            event_sheet.append([
-                event.get('id'), event.get('name'), event.get('week_start_date'),
-                event.get('date'), event.get('start_time'), event.get('end_time'),
-                event.get('location'), event.get('people_needed'), event.get('description'),
-                event.get('created_by')
-            ])
+    # If no schedules, create empty workbook with just header
+    if not schedules:
+        ws = wb.active
+        ws.title = "June 1-7"
+        headers = ["Employee", "Mon", "", "Tue", "", "Wed", "", "Thu", "", "Fri", "", "Sat", "", "Sun", ""]
+        ws.append(headers)
     
     # Save to buffer
     buffer = io.BytesIO()
@@ -577,50 +609,31 @@ async def download_excel():
         headers={"Content-Disposition": "attachment; filename=IBU_Schedule.xlsx"}
     )
 
-@app.post("/api/excel/create-new")
-async def create_new_excel(authorization: Optional[str] = Header(None)):
-    """Create a new Excel database with sample employees - managers only, or anyone if no database exists"""
-    # Allow creation if no database exists (initial setup)
-    if not excel_file_exists():
-        pass  # Initial setup
-    else:
-        user = require_manager(authorization)
-    import io
-    from openpyxl import Workbook
+def format_time_range(start_time: str, end_time: str) -> str:
+    """Format time range as '9a-5p' style"""
+    if not start_time or not end_time:
+        return ""
     
     try:
-        # Create workbook in memory
-        wb = Workbook()
+        # Parse 24-hour format
+        start_h, start_m = map(int, start_time.split(':'))
+        end_h, end_m = map(int, end_time.split(':'))
         
-        # Remove default sheet
-        if 'Sheet' in wb.sheetnames:
-            wb.remove(wb['Sheet'])
+        # Convert to 12-hour format with am/pm
+        def format_12h(h, m):
+            if h == 0:
+                return f"12{':'+str(m) if m > 0 else ''}a"
+            elif h < 12:
+                return f"{h}{':'+str(m) if m > 0 else ''}a"
+            elif h == 12:
+                return f"12{':'+str(m) if m > 0 else ''}p"
+            else:
+                return f"{h-12}{':'+str(m) if m > 0 else ''}p"
         
-        # Create basic tabs
-        wb.create_sheet('Config', 0)
-        wb.create_sheet('PWDs', 1)
-        wb.create_sheet('Employees', 2)
-        wb.create_sheet('Availability', 3)
-        
-        # Save to bytes
-        buffer = io.BytesIO()
-        wb.save(buffer)
-        buffer.seek(0)
-        
-        # Try to store using storage module
-        try:
-            from storage import store_excel_data
-            store_excel_data(buffer.read(), "ibu_schedule.xlsx")
-        except:
-            # If storage fails, continue anyway
-            pass
-        
-        return {
-            "message": "New Excel database created successfully",
-            "employees_added": 0
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to create Excel database: {str(e)}")
+        return f"{format_12h(start_h, start_m)}-{format_12h(end_h, end_m)}"
+    except:
+        return f"{start_time}-{end_time}"
+
 
 # ============ Password Management ============
 
@@ -817,25 +830,6 @@ async def cleanup_orphaned_records(authorization: str = Header(None)):
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Failed to cleanup orphaned records: {str(e)}")
 
-@app.post("/api/staging/reset-from-excel")
-async def reset_staging_from_excel(authorization: str = Header(None)):
-    """Reset staging data from Excel (managers only)"""
-    user = require_manager(authorization)
-    
-    try:
-        # Load all employees from json_store
-        from json_data import get_all_employees
-        all_employees = get_all_employees()
-        employees_data = [e.model_dump() for e in all_employees]
-        
-        # Update staging with all employees
-        staging_store.set_employees(employees_data, user_id="system")
-        
-        return {"message": f"Reset staging with {len(employees_data)} employees from Excel"}
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Failed to reset staging: {str(e)}")
 
 @app.get("/api/employees", response_model=List[Employee])
 async def list_employees(active_only: bool = False, authorization: str = Header(None)):
@@ -2991,405 +2985,7 @@ async def reset_blob_data(authorization: str = Header(None)):
 
 
 
-@app.post("/api/database/upload-excel")
-async def upload_excel_file(
-    file: UploadFile = File(...),
-    user: Dict = Depends(require_manager)
-):
-    """Upload and merge Excel file with existing data (managers only)"""
-    from excel_store import _invalidate_cache, _get_workbook, _save_workbook
-    from openpyxl import load_workbook
-    import io
-    
-    # Validate file type
-    if not file.filename.endswith('.xlsx'):
-        raise HTTPException(status_code=400, detail="Only .xlsx files are allowed")
-    
-    # Read file content
-    content = await file.read()
-    
-    # Load uploaded Excel file
-    uploaded_wb = load_workbook(io.BytesIO(content))
-    
-    # Get current workbook
-    current_wb = _get_workbook()
-    if not current_wb:
-        raise HTTPException(status_code=500, detail="Failed to load current workbook")
-    
-    # Merge logic: preserve employees and passwords, merge schedules
-    try:
-        # Preserve Employees sheet from current
-        if "Employees" in current_wb.sheetnames:
-            employees_sheet = current_wb["Employees"]
-            # Keep employees as-is
-        
-        # Preserve PWDs sheet from current
-        if "PWDs" in current_wb.sheetnames:
-            pwds_sheet = current_wb["PWDs"]
-            # Keep passwords as-is
-        
-        # Merge Schedules from uploaded file
-        # Handle both formats: weekly sheets (e.g., "June 15-21") and single "Schedules" sheet
-        if "Schedules" in uploaded_wb.sheetnames and "Schedules" in current_wb.sheetnames:
-            uploaded_schedules = uploaded_wb["Schedules"]
-            current_schedules = current_wb["Schedules"]
-            
-            # Check if uploaded has data (rows beyond header)
-            has_data = any(cell.value for row in uploaded_schedules.iter_rows(min_row=2) for cell in row)
-            
-            if has_data:
-                # Clear current schedules (except header)
-                for row in list(current_schedules.iter_rows(min_row=2)):
-                    for cell in row:
-                        cell.value = None
-                
-                # Copy uploaded schedules
-                for row in uploaded_schedules.iter_rows(min_row=2):
-                    for cell in row:
-                        current_schedules.cell(row=cell.row, column=cell.column, value=cell.value)
-        
-        # Always process weekly sheets if they exist (takes precedence over Schedule_ sheets)
-        weekly_sheets = [s for s in uploaded_wb.sheetnames if not s.startswith('Schedule_') and s not in ['PWDs', 'Employees', 'Schedules', 'Availability']]
-        print(f"[MERGE] Found {len(weekly_sheets)} weekly sheets to process: {weekly_sheets[:5]}...")
-        if weekly_sheets:
-            # Handle weekly sheets format - convert to Schedule_YYYY-MM-DD format with proper parsing
-            from datetime import datetime
-            import re
-            import uuid
-            from json_data import get_all_employees
 
-            # Get employee name to ID mapping (exact + normalized fallback)
-            employees = get_all_employees()
-            print(f"[MERGE] Loaded {len(employees)} employees from system")
-            exact_map, base_map = build_employee_lookup(employees)
-            id_to_name = {emp.id: emp.name for emp in employees}
-            unmatched_names = set()
-            
-            # Remove existing Schedule_ sheets from current
-            for sheet_name in list(current_wb.sheetnames):
-                if sheet_name.startswith('Schedule_'):
-                    current_wb.remove(current_wb[sheet_name])
-            
-            # Convert weekly sheets from uploaded file
-            for sheet_name in weekly_sheets:
-                print(f"[MERGE] Processing sheet: {sheet_name}")
-                try:
-                    # Extract week start date from sheet name
-                    year = 2026
-                    month_map = {
-                        'jan': 1, 'feb': 2, 'mar': 3, 'apr': 4, 'may': 5, 'jun': 6,
-                        'jul': 7, 'aug': 8, 'sep': 9, 'oct': 10, 'nov': 11, 'dec': 12
-                    }
-                    
-                    sheet_lower = sheet_name.lower()
-                    week_start = None
-                    
-                    for month_name, month_num in month_map.items():
-                        if month_name in sheet_lower:
-                            day_match = re.search(r'(\d{1,2})[-\s]+(\d{1,2})', sheet_name)
-                            if day_match:
-                                start_day = int(day_match.group(1))
-                                week_start = datetime(year, month_num, start_day).strftime('%Y-%m-%d')
-                                break
-                    
-                    if not week_start:
-                        continue
-                    
-                    schedule_sheet_name = f"Schedule_{week_start}"
-                    print(f"[MERGE] Creating Schedule sheet: {schedule_sheet_name}")
-                    
-                    # Parse the weekly sheet and convert to Schedule_ format
-                    uploaded_sheet = uploaded_wb[sheet_name]
-                    
-                    # Create new Schedule_ sheet with proper headers
-                    new_sheet = current_wb.create_sheet(schedule_sheet_name)
-                    new_sheet.append([
-                        "Shift_ID", "Employee_ID", "Employee_Name", "Day", 
-                        "Start_Time", "End_Time", "Job_Type", "Floor", 
-                        "Hours", "Is_Event", "Event_Name", "Locked", 
-                        "Locked_Avail_Type", "Location"
-                    ])
-                    
-                    # Parse employee schedules from weekly format
-                    days = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']
-                    day_columns = [1, 3, 5, 7, 9, 11, 13]  # Column indices for each day
-                    hour_columns = [2, 4, 6, 8, 10, 12, 14]  # Hour columns
-                    
-                    for row_idx, row in enumerate(uploaded_sheet.iter_rows(min_row=3, values_only=True), start=3):
-                        employee_name = row[0]
-                        if not employee_name or str(employee_name).strip().upper() == 'EVENTS':
-                            continue
-                        
-                        employee_name = str(employee_name).strip()
-                        employee_id = match_employee_id(employee_name, exact_map, base_map)
-                        
-                        if not employee_id:
-                            unmatched_names.add(employee_name)
-                            continue
-                        
-                        # Use the canonical system name
-                        canonical_name = id_to_name.get(employee_id, employee_name)
-                        shift_count_for_employee = 0
-                        
-                        for day_idx, (col_idx, hour_col_idx) in enumerate(zip(day_columns, hour_columns)):
-                            if col_idx >= len(row):
-                                continue
-                            shift_text = row[col_idx]
-                            hours = row[hour_col_idx] if hour_col_idx < len(row) else None
-                            
-                            if not shift_text:
-                                continue
-                            
-                            # Parse all shifts in this cell (may be multiple separated by '/')
-                            parsed_shifts = parse_shift_cell(shift_text, hours)
-                            
-                            for ps in parsed_shifts:
-                                shift_id = f"shift_{uuid.uuid4().hex[:8]}"
-                                new_sheet.append([
-                                    shift_id,
-                                    employee_id,
-                                    canonical_name,
-                                    days[day_idx],
-                                    ps['start'],
-                                    ps['end'],
-                                    'ibu_ops',
-                                    None,
-                                    ps['hours'],
-                                    False,
-                                    None,
-                                    False,
-                                    None,
-                                    ps['location']
-                                ])
-                                shift_count_for_employee += 1
-                    print(f"[MERGE] Created {new_sheet.max_row - 1} shifts in {schedule_sheet_name}")
-                except Exception as e:
-                    print(f"Could not parse sheet {sheet_name}: {e}")
-                    continue
-            
-            if unmatched_names:
-                print(f"[UPLOAD] Unmatched employee names (skipped): {sorted(unmatched_names)}")
-            print(f"[MERGE] Weekly sheet processing complete. Total Schedule_ sheets now: {len([s for s in current_wb.sheetnames if s.startswith('Schedule_')])}")
-        
-        # Merge Availabilities from uploaded file
-        if "Availability" in uploaded_wb.sheetnames and "Availability" in current_wb.sheetnames:
-            uploaded_avail = uploaded_wb["Availability"]
-            current_avail = current_wb["Availability"]
-            
-            # Check if uploaded has data (rows beyond header)
-            has_data = any(cell.value for row in uploaded_avail.iter_rows(min_row=2) for cell in row)
-            
-            if has_data:
-                # Clear current availability (except header)
-                for row in list(current_avail.iter_rows(min_row=2)):
-                    for cell in row:
-                        cell.value = None
-                
-                # Copy uploaded availability
-                for row in uploaded_avail.iter_rows(min_row=2):
-                    for cell in row:
-                        current_avail.cell(row=cell.row, column=cell.column, value=cell.value)
-        
-        # Save merged workbook
-        print(f"[MERGE] Saving workbook with sheets: {current_wb.sheetnames[:10]}...")
-        saved = _save_workbook(current_wb)
-        current_wb.close()
-        uploaded_wb.close()
-        
-        if not saved:
-            raise HTTPException(status_code=500, detail="Failed to save merged workbook")
-        print(f"[MERGE] Workbook saved successfully")
-        
-        # Invalidate cache
-        _invalidate_cache()
-        
-        return {
-            "success": True, 
-            "message": "Excel file merged successfully. Employees and passwords preserved, schedules and availability updated."
-        }
-    except Exception as e:
-        current_wb.close()
-        uploaded_wb.close()
-        raise HTTPException(status_code=500, detail=f"Merge failed: {str(e)}")
-
-# Helper functions for parsing shift strings
-def normalize_employee_name(name: str) -> str:
-    """Normalize an employee name by stripping trailing suffixes (numbers, single letters, role titles)
-    and collapsing whitespace. e.g. 'Pablo 2' -> 'pablo', 'Sagar C' -> 'sagar', 'Fran SManager' -> 'fran'."""
-    if not name:
-        return ""
-    n = str(name).strip().lower()
-    # Collapse multiple spaces
-    n = re.sub(r'\s+', ' ', n)
-    # Strip common prefixes like 'intern -', 'inton-'
-    n = re.sub(r'^(intern|inton)\s*[-]?\s*', '', n)
-    # Strip common role suffixes
-    suffixes_to_strip = [
-        r'\s+smanager$',
-        r'\s+supervisor$',
-        r'\s+last\s+day$',
-        r'\s+b$',
-        r'\s+c$',
-        r'\s+\d{1,2}$',
-        r'\s+[a-z]$',
-    ]
-    for suffix in suffixes_to_strip:
-        n = re.sub(suffix, '', n)
-    return n.strip()
-
-# Manual alias map for spelling differences between Excel and system
-EMPLOYEE_NAME_ALIASES = {
-    'arnab': 'arnob',
-}
-
-def build_employee_lookup(employees):
-    """Build exact and normalized name->id lookups from a list of Employee objects.
-    Exact match takes precedence; normalized (suffix-stripped) is the fallback."""
-    exact = {}
-    base = {}
-    for emp in employees:
-        ename = str(emp.name).strip().lower()
-        ename = re.sub(r'\s+', ' ', ename)
-        # Exact lookup
-        if ename not in exact:
-            exact[ename] = emp.id
-        # Base (normalized) lookup - prefer lower/original emp_ ids
-        norm = normalize_employee_name(emp.name)
-        if norm and (norm not in base or str(emp.id) < str(base[norm])):
-            base[norm] = emp.id
-    return exact, base
-
-def match_employee_id(excel_name: str, exact_map: dict, base_map: dict):
-    """Match an Excel employee name to a system employee id using multiple strategies."""
-    if not excel_name:
-        return None
-    raw = re.sub(r'\s+', ' ', str(excel_name).strip().lower())
-    # 1. Exact match
-    if raw in exact_map:
-        return exact_map[raw]
-    # 2. Normalized base match
-    norm = normalize_employee_name(excel_name)
-    norm = EMPLOYEE_NAME_ALIASES.get(norm, norm)
-    if norm in base_map:
-        return base_map[norm]
-    if norm in exact_map:
-        return exact_map[norm]
-    return None
-
-def _parse_one_time_range(segment: str):
-    """Parse a single time range like '9a-5p', '7:45a - 3p', '10a-4:30', '1-1:30'.
-    Returns (start_24, end_24, duration_minutes) or (None, None, 0)."""
-    seg = segment.lower()
-    # Strip break markers like 'b@11:30', '8@11:30', '@12'
-    seg = re.sub(r'\S*@\S*', ' ', seg)
-    # Find a start-end time range
-    m = re.search(
-        r'(\d{1,2})(?::(\d{2}))?\s*([ap])?m?\s*-\s*(\d{1,2})(?::(\d{2}))?\s*([ap])?m?',
-        seg,
-    )
-    if not m:
-        return None, None, 0
-    sh = int(m.group(1)); sm = int(m.group(2)) if m.group(2) else 0; sap = m.group(3)
-    eh = int(m.group(4)); em = int(m.group(5)) if m.group(5) else 0; eap = m.group(6)
-
-    def base_24(hour, ap, default_pm=False):
-        if ap == 'p':
-            return hour + 12 if hour != 12 else 12
-        if ap == 'a':
-            return 0 if hour == 12 else hour
-        # No marker - infer
-        if default_pm and hour < 12:
-            return hour + 12
-        # Heuristic: 1-6 -> pm, 7-11 -> am, 12 -> pm
-        if 1 <= hour <= 6:
-            return hour + 12
-        if hour == 12:
-            return 12
-        return hour
-
-    start_h = base_24(sh, sap)
-    # For end, if no marker, infer pm so that end > start
-    if eap:
-        end_h = base_24(eh, eap)
-    else:
-        end_h = base_24(eh, None)
-        # If end <= start, bump to pm
-        if (end_h * 60 + em) <= (start_h * 60 + sm) and eh < 12:
-            end_h = eh + 12
-    start_min = start_h * 60 + sm
-    end_min = end_h * 60 + em
-    duration = end_min - start_min
-    if duration <= 0:
-        return None, None, 0
-    return f"{start_h:02d}:{sm:02d}", f"{end_h:02d}:{em:02d}", duration
-
-def parse_shift_cell(cell_text: str, total_hours):
-    """Parse a cell that may contain one or more shifts separated by '/'.
-    Returns a list of dicts: {start, end, location, hours}.
-    Hours from total_hours are split proportionally by each shift's duration."""
-    if not cell_text:
-        return []
-    text = str(cell_text).strip()
-    # Skip non-working markers
-    upper = text.upper()
-    if upper in ('OFF', 'RO') or upper.startswith('OFF ') or 'LIEU' in upper or upper.startswith('RO '):
-        return []
-
-    segments = [s.strip() for s in text.split('/') if s.strip()]
-    shifts = []
-    for seg in segments:
-        start, end, duration = _parse_one_time_range(seg)
-        loc = parse_location_from_string(seg)
-        if start and end:
-            shifts.append({'start': start, 'end': end, 'location': loc, 'duration': duration})
-        else:
-            # No time in this segment - treat as location modifier for previous shift
-            if shifts and loc:
-                if not shifts[-1]['location']:
-                    shifts[-1]['location'] = loc
-
-    # Distribute total_hours proportionally by duration
-    try:
-        total = float(total_hours) if total_hours not in (None, '') else None
-    except (ValueError, TypeError):
-        total = None
-
-    total_duration = sum(s['duration'] for s in shifts) or 0
-    for s in shifts:
-        if total is not None and total_duration > 0:
-            s['hours'] = round(total * (s['duration'] / total_duration), 2)
-        else:
-            s['hours'] = round(s['duration'] / 60.0, 2)
-    return shifts
-
-def parse_shift_time_from_string(shift_str: str) -> tuple:
-    """Backward-compatible single-range parser."""
-    start, end, _ = _parse_one_time_range(str(shift_str))
-    return start, end
-
-def parse_location_from_string(shift_str: str) -> str:
-    """Parse location from shift string like '8a-3p INVENTORY' or '12p-7p f6 CC'"""
-    shift_lower = shift_str.lower()
-    
-    # Check for common location patterns (order matters - more specific first)
-    if 'offsite' in shift_lower:
-        return 'offsite'
-    elif 'inventory' in shift_lower:
-        return 'inventory'
-    elif 'f6' in shift_lower or '6th' in shift_lower or 'sixth' in shift_lower:
-        return 'sixth_floor'
-    elif 'f2' in shift_lower or '2nd' in shift_lower or 'second' in shift_lower:
-        return 'second_floor'
-    elif 'ground' in shift_lower or re.search(r'\bgr\b', shift_lower) or 'gf' in shift_lower:
-        return 'ground_floor'
-    elif 'cc' in shift_lower or 'call center' in shift_lower:
-        return 'call_center'
-    elif 'cl' in shift_lower or 'closing' in shift_lower:
-        return 'closing'
-    elif 'event' in shift_lower:
-        return 'event'
-    
-    return None
 
 
 
