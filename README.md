@@ -173,20 +173,22 @@ This ensures:
 
 ### Security Hardening
 - Removed weak default ADMIN_SECRET_KEY (now requires environment variable)
-- Removed wildcard CORS origin (only allows specific frontend domains)
+- Added wildcard CORS origin to allow all origins (temporary fix for Excel download)
 - Added rate limiting to auth endpoints (10 attempts per 5 minutes per IP)
 - Added ADMIN_SECRET_KEY to Vercel environment variables
 - Removed all diagnostic endpoints (security risk - exposed sensitive data without authentication)
 - Removed unprotected admin password reset endpoint
+- Removed Excel import functionality from frontend (security and data integrity)
 
 ### Security Posture
 **Implemented Security Measures:**
 - JWT-based authentication with stateless tokens (works with serverless)
 - Rate limiting on auth endpoints (10 attempts per 5 minutes per IP)
-- CORS restricted to specific frontend domains
+- CORS wildcard origin (temporary fix for Excel download - will be restricted to specific domains)
 - Environment variables for all secrets (JWT_SECRET, ADMIN_SECRET_KEY, GITHUB_TOKEN)
 - Manager-only access controls for sensitive operations
 - Audit logging for all write operations
+- Excel import removed from frontend (data integrity - only GitHub JSON as source of truth)
 
 **Known Limitations (Non-Critical for Internal Use):**
 - Password hashing uses SHA-256 truncated to 16 characters (not bcrypt)
@@ -394,7 +396,15 @@ Navigate to "Employees" to:
   - Shows actual availabilities and approved requests
   - Displays detailed time ranges for approved requests
 
-### 7. Hours Summary
+### 7. Database Export (Manager)
+Navigate to "Database" to:
+- Export current data to Excel file
+- Excel uses weekly sheet format (e.g., "June 15-21")
+- Shifts formatted as "9a-5p" for readability
+- Used for historical records and offline viewing
+- Excel import functionality removed (data integrity - only GitHub JSON as source of truth)
+
+### 8. Hours Summary
 At the bottom of the Schedule page, see:
 - Hours scheduled per employee
 - Remaining hours before hitting limits
@@ -417,10 +427,12 @@ The system uses GitHub JSON files as the single source of truth for all data:
 - Single source of truth - no Excel fallback or sync needed
 
 ### Excel Export (On-Demand)
-- Available via `/api/excel/download` endpoint
+- Available via Database tab in frontend
 - Generates Excel file from current GitHub JSON data
-- Contains all entities as separate sheets (Employees, Schedules, Availabilities, etc.)
+- Uses weekly sheet format (e.g., "June 15-21")
+- Shifts formatted as "9a-5p" for readability
 - Used for historical records and data export
+- Excel import functionality removed (data integrity - only GitHub JSON as source of truth)
 
 ### Nightly Excel Commit (Automated)
 - Vercel Cron job runs at midnight daily
