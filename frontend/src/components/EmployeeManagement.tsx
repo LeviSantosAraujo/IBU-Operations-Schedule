@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { getEmployees, createEmployee, updateEmployee, deleteEmployee, updateManagerPassword, getAvailabilities, getAvailabilityRequests } from '../api'
+import { getEmployees, createEmployee, updateEmployee, deleteEmployee, updateManagerPassword, getAvailabilityRequests } from '../api'
 import { Plus, Edit, Trash2, Check, X } from 'lucide-react'
 import { LoadingOverlay } from './LoadingOverlay'
 import { ButtonWithLoading } from './ButtonWithLoading'
@@ -56,14 +56,8 @@ export default function EmployeeManagement() {
   const loadAvailabilities = async () => {
     setAvailabilitiesLoading(true)
     try {
-      // Load both actual availabilities and approved requests
-      const [availabilitiesData, requestsData] = await Promise.all([
-        getAvailabilities(),
-        getAvailabilityRequests()
-      ])
-      
-      // Filter for approved availabilities
-      const approvedAvailabilities = availabilitiesData.filter((a: any) => a.approved)
+      // Load approved requests only (old availability system removed)
+      const requestsData = await getAvailabilityRequests()
       
       // Convert approved requests to availability-like format
       const approvedRequests = requestsData
@@ -121,9 +115,8 @@ export default function EmployeeManagement() {
           return availabilityEntry
         })
       
-      // Combine both and add employee names
-      const allAvailabilities = [...approvedAvailabilities, ...approvedRequests]
-      const availabilitiesWithNames = allAvailabilities.map((avail: any) => {
+      // Add employee names to approved requests
+      const availabilitiesWithNames = approvedRequests.map((avail: any) => {
         const employee = employees.find(emp => emp.id === avail.employee_id)
         return {
           ...avail,

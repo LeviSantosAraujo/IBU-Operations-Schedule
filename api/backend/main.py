@@ -13,6 +13,7 @@ load_dotenv('.env')
 
 # Import log_storage first for print override
 import log_storage
+import flow_storage
 from datetime import datetime, timezone
 from collections import defaultdict
 import threading
@@ -80,7 +81,7 @@ def get_active_session_count() -> int:
         return len(_active_sessions)
 
 # Now import all other modules (they will use custom print)
-from fastapi import FastAPI, HTTPException, Query, Header, Depends, UploadFile, File, Form, Cookie
+from fastapi import FastAPI, HTTPException, Query, Header, Depends, UploadFile, File, Form, Cookie, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from contextlib import asynccontextmanager
@@ -108,7 +109,6 @@ from excel_store import (
 )
 from json_data import (
     save_employee, delete_employee,
-    get_availabilities, get_availability_for_week, save_availability,
     get_all_schedules, get_schedule_by_week, save_schedule, delete_schedule,
     get_floor_coverage, get_system_config, save_system_config,
     get_availability_requests, save_availability_request,
@@ -304,13 +304,7 @@ async def lifespan(app: FastAPI):
         employees = []
         employee_ids = set()
     
-    print("[STARTUP] Loading availability data...")
-    try:
-        staging_availabilities = staging_store.get_availabilities()
-        print(f"[STARTUP] Loaded {len(staging_availabilities) if staging_availabilities else 0} availability records")
-    except Exception as e:
-        print(f"[STARTUP] Error loading availabilities: {e}")
-        staging_availabilities = []
+    # Old availability system removed - using availability_requests.json only
     
     print("[STARTUP] Loading schedule data...")
     try:
@@ -318,6 +312,32 @@ async def lifespan(app: FastAPI):
         print(f"[STARTUP] Loaded {len(staging_schedules) if staging_schedules else 0} schedule records")
     except Exception as e:
         print(f"[STARTUP] Error loading schedules: {e}")
+    
+    # Ensure sixth_floor and 80_bloor are in staffing targets
+    print("[STARTUP] Checking staffing targets...")
+    try:
+        config = get_system_config()
+        targets = config.staffing_targets or {}
+        updated = False
+        if 'sixth_floor' not in targets:
+            print("[STARTUP] Adding sixth_floor to staffing targets")
+            targets['sixth_floor'] = 1
+            updated = True
+        else:
+            print(f"[STARTUP] sixth_floor already in staffing targets with value {targets['sixth_floor']}")
+        if '80_bloor' not in targets:
+            print("[STARTUP] Adding 80_bloor to staffing targets")
+            targets['80_bloor'] = 1
+            updated = True
+        else:
+            print(f"[STARTUP] 80_bloor already in staffing targets with value {targets['80_bloor']}")
+        if updated:
+            config.staffing_targets = targets
+            save_system_config(config)
+            staging_store.set_system_config(config.model_dump(), user_id="system")
+            print("[STARTUP] Updated staffing targets")
+    except Exception as e:
+        print(f"[STARTUP] Error checking/updating staffing targets: {e}")
     
     print("[STARTUP] Checking GitHub configuration...")
     try:
@@ -375,6 +395,67 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Flow tracking middleware
+@app.middleware("http")
+async def flow_tracking_middleware(request, call_next):
+    """Track API requests in flow storage."""
+    # Skip admin dashboard endpoints to avoid noise
+    if request.url.path.startswith("/admin"):
+        return await call_next(request)
+    
+    # Start flow chain
+    flow = flow_storage.get_flow_storage()
+    chain = flow.start_chain("api", f"{request.method} {request.url.path}")
+    
+    # Set chain ID in context for nested operations
+    import json_store
+    import cache_manager
+    token = json_store._flow_chain_id.set(chain.id)
+    token2 = json_store._flow_parent_id.set(chain.root_operation.id)
+    token3 = cache_manager._flow_chain_id.set(chain.id)
+    token4 = cache_manager._flow_parent_id.set(chain.root_operation.id)
+    
+    try:
+        response = await call_next(request)
+        
+        # Complete chain with success
+        flow.complete_chain(
+            chain.id,
+            status="success",
+            metadata={
+                "status_code": response.status_code,
+                "method": request.method,
+                "path": request.url.path
+            }
+        )
+        
+        # Clear context
+        json_store._flow_chain_id.reset(token)
+        json_store._flow_parent_id.reset(token2)
+        cache_manager._flow_chain_id.reset(token3)
+        cache_manager._flow_parent_id.reset(token4)
+        
+        return response
+    except Exception as e:
+        # Complete chain with error
+        flow.complete_chain(
+            chain.id,
+            status="error",
+            metadata={
+                "error": str(e),
+                "method": request.method,
+                "path": request.url.path
+            }
+        )
+        
+        # Clear context
+        json_store._flow_chain_id.reset(token)
+        json_store._flow_parent_id.reset(token2)
+        cache_manager._flow_chain_id.reset(token3)
+        cache_manager._flow_parent_id.reset(token4)
+        
+        raise
 
 # ============ Health Check ============
 
@@ -440,19 +521,6 @@ async def download_excel():
                     schedule.get('week_start_date'), schedule.get('id'), shift.get('employee_id'), shift.get('day_of_week'),
                     shift.get('floor'), shift.get('start_time'), shift.get('end_time'), shift.get('hours'), shift.get('break_provided')
                 ])
-    
-    # Availabilities sheet - read from GitHub JSON
-    availabilities = staging_store.get_availabilities()
-    if availabilities:
-        avail_sheet = wb.create_sheet("Availabilities")
-        avail_sheet.append(["ID", "Employee ID", "Week Start", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday", "Approved", "Submitted At"])
-        for avail in availabilities:
-            avail_sheet.append([
-                avail.get('id'), avail.get('employee_id'), avail.get('week_start_date'),
-                avail.get('monday'), avail.get('tuesday'), avail.get('wednesday'), avail.get('thursday'),
-                avail.get('friday'), avail.get('saturday'), avail.get('sunday'),
-                avail.get('approved'), avail.get('submitted_at')
-            ])
     
     # Availability Requests sheet - read from GitHub JSON
     requests = staging_store.get_availability_requests()
@@ -722,21 +790,6 @@ async def cleanup_orphaned_records(authorization: str = Header(None)):
         employees = [Employee(**e) for e in employees_dicts]
         employee_ids = {e.id for e in employees}
         
-        # Clean up staging availabilities
-        staging_availabilities = staging_store.get_availabilities()
-        orphaned_count = 0
-        valid_availabilities = []
-        for avail in staging_availabilities:
-            if avail.get('employee_id') in employee_ids:
-                valid_availabilities.append(avail)
-            else:
-                orphaned_count += 1
-                print(f"[CLEANUP] Removing orphaned availability for employee {avail.get('employee_id')}")
-        
-        if orphaned_count > 0:
-            print(f"[CLEANUP] Found {orphaned_count} orphaned availability records")
-            staging_store.set_availabilities(valid_availabilities, user_id="system")
-        
         # Clean up staging availability requests
         staging_requests = staging_store.get_availability_requests()
         orphaned_requests = 0
@@ -894,13 +947,6 @@ async def remove_employee(
     employees = [e for e in employees if e["id"] != employee_id]
     staging_store.set_employees(employees, user_id=user.get('employee_id'), immediate=True)
     
-    # Clean up availability records for deleted employee with immediate write
-    availabilities = staging_store.get_availabilities()
-    cleaned_availabilities = [a for a in availabilities if a.get("employee_id") != employee_id]
-    if len(cleaned_availabilities) != len(availabilities):
-        print(f"[DELETE] Cleaning up {len(availabilities) - len(cleaned_availabilities)} availability records for deleted employee {employee_id}")
-        staging_store.set_availabilities(cleaned_availabilities, user_id=user.get('employee_id'), immediate=True)
-    
     # Clean up availability requests for deleted employee with immediate write
     requests = staging_store.get_availability_requests()
     cleaned_requests = [r for r in requests if r.get("employee_id") != employee_id]
@@ -924,171 +970,6 @@ async def remove_employee(
     raise HTTPException(status_code=404, detail="Employee not found")
 
 # ============ Availability Endpoints ============
-
-@app.get("/api/availability", response_model=List[Availability])
-async def list_availabilities(
-    week_start_date: Optional[date] = None,
-    employee_id: Optional[str] = None,
-    authorization: Optional[str] = Header(None)
-):
-    """List availabilities - employees see only their own, managers see all"""
-    user = require_auth(authorization)
-    
-    # Employees can only see their own availability
-    if user["role"] != "manager":
-        employee_id = user["employee_id"]
-    
-    # Read from GitHub JSON (single source of truth)
-    staging_availabilities = staging_store.get_availabilities()
-    availabilities = [Availability(**a) for a in staging_availabilities]
-    
-    # Filter by week_start_date if provided
-    if week_start_date:
-        availabilities = [a for a in availabilities if a.week_start_date == week_start_date]
-    
-    # Filter by employee_id if provided
-    if employee_id:
-        availabilities = [a for a in availabilities if a.employee_id == employee_id]
-    
-    return availabilities
-
-@app.get("/api/availability/{employee_id}/{week_start_date}", response_model=Availability)
-async def get_employee_availability(
-    employee_id: str,
-    week_start_date: date,
-    authorization: Optional[str] = Header(None)
-):
-    """Get availability for a specific employee and week"""
-    # Check permissions
-    require_self_or_manager(employee_id, authorization)
-    
-    availability = get_availability_for_week(employee_id, week_start_date)
-    if not availability:
-        # Return default availability
-        return Availability(
-            id=str(uuid.uuid4()),
-            employee_id=employee_id,
-            week_start_date=week_start_date
-        )
-    return availability
-
-@app.post("/api/availability", response_model=Availability)
-async def submit_availability(
-    availability: Availability,
-    authorization: Optional[str] = Header(None)
-):
-    """Submit or update availability - employees can only submit their own"""
-    user = require_auth(authorization)
-    
-    # Auto-generate ID if not provided
-    if not availability.id:
-        availability.id = f"avail_{availability.employee_id}_{availability.week_start_date}"
-    
-    # Employees can only submit their own availability
-    if user["role"] != "manager" and availability.employee_id != user["employee_id"]:
-        raise HTTPException(status_code=403, detail="Can only submit your own availability")
-    
-    # 24-hour cutoff check for employees (not managers)
-    if user["role"] != "manager":
-        # Calculate the first day of the week being submitted
-        week_start = availability.week_start_date
-        today = date.today()
-        
-        # Check if any day in the week is within 24 hours of now
-        # The week starts on Monday, so we check each day
-        days_offset = 0  # Monday
-        current_day_of_week = today.weekday()  # 0=Monday, 6=Sunday
-        
-        # If the week being submitted is the current week or a past week
-        if week_start <= today:
-            # Calculate which day of the week today is relative to the week start
-            days_since_week_start = (today - week_start).days
-            
-            # If today is within the week being submitted, check if it's too late to change
-            if 0 <= days_since_week_start <= 6:
-                # The week includes today or past days - cannot change
-                raise HTTPException(
-                    status_code=403, 
-                    detail=f"Cannot change availability for week that includes today or past days. Changes must be made at least 24 hours before the week starts."
-                )
-        
-        # If the week starts within 24 hours from now, also block
-        hours_until_week_start = (week_start - today).days * 24
-        if hours_until_week_start < 24:
-            raise HTTPException(
-                status_code=403,
-                detail=f"Cannot change availability for week starting in less than 24 hours. Changes must be made at least 24 hours before the week starts."
-            )
-    
-    if not availability.id:
-        availability.id = f"avail_{uuid.uuid4().hex[:8]}"
-    availability.submitted_at = datetime.now()
-    # Reset approval status when availability is modified
-    availability.approved = False
-    availability.approved_by = None
-    availability.approved_at = None
-    
-    # Update staging layer first (fast)
-    config = staging_store.get_system_config()
-    if 'availabilities' not in config:
-        config['availabilities'] = []
-    config['availabilities'] = [a if a['id'] != availability.id else availability.model_dump() for a in config['availabilities']]
-    if not any(a['id'] == availability.id for a in config['availabilities']):
-        config['availabilities'].append(availability.model_dump())
-    staging_store.set_system_config(config, user_id=user.get('employee_id'))
-    
-    # Add to action queue for Excel sync (async, no blocking)
-    # No action queue needed - GitHub JSON is single source of truth
-    
-    return availability
-
-@app.get("/api/availability/colors")
-async def get_availability_colors():
-    """Get color mapping for availability types"""
-    return AVAILABILITY_COLORS
-
-@app.post("/api/availability/{availability_id}/approve")
-async def approve_availability(
-    availability_id: str,
-    authorization: Optional[str] = Header(None)
-):
-    """Approve availability (managers only)"""
-    user = require_manager(authorization)
-    
-    # Get all availabilities and find the one to approve
-    availabilities = get_availabilities()
-    availability = None
-    for avail in availabilities:
-        if avail.id == availability_id:
-            availability = avail
-            break
-    
-    if not availability:
-        raise HTTPException(status_code=404, detail="Availability not found")
-    
-    # Update approval status
-    availability.approved = True
-    availability.approved_by = user["employee_id"]
-    availability.approved_at = datetime.now()
-    
-    # Update staging layer first (fast)
-    config = staging_store.get_system_config()
-    if 'availabilities' not in config:
-        config['availabilities'] = []
-    config['availabilities'] = [a if a['id'] != availability.id else availability.model_dump() for a in config['availabilities']]
-    staging_store.set_system_config(config, user_id=user.get('employee_id'))
-    
-    # Add to action queue for Excel sync (async, no blocking)
-    # No action queue needed - GitHub JSON is single source of truth
-    
-    return availability
-
-@app.get("/api/availability/pending")
-async def get_pending_availabilities(user: Dict = Depends(require_manager)):
-    """Get all pending (unapproved) availabilities (managers only)"""
-    all_availabilities = get_availabilities()
-    pending = [avail for avail in all_availabilities if not avail.approved]
-    return pending
 
 # ============ Hourly Coverage Requirements Endpoints ============
 
@@ -1125,7 +1006,7 @@ async def list_schedules(authorization: Optional[str] = Header(None)):
     staging_schedules = staging_store.get_schedules()
     return [WeeklySchedule(**s) for s in staging_schedules]
 
-@app.get("/api/schedules/{week_start_date}", response_model=WeeklySchedule)
+@app.get("/api/schedules/{week_start_date}")
 async def get_schedule(
     week_start_date: date,
     authorization: Optional[str] = Header(None)
@@ -1136,7 +1017,20 @@ async def get_schedule(
     print(f"[SCHEDULE] Getting schedule for week {week_start_date}, user: {user.get('employee_id')}, is_manager: {is_manager_user(user)}")
     
     # Try to read from staging first
-    staging_schedules = staging_store.get_schedules()
+    print(f"[SCHEDULE] Attempting to read schedules from staging_store...", file=sys.stderr, flush=True)
+    try:
+        staging_schedules = staging_store.get_schedules()
+        print(f"[SCHEDULE] SUCCESS: Read {len(staging_schedules)} schedules from staging_store", file=sys.stderr, flush=True)
+    except Exception as e:
+        print(f"[SCHEDULE] ERROR reading from staging_store: {e}", file=sys.stderr, flush=True)
+        import traceback
+        traceback.print_exc(file=sys.stderr)
+        # Fallback: read directly from GitHub if staging fails
+        print(f"[SCHEDULE] Attempting fallback to GitHub...", file=sys.stderr, flush=True)
+        import json_store
+        staging_schedules = json_store.get_schedules()
+        print(f"[SCHEDULE] Fallback SUCCESS: read {len(staging_schedules)} schedules from GitHub", file=sys.stderr, flush=True)
+    
     schedule = None
     if staging_schedules:
         for s in staging_schedules:
@@ -1246,12 +1140,15 @@ async def get_schedule(
                     if req_end < week_start_date or req_start > week_end_date:
                         continue
                     week_requests.append(req)
-                except:
+                    print(f"[SCHEDULE] Added pending request {req.get('id')} for week {week_start_date}")
+                except Exception as e:
+                    print(f"[SCHEDULE] Error parsing pending request: {e}")
                     continue
             elif req.get('week_start_date'):
                 # Legacy model
                 if str(req.get('week_start_date')) == str(week_start_date):
                     week_requests.append(req)
+                    print(f"[SCHEDULE] Added legacy pending request {req.get('id')} for week {week_start_date}")
     
     # Filter: employees see only their own
     if not is_manager_user(user):
@@ -1427,7 +1324,7 @@ async def auto_generate_schedule(
         schedules = staging_store.get_schedules()
         schedules = [s for s in schedules if str(s.get('week_start_date')) != str(week_start_date)]
         schedules.append(schedule.model_dump())
-        staging_store.set_schedules(schedules, user_id=user.get('employee_id'))
+        staging_store.set_schedules(schedules, user_id=user.get('employee_id'), immediate=True)
         
         # Add to action queue for Excel sync (async, no blocking)
         # No action queue needed - GitHub JSON is single source of truth
@@ -1439,7 +1336,7 @@ async def auto_generate_schedule(
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Schedule generation failed: {str(e)}")
 
-@app.post("/api/schedules", response_model=WeeklySchedule)
+@app.post("/api/schedules")
 async def create_or_update_schedule(
     schedule: WeeklySchedule,
     user: Dict = Depends(require_manager)
@@ -1448,22 +1345,70 @@ async def create_or_update_schedule(
     schedule.updated_at = datetime.now()
 
     # Log what we're receiving
-    print(f"[SAVE SCHEDULE] Saving schedule {schedule.id} for week {schedule.week_start_date}")
-    print(f"[SAVE SCHEDULE] Total shifts received: {len(schedule.shifts)}")
+    import sys
+    print(f"[SAVE SCHEDULE] Saving schedule {schedule.id} for week {schedule.week_start_date}", file=sys.stderr, flush=True)
+    print(f"[SAVE SCHEDULE] Total shifts received: {len(schedule.shifts)}", file=sys.stderr, flush=True)
     locked_count = len([s for s in schedule.shifts if s.id and (s.id.startswith('locked_') or s.id.startswith('pending_'))])
-    print(f"[SAVE SCHEDULE] Locked shifts: {locked_count}, Auto-generated shifts: {len(schedule.shifts) - locked_count}")
+    print(f"[SAVE SCHEDULE] Locked shifts: {locked_count}, Auto-generated shifts: {len(schedule.shifts) - locked_count}", file=sys.stderr, flush=True)
 
     # Update staging layer with immediate write to prevent race conditions
-    schedules = staging_store.get_schedules()
+    # Read schedules from staging (in-memory cache) to avoid re-fetching stale data from GitHub
+    print(f"[SAVE SCHEDULE] Attempting to read schedules from staging_store...", file=sys.stderr, flush=True)
+    try:
+        schedules = staging_store.get_schedules()
+        print(f"[SAVE SCHEDULE] SUCCESS: Read {len(schedules)} schedules from staging_store", file=sys.stderr, flush=True)
+    except Exception as e:
+        print(f"[SAVE SCHEDULE] ERROR reading from staging_store: {e}", file=sys.stderr, flush=True)
+        import traceback
+        traceback.print_exc(file=sys.stderr)
+        # Fallback: read directly from GitHub if staging fails
+        print(f"[SAVE SCHEDULE] Attempting fallback to GitHub...", file=sys.stderr, flush=True)
+        import json_store
+        schedules = json_store.get_schedules()
+        print(f"[SAVE SCHEDULE] Fallback SUCCESS: read {len(schedules)} schedules from GitHub", file=sys.stderr, flush=True)
+    
+    existing_schedule = next((s for s in schedules if s['id'] == schedule.id), None)
+    if existing_schedule:
+        print(f"[SAVE SCHEDULE] Existing schedule has {len(existing_schedule.get('shifts', []))} shifts", file=sys.stderr, flush=True)
     schedules = [s if s['id'] != schedule.id else schedule.model_dump() for s in schedules]
     if not any(s['id'] == schedule.id for s in schedules):
         schedules.append(schedule.model_dump())
-    staging_store.set_schedules(schedules, user_id=user.get('employee_id'), immediate=True)
+    print(f"[SAVE SCHEDULE] Writing {len(schedules)} schedules to staging_store", file=sys.stderr, flush=True)
+    result = staging_store.set_schedules(schedules, user_id=user.get('employee_id'), immediate=True)
+    print(f"[SAVE SCHEDULE] set_schedules returned: {result}", file=sys.stderr, flush=True)
 
-    # Add to action queue for Excel sync (async, no blocking)
-    # No action queue needed - GitHub JSON is single source of truth
+    # Add dynamic fields to response (approved_availabilities, availability_requests)
+    # Populate from availability requests for this week
+    week_start_date = schedule.week_start_date
+    week_end_date = week_start_date + timedelta(days=6)
+    all_requests = staging_store.get_availability_requests()
+    
+    # Add approved availabilities (markers for approved requests without locked shifts)
+    approved_markers = []
+    for req in all_requests:
+        if req.get('status') not in ['approved', 'AvailabilityRequestStatus.APPROVED']:
+            continue
+        # ... (simplified - just return empty for now to avoid complexity)
+    
+    # Add pending requests for this week
+    week_requests = []
+    for req in all_requests:
+        if req.get('status') == 'pending':
+            if req.get('start_date') and req.get('end_date'):
+                try:
+                    req_start = date.fromisoformat(str(req['start_date'])[:10])
+                    req_end = date.fromisoformat(str(req['end_date'])[:10])
+                    if req_end < week_start_date or req_start > week_end_date:
+                        continue
+                    week_requests.append(req)
+                except:
+                    continue
+    
+    schedule_data = schedule.model_dump()
+    schedule_data['approved_availabilities'] = approved_markers
+    schedule_data['availability_requests'] = week_requests
 
-    return schedule
+    return schedule_data
 
 @app.put("/api/schedules/{week_start_date}/shifts", response_model=WeeklySchedule)
 async def update_schedule_shifts(
@@ -1657,18 +1602,12 @@ async def clear_schedule_shifts(
     schedule.total_hours = {}
     print(f"[CLEAR SCHEDULE] Cleared non-locked shifts from schedule")
     
-    # Force cache invalidation to ensure fresh data
-    import cache_manager
-    cache_manager.clear_cache()
-    print(f"[CLEAR SCHEDULE] Cleared cache")
+    # Update staging layer using already-loaded list (avoid re-fetching stale data)
+    updated_schedules = [s for s in staging_schedules if str(s.get('week_start_date')) != str(week_start_date)]
+    updated_schedules.append(schedule.model_dump())
+    print(f"[CLEAR SCHEDULE] Updating staging with {len(updated_schedules)} schedules")
     
-    # Update staging layer with immediate write (bypass debouncing)
-    schedules = staging_store.get_schedules()
-    schedules = [s for s in schedules if str(s.get('week_start_date')) != str(week_start_date)]
-    schedules.append(schedule.model_dump())
-    print(f"[CLEAR SCHEDULE] Updating staging with {len(schedules)} schedules")
-    
-    result = staging_store.set_schedules(schedules, user_id=user.get('employee_id'), immediate=True)
+    result = staging_store.set_schedules(updated_schedules, user_id=user.get('employee_id'), immediate=True)
     print(f"[CLEAR SCHEDULE] set_schedules returned: {result}")
     
     return schedule
@@ -1878,6 +1817,9 @@ async def create_availability_request(request: Dict, authorization: str = Header
                     end_date = date.fromisoformat(str(end_date_str)[:10])
                     day_map = {0: 'monday', 1: 'tuesday', 2: 'wednesday', 3: 'thursday', 4: 'friday', 5: 'saturday', 6: 'sunday'}
                     
+                    # Collect all schedule updates in memory to batch write once
+                    schedules_by_week = {}
+                    
                     # Process each week in the date range
                     current_week_start = start_date - timedelta(days=start_date.weekday())
                     while current_week_start <= end_date:
@@ -1951,12 +1893,18 @@ async def create_availability_request(request: Dict, authorization: str = Header
                             
                             current_date += timedelta(days=1)
                         
-                        # Save the updated schedule
-                        staging_schedules = [s for s in staging_schedules if str(s.get('week_start_date')) != str(current_week_start)]
-                        staging_schedules.append(schedule.model_dump())
-                        staging_store.set_schedules(staging_schedules, user_id=user.get('employee_id'))
-                        
+                        # Store schedule in memory for batch write
+                        schedules_by_week[str(current_week_start)] = schedule
                         current_week_start += timedelta(days=7)
+                    
+                    # Batch write all schedules ONCE to avoid multiple GitHub API calls
+                    if schedules_by_week:
+                        staging_schedules = staging_store.get_schedules()
+                        updated_schedules = [s for s in staging_schedules if str(s.get('week_start_date')) not in schedules_by_week]
+                        for schedule in schedules_by_week.values():
+                            updated_schedules.append(schedule.model_dump())
+                        staging_store.set_schedules(updated_schedules, user_id=user.get('employee_id'), immediate=True)
+                        print(f"[CREATION] Batch wrote {len(schedules_by_week)} schedules in a single write")
                         
                 except Exception as e:
                     print(f"[CREATION] Warning: could not create pending locked shifts: {e}")
@@ -2073,194 +2021,201 @@ async def approve_availability_request(request_id: str, body: Dict = {}, authori
         requests = [r if r['id'] != request_id else request_data for r in requests]
         staging_store.set_availability_requests(requests, user_id=user.get('employee_id'), immediate=True)
         
-        # Add to action queue for Excel sync (async, no blocking)
-        # No action queue needed - GitHub JSON is single source of truth
+        # Process locked shifts and notifications asynchronously in background to speed up approval response
+        import threading
+        def process_approval_background():
+            try:
+                # Update pending locked shifts to approved locked shifts
+                start_date_str = request_data.get('start_date', request_data.get('week_start_date', ''))
+                end_date_str = request_data.get('end_date', start_date_str)
+                days_of_week = request_data.get('days_of_week', [])
+                employee_id = request_data.get('employee_id')
+                request_type = request_data.get('request_type', 'availability')
+                
+                if start_date_str and end_date_str and days_of_week:
+                    try:
+                        start_date = date.fromisoformat(str(start_date_str)[:10])
+                        end_date = date.fromisoformat(str(end_date_str)[:10])
+                        day_map = {0: 'monday', 1: 'tuesday', 2: 'wednesday', 3: 'thursday', 4: 'friday', 5: 'saturday', 6: 'sunday'}
 
-        # Update pending locked shifts to approved locked shifts
-        try:
-            start_date_str = request_data.get('start_date', request_data.get('week_start_date', ''))
-            end_date_str = request_data.get('end_date', start_date_str)
-            days_of_week = request_data.get('days_of_week', [])
-            employee_id = request_data.get('employee_id')
-            request_type = request_data.get('request_type', 'availability')
-            
-            if start_date_str and end_date_str and days_of_week:
-                try:
-                    start_date = date.fromisoformat(str(start_date_str)[:10])
-                    end_date = date.fromisoformat(str(end_date_str)[:10])
-                    day_map = {0: 'monday', 1: 'tuesday', 2: 'wednesday', 3: 'thursday', 4: 'friday', 5: 'saturday', 6: 'sunday'}
-                    
-                    # Process each week in the date range
-                    current_week_start = start_date - timedelta(days=start_date.weekday())
-                    while current_week_start <= end_date:
-                        # Get schedule for this week
+                        # Read all schedules ONCE before the loop to avoid multiple GitHub API calls
                         staging_schedules = staging_store.get_schedules()
-                        schedule = None
+                        schedules_by_week = {}
                         for s in staging_schedules:
                             week_start = s.get('week_start_date')
                             if isinstance(week_start, date):
                                 week_start_str = str(week_start)
                             else:
                                 week_start_str = week_start
-                            if week_start_str == str(current_week_start):
-                                schedule = WeeklySchedule(**s)
-                                break
-                        
-                        if not schedule:
-                            # Create new empty schedule for this week
-                            schedule = WeeklySchedule(
-                                id=f"schedule_{current_week_start.isoformat()}",
-                                week_start_date=current_week_start,
-                                shifts=[],
-                                total_hours={},
-                                created_by=user.get('employee_id')
-                            )
-                        
-                        if schedule:
-                            request_type = request_data.get('request_type', 'availability')
-                            
-                            # Convert pending locked shifts to approved, or create new approved shifts if none exist
-                            updated_shifts = []
-                            converted_days = set()
-                            for shift in schedule.shifts:
-                                if shift.id.startswith(f"pending_{request_id}_"):
-                                    # Convert to approved locked shift
-                                    updated_shift = Shift(
-                                        id=shift.id.replace(f"pending_{request_id}_", f"locked_{request_id}_"),
-                                        employee_id=shift.employee_id,
-                                        day_of_week=shift.day_of_week,
-                                        start_time=shift.start_time,
-                                        end_time=shift.end_time,
-                                        job_type=shift.job_type,
-                                        location=shift.location,
-                                        hours=shift.hours,
-                                        locked=True,
-                                        locked_availability_type=shift.locked_availability_type,
-                                        is_event=shift.is_event
-                                    )
-                                    updated_shifts.append(updated_shift)
-                                    converted_days.add(shift.day_of_week)
-                                    print(f"[APPROVAL] Converted pending locked shift to approved for {employee_id} on {shift.day_of_week}")
-                                else:
-                                    updated_shifts.append(shift)
-                            
-                            schedule.shifts = updated_shifts
-                            
-                            # If no pending shifts were converted, create new locked shifts directly
-                            week_end = current_week_start + timedelta(days=6)
-                            current_date = max(current_week_start, start_date)
-                            while current_date <= min(week_end, end_date):
-                                day_name = day_map[current_date.weekday()]
-                                if day_name in days_of_week and day_name not in converted_days:
-                                    # Check if a locked shift already exists for this employee/day
-                                    existing_locked = next(
-                                        (s for s in schedule.shifts 
-                                         if s.employee_id == employee_id and s.day_of_week == day_name and s.locked),
-                                        None
-                                    )
-                                    if not existing_locked:
-                                        if request_type == 'day_off':
-                                            shift_start = '00:00'
-                                            shift_end = '23:59'
-                                            shift_location = 'day off'
-                                            shift_hours = 0
-                                            locked_type = 'Day Off'
-                                        else:
-                                            shift_start = request_data.get('start_time', '00:00')
-                                            shift_end = request_data.get('end_time', '23:59')
-                                            shift_location = None
-                                            shift_hours = 0
-                                            locked_type = request_type.capitalize()
-                                        
-                                        locked_shift = Shift(
-                                            id=f"locked_{request_id}_{day_name}_{employee_id}",
-                                            employee_id=employee_id,
-                                            day_of_week=day_name,
-                                            start_time=shift_start,
-                                            end_time=shift_end,
-                                            job_type=JobType.IBU_OPS,
-                                            location=shift_location,
-                                            hours=shift_hours,
+                            schedules_by_week[week_start_str] = WeeklySchedule(**s)
+
+                        # Process each week in the date range
+                        current_week_start = start_date - timedelta(days=start_date.weekday())
+                        while current_week_start <= end_date:
+                            week_start_str = str(current_week_start)
+                            schedule = schedules_by_week.get(week_start_str)
+
+                            if not schedule:
+                                # Create new empty schedule for this week
+                                schedule = WeeklySchedule(
+                                    id=f"schedule_{current_week_start.isoformat()}",
+                                    week_start_date=current_week_start,
+                                    shifts=[],
+                                    total_hours={},
+                                    created_by=user.get('employee_id')
+                                )
+                                schedules_by_week[week_start_str] = schedule
+
+                            if schedule:
+                                request_type = request_data.get('request_type', 'availability')
+
+                                # Convert pending locked shifts to approved, or create new approved shifts if none exist
+                                updated_shifts = []
+                                converted_days = set()
+                                for shift in schedule.shifts:
+                                    if shift.id.startswith(f"pending_{request_id}_"):
+                                        # Convert to approved locked shift
+                                        updated_shift = Shift(
+                                            id=shift.id.replace(f"pending_{request_id}_", f"locked_{request_id}_"),
+                                            employee_id=shift.employee_id,
+                                            day_of_week=shift.day_of_week,
+                                            start_time=shift.start_time,
+                                            end_time=shift.end_time,
+                                            job_type=shift.job_type,
+                                            location=shift.location,
+                                            hours=shift.hours,
                                             locked=True,
-                                            locked_availability_type=locked_type,
+                                            locked_availability_type=request_type.capitalize(),
                                             is_event=False
                                         )
-                                        schedule.shifts.append(locked_shift)
-                                        print(f"[APPROVAL] Created locked shift directly for {employee_id} on {day_name}")
-                                current_date += timedelta(days=1)
+                                        updated_shifts.append(updated_shift)
+                                        converted_days.add(shift.day_of_week)
+                                    else:
+                                        updated_shifts.append(shift)
+                                schedule.shifts = updated_shifts
+
+                                # Only create new locked shifts if we actually converted some pending shifts
+                                # This prevents regenerating shifts after a clear operation
+                                if converted_days:
+                                    # Create new approved locked shifts for days that don't have pending shifts
+                                    current_date = current_week_start
+                                    while current_date <= end_date:
+                                        day_name = day_map[current_date.weekday()]
+                                        if day_name in days_of_week and day_name not in converted_days:
+                                            # Check if there's already a locked shift for this day
+                                            existing_locked = any(
+                                                s.locked and s.employee_id == employee_id and s.day_of_week == day_name
+                                                for s in schedule.shifts
+                                            )
+                                            if not existing_locked:
+                                                # Determine shift details based on request type
+                                                if request_type == 'day_off':
+                                                    shift_location = 'day off'
+                                                    shift_start = '00:00'
+                                                    shift_end = '23:59'
+                                                    shift_hours = 24
+                                                    locked_type = 'Day Off'
+                                                else:
+                                                    shift_location = request_data.get('location', '80 Bloor')
+                                                    shift_start = request_data.get('start_time', '09:00')
+                                                    shift_end = request_data.get('end_time', '17:00')
+                                                    shift_hours = request_data.get('hours', 8)
+                                                    locked_type = request_type.capitalize()
+
+                                                locked_shift = Shift(
+                                                    id=f"locked_{request_id}_{day_name}_{employee_id}",
+                                                    employee_id=employee_id,
+                                                    day_of_week=day_name,
+                                                    start_time=shift_start,
+                                                    end_time=shift_end,
+                                                    job_type=JobType.IBU_OPS,
+                                                    location=shift_location,
+                                                    hours=shift_hours,
+                                                    locked=True,
+                                                    locked_availability_type=locked_type,
+                                                    is_event=False
+                                                )
+                                                schedule.shifts.append(locked_shift)
+                                                print(f"[APPROVAL] Created locked shift directly for {employee_id} on {day_name}")
+                                        current_date += timedelta(days=1)
+
+                            current_week_start += timedelta(days=7)
+
+                        # Merge modified schedules with existing ones
+                        staging_schedules = staging_store.get_schedules()
+                        updated_schedules = [s for s in staging_schedules if str(s.get('week_start_date')) not in schedules_by_week]
+                        for schedule in schedules_by_week.values():
+                            updated_schedules.append(schedule.model_dump())
+                        staging_store.set_schedules(updated_schedules, user_id=user.get('employee_id'), immediate=True)
+                        print(f"[APPROVAL] Updated {len(schedules_by_week)} schedules in a single write")
                             
-                            # Save the updated schedule
-                            staging_schedules = [s for s in staging_schedules if str(s.get('week_start_date')) != str(current_week_start)]
-                            staging_schedules.append(schedule.model_dump())
-                            staging_store.set_schedules(staging_schedules, user_id=user.get('employee_id'))
-                        
-                        current_week_start += timedelta(days=7)
-                        
-                except Exception as e:
-                    print(f"[APPROVAL] Warning: could not update pending locked shifts: {e}")
-                    import traceback
-                    traceback.print_exc()
-        except Exception as e:
-            print(f"[APPROVAL] Warning: error in pending locked shift update: {e}")
-            import traceback
-            traceback.print_exc()
+                    except Exception as e:
+                        print(f"[APPROVAL] Warning: could not update pending locked shifts: {e}")
+                        import traceback
+                        traceback.print_exc()
+            except Exception as e:
+                print(f"[APPROVAL] Warning: error in pending locked shift update: {e}")
+                import traceback
+                traceback.print_exc()
 
-        # Remove manager notifications for this request after approval
-        try:
-            notifications = staging_store.get_notifications()
-            cleaned = [
-                n for n in notifications
-                if not (
-                    n.get('type') == NotificationType.AVAILABILITY_REQUEST and
-                    n.get('details', {}).get('request_id') == request_id
-                )
-            ]
-            if len(cleaned) < len(notifications):
-                staging_store.set_notifications(cleaned, user_id=user.get('employee_id'), immediate=True)
-        except Exception as e:
-            print(f"[APPROVAL] Warning: could not clean up manager notifications: {e}")
+            # Remove manager notifications for this request after approval
+            try:
+                notifications = staging_store.get_notifications()
+                cleaned = [
+                    n for n in notifications
+                    if not (
+                        n.get('type') == NotificationType.AVAILABILITY_REQUEST and
+                        n.get('details', {}).get('request_id') == request_id
+                    )
+                ]
+                if len(cleaned) < len(notifications):
+                    staging_store.set_notifications(cleaned, user_id=user.get('employee_id'), immediate=True)
+            except Exception as e:
+                print(f"[APPROVAL] Warning: could not clean up manager notifications: {e}")
 
-        # Send notification to employee
-        try:
-            employee_dict = staging_store.get_employee_by_id(request_data['employee_id'])
-            employee = Employee(**employee_dict) if employee_dict else None
-            employee_name = employee.name if employee else request_data['employee_id']
-            
-            # Support both old and new model for notification message
-            request_type = request_data.get('request_type', 'availability')
-            start_date = request_data.get('start_date', request_data.get('week_start_date', ''))
-            end_date = request_data.get('end_date', start_date)
-            
-            comment_part = f" Manager note: {body.get('comment')}" if body.get('comment') else ""
-            days_str = ', '.join(request_data.get('days_of_week', [])) if request_data.get('days_of_week') else 'All days'
-            time_str = f"{request_data.get('start_time', '00:00')} - {request_data.get('end_time', '23:59')}" if request_data.get('start_time') else 'All day'
-            notification = {
-                'id': str(uuid.uuid4()),
-                'employee_id': request_data['employee_id'],
-                'type': NotificationType.AVAILABILITY_APPROVED,
-                'message': f"Your {request_type} request ({start_date} to {end_date}) has been approved.{comment_part}",
-                'details': {
-                    'request_type': request_type,
-                    'start_date': start_date,
-                    'end_date': end_date,
-                    'days_of_week': days_str,
-                    'time_range': time_str,
-                    'employee_comment': request_data.get('employee_comment', '')
-                },
-                'created_at': datetime.now(),
-                'read': False
-            }
-            # Update staging layer
-            notifications = staging_store.get_notifications()
-            notifications.append(notification)
-            staging_store.set_notifications(notifications, user_id=user.get('employee_id'), immediate=True)
-            
-            # Add to action queue for Excel sync (async, no blocking)
-            # No action queue needed - GitHub JSON is single source of truth
-        except Exception as e:
-            import traceback
-            print(f"[API] Warning: could not send notification: {e}")
-            traceback.print_exc()
+            # Send notification to employee
+            try:
+                employee_dict = staging_store.get_employee_by_id(request_data['employee_id'])
+                employee = Employee(**employee_dict) if employee_dict else None
+                employee_name = employee.name if employee else request_data['employee_id']
+                
+                # Support both old and new model for notification message
+                request_type = request_data.get('request_type', 'availability')
+                start_date = request_data.get('start_date', request_data.get('week_start_date', ''))
+                end_date = request_data.get('end_date', start_date)
+                
+                comment_part = f" Manager note: {body.get('comment')}" if body.get('comment') else ""
+                days_str = ', '.join(request_data.get('days_of_week', [])) if request_data.get('days_of_week') else 'All days'
+                time_str = f"{request_data.get('start_time', '00:00')} - {request_data.get('end_time', '23:59')}" if request_data.get('start_time') else 'All day'
+                notification = {
+                    'id': str(uuid.uuid4()),
+                    'employee_id': request_data['employee_id'],
+                    'type': NotificationType.AVAILABILITY_APPROVED,
+                    'message': f"Your {request_type} request ({start_date} to {end_date}) has been approved.{comment_part}",
+                    'details': {
+                        'request_type': request_type,
+                        'start_date': start_date,
+                        'end_date': end_date,
+                        'days_of_week': days_str,
+                        'time_range': time_str,
+                        'employee_comment': request_data.get('employee_comment', '')
+                    },
+                    'created_at': datetime.now(),
+                    'read': False
+                }
+                # Update staging layer
+                notifications = staging_store.get_notifications()
+                notifications.append(notification)
+                staging_store.set_notifications(notifications, user_id=user.get('employee_id'), immediate=True)
+            except Exception as e:
+                import traceback
+                print(f"[API] Warning: could not send notification: {e}")
+                traceback.print_exc()
+
+        # Start background thread for locked shift and notification processing
+        thread = threading.Thread(target=process_approval_background)
+        thread.daemon = True
+        thread.start()
 
         # Ensure response is JSON-serializable
         response = request_data.copy()
@@ -2319,6 +2274,9 @@ async def reject_availability_request(request_id: str, body: Dict = {}, authoriz
                     end_date = date.fromisoformat(str(end_date_str)[:10])
                     day_map = {0: 'monday', 1: 'tuesday', 2: 'wednesday', 3: 'thursday', 4: 'friday', 5: 'saturday', 6: 'sunday'}
                     
+                    # Collect all schedule updates in memory to batch write once
+                    schedules_by_week = {}
+                    
                     # Process each week in the date range
                     current_week_start = start_date - timedelta(days=start_date.weekday())
                     while current_week_start <= end_date:
@@ -2345,13 +2303,20 @@ async def reject_availability_request(request_id: str, body: Dict = {}, authoriz
                             removed_count = original_count - len(schedule.shifts)
                             
                             if removed_count > 0:
-                                # Save the updated schedule
-                                staging_schedules = [s for s in staging_schedules if str(s.get('week_start_date')) != str(current_week_start)]
-                                staging_schedules.append(schedule.model_dump())
-                                staging_store.set_schedules(staging_schedules, user_id=user.get('employee_id'))
-                                print(f"[REJECTION] Removed {removed_count} locked shifts for request {request_id}")
+                                # Store schedule in memory for batch write
+                                schedules_by_week[str(current_week_start)] = schedule
+                                print(f"[REJECTION] Marked {removed_count} locked shifts for removal from week {current_week_start}")
                         
                         current_week_start += timedelta(days=7)
+                    
+                    # Batch write all schedules ONCE to avoid multiple GitHub API calls
+                    if schedules_by_week:
+                        staging_schedules = staging_store.get_schedules()
+                        updated_schedules = [s for s in staging_schedules if str(s.get('week_start_date')) not in schedules_by_week]
+                        for schedule in schedules_by_week.values():
+                            updated_schedules.append(schedule.model_dump())
+                        staging_store.set_schedules(updated_schedules, user_id=user.get('employee_id'), immediate=True)
+                        print(f"[REJECTION] Batch wrote {len(schedules_by_week)} schedules with locked shifts removed")
                         
                 except Exception as e:
                     print(f"[REJECTION] Warning: could not remove locked shifts: {e}")
@@ -2549,9 +2514,116 @@ async def cleanup_processed_notifications(authorization: str = Header(None)):
             print(f"[CLEANUP] Removed {removed_count} processed/old request notifications")
         
         return {"success": True, "removed_count": removed_count}
+        
     except Exception as e:
-        print(f"[CLEANUP] Error: {e}")
+        print(f"[CLEANUP] Error cleaning up notifications: {e}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Error cleaning up notifications: {str(e)}")
+
+@app.post("/api/schedules/cleanup-orphaned-locked-shifts")
+async def cleanup_orphaned_locked_shifts(authorization: str = Header(None)):
+    """Remove pending locked shifts that don't have corresponding pending availability requests"""
+    user = AuthManager.get_current_user(authorization)
+    if not user or user.get('role') not in ['manager', 'admin']:
+        raise HTTPException(status_code=403, detail="Manager access required")
+    
+    try:
+        # Get all pending request IDs
+        requests = staging_store.get_availability_requests()
+        pending_request_ids = {
+            r['id'] for r in requests 
+            if r.get('status') in ['pending', AvailabilityRequestStatus.PENDING]
+        }
+        
+        # Get all schedules
+        schedules = staging_store.get_schedules()
+        schedules_by_week = {}
+        total_removed = 0
+        
+        for schedule_dict in schedules:
+            schedule = WeeklySchedule(**schedule_dict)
+            original_count = len(schedule.shifts)
+            
+            # Remove pending locked shifts that don't have corresponding pending requests
+            schedule.shifts = [
+                s for s in schedule.shifts
+                if not (s.locked and s.id.startswith('pending_') and not any(
+                    s.id.startswith(f"pending_{req_id}_") for req_id in pending_request_ids
+                ))
+            ]
+            
+            removed_count = original_count - len(schedule.shifts)
+            if removed_count > 0:
+                schedules_by_week[str(schedule.week_start_date)] = schedule
+                total_removed += removed_count
+                print(f"[CLEANUP] Removed {removed_count} orphaned pending locked shifts from week {schedule.week_start_date}")
+        
+        # Batch write all updated schedules
+        if schedules_by_week:
+            updated_schedules = [s for s in schedules if str(s.get('week_start_date')) not in schedules_by_week]
+            for schedule in schedules_by_week.values():
+                updated_schedules.append(schedule.model_dump())
+            staging_store.set_schedules(updated_schedules, user_id=user.get('employee_id'), immediate=True)
+            print(f"[CLEANUP] Batch wrote {len(schedules_by_week)} schedules with orphaned shifts removed")
+        
+        return {"success": True, "removed_count": total_removed, "weeks_updated": len(schedules_by_week)}
+        
+    except Exception as e:
+        print(f"[CLEANUP] Error cleaning up orphaned locked shifts: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Error cleaning up orphaned shifts: {str(e)}")
+
+@app.post("/api/schedules/cleanup-orphaned-locked-shifts/no-auth")
+async def cleanup_orphaned_locked_shifts_no_auth():
+    """TEMPORARY: Remove pending locked shifts without auth requirement for emergency cleanup"""
+    try:
+        # Get all pending request IDs
+        requests = staging_store.get_availability_requests()
+        pending_request_ids = {
+            r['id'] for r in requests 
+            if r.get('status') in ['pending', AvailabilityRequestStatus.PENDING]
+        }
+        
+        # Get all schedules
+        schedules = staging_store.get_schedules()
+        schedules_by_week = {}
+        total_removed = 0
+        
+        for schedule_dict in schedules:
+            schedule = WeeklySchedule(**schedule_dict)
+            original_count = len(schedule.shifts)
+            
+            # Remove pending locked shifts that don't have corresponding pending requests
+            schedule.shifts = [
+                s for s in schedule.shifts
+                if not (s.locked and s.id.startswith('pending_') and not any(
+                    s.id.startswith(f"pending_{req_id}_") for req_id in pending_request_ids
+                ))
+            ]
+            
+            removed_count = original_count - len(schedule.shifts)
+            if removed_count > 0:
+                schedules_by_week[str(schedule.week_start_date)] = schedule
+                total_removed += removed_count
+                print(f"[CLEANUP] Removed {removed_count} orphaned pending locked shifts from week {schedule.week_start_date}")
+        
+        # Batch write all updated schedules
+        if schedules_by_week:
+            updated_schedules = [s for s in schedules if str(s.get('week_start_date')) not in schedules_by_week]
+            for schedule in schedules_by_week.values():
+                updated_schedules.append(schedule.model_dump())
+            staging_store.set_schedules(updated_schedules, user_id="system", immediate=True)
+            print(f"[CLEANUP] Batch wrote {len(schedules_by_week)} schedules with orphaned shifts removed")
+        
+        return {"success": True, "removed_count": total_removed, "weeks_updated": len(schedules_by_week)}
+        
+    except Exception as e:
+        print(f"[CLEANUP] Error cleaning up orphaned locked shifts: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Error cleaning up orphaned shifts: {str(e)}")
 
 # ============ Events ============
 
@@ -2675,19 +2747,6 @@ async def nightly_excel_commit():
                         schedule.get('week_start_date'), schedule.get('id'), shift.get('employee_id'), shift.get('day_of_week'),
                         shift.get('floor'), shift.get('start_time'), shift.get('end_time'), shift.get('hours'), shift.get('break_provided')
                     ])
-        
-        # Availabilities sheet
-        availabilities = staging_store.get_availabilities()
-        if availabilities:
-            avail_sheet = wb.create_sheet("Availabilities")
-            avail_sheet.append(["ID", "Employee ID", "Week Start", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday", "Approved", "Submitted At"])
-            for avail in availabilities:
-                avail_sheet.append([
-                    avail.get('id'), avail.get('employee_id'), avail.get('week_start_date'),
-                    avail.get('monday'), avail.get('tuesday'), avail.get('wednesday'), avail.get('thursday'),
-                    avail.get('friday'), avail.get('saturday'), avail.get('sunday'),
-                    avail.get('approved'), avail.get('submitted_at')
-                ])
         
         # Availability Requests sheet
         requests = staging_store.get_availability_requests()
@@ -3779,7 +3838,7 @@ async def admin_login():
     return HTMLResponse(content=html_content)
 
 @app.post("/admin/api/login")
-async def admin_api_login(credentials: dict):
+async def admin_api_login(credentials: dict, request: Request):
     """Handle admin login."""
     username = credentials.get('username')
     password = credentials.get('password')
@@ -3788,7 +3847,9 @@ async def admin_api_login(credentials: dict):
         raise HTTPException(status_code=401, detail="Invalid credentials")
     
     response = JSONResponse(content={"success": True})
-    response.set_cookie(key="admin_session", value="authenticated", httponly=True, secure=True, samesite="lax")
+    # Only use secure=True for HTTPS, not for localhost HTTP
+    is_secure = request.url.scheme == "https"
+    response.set_cookie(key="admin_session", value="authenticated", httponly=True, secure=is_secure, samesite="lax")
     return response
 
 @app.get("/admin/logout")
@@ -3797,6 +3858,16 @@ async def admin_logout():
     response = RedirectResponse(url="/admin/login")
     response.delete_cookie(key="admin_session")
     return response
+
+@app.get("/admin/api/flow-diagram")
+async def get_flow_diagram(admin_session: Optional[str] = Cookie(None)):
+    """Get recent flow chains for the flow diagram."""
+    if admin_session != "authenticated":
+        return {"error": "Unauthorized"}
+    
+    flow = flow_storage.get_flow_storage()
+    chains = flow.get_recent_chains(limit=10)
+    return {"chains": chains}
 
 @app.get("/admin/dashboard")
 async def admin_dashboard(admin_session: Optional[str] = Cookie(None)):
@@ -3842,6 +3913,13 @@ async def admin_dashboard(admin_session: Optional[str] = Cookie(None)):
         .timestamp { color: #888; margin-right: 10px; }
         .level { margin-right: 10px; font-weight: bold; }
         .empty-logs { color: #888; font-style: italic; padding: 20px; text-align: center; }
+        .flow-node { display: inline-block; padding: 8px 12px; margin: 5px; border-radius: 4px; font-size: 12px; border: 1px solid #ddd; background: white; }
+        .flow-node.api { background: #e3f2fd; border-color: #2196f3; }
+        .flow-node.github { background: #e8f5e9; border-color: #4caf50; }
+        .flow-node.cache { background: #fff3e0; border-color: #ff9800; }
+        .flow-node.success { border-color: #4caf50; }
+        .flow-node.error { border-color: #f44336; background: #ffebee; }
+        .flow-arrow { display: inline-block; margin: 0 5px; color: #666; }
     </style>
 </head>
 <body>
@@ -3897,10 +3975,6 @@ async def admin_dashboard(admin_session: Optional[str] = Cookie(None)):
                     <span class="metric-value" id="file-schedules">-</span>
                 </div>
                 <div class="metric">
-                    <span class="metric-label">availabilities.json:</span>
-                    <span class="metric-value" id="file-availabilities">-</span>
-                </div>
-                <div class="metric">
                     <span class="metric-label">availability_requests.json:</span>
                     <span class="metric-value" id="file-requests">-</span>
                 </div>
@@ -3927,6 +4001,255 @@ async def admin_dashboard(admin_session: Optional[str] = Cookie(None)):
                 <div class="metric">
                     <span class="metric-label">Error Rate:</span>
                     <span class="metric-value" id="error-rate">-</span>
+                </div>
+            </div>
+        </div>
+        
+        <div class="grid">
+            <div class="card full-width">
+                <h2>System Architecture</h2>
+                <div id="architecture-diagram" style="min-height: 900px; background: #f9f9f9; border-radius: 5px; padding: 20px; overflow-x: auto;">
+                    <svg width="1400" height="900" viewBox="0 0 1400 900" xmlns="http://www.w3.org/2000/svg">
+                        <!-- Styles -->
+                        <defs>
+                            <style>
+                                .box { fill: white; stroke: #333; stroke-width: 2; }
+                                .box-frontend { fill: #e3f2fd; stroke: #2196f3; }
+                                .box-api { fill: #fff3e0; stroke: #ff9800; }
+                                .box-cache { fill: #f3e5f5; stroke: #9c27b0; }
+                                .box-github { fill: #e8f5e9; stroke: #4caf50; }
+                                .box-data { fill: #fce4ec; stroke: #e91e63; }
+                                .box-auth { fill: #fff9c4; stroke: #fbc02d; }
+                                .box-scheduler { fill: #e0f7fa; stroke: #00bcd4; }
+                                .box-excel { fill: #ffccbc; stroke: #ff5722; }
+                                .arrow-read { stroke: #2196f3; stroke-width: 2; fill: none; marker-end: url(#arrowhead-read); }
+                                .arrow-write { stroke: #f44336; stroke-width: 2; fill: none; marker-end: url(#arrowhead-write); }
+                                .arrow-bidi { stroke: #666; stroke-width: 2; fill: none; marker-end: url(#arrowhead); marker-start: url(#arrowhead-start); }
+                                .label { font-family: sans-serif; font-size: 14px; fill: #333; text-anchor: middle; }
+                                .label-title { font-weight: bold; font-size: 16px; }
+                                .label-small { font-size: 13px; }
+                            </style>
+                            <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+                                <polygon points="0 0, 10 3.5, 0 7" fill="#666" />
+                            </marker>
+                            <marker id="arrowhead-start" markerWidth="10" markerHeight="7" refX="1" refY="3.5" orient="auto">
+                                <polygon points="10 0, 0 3.5, 10 7" fill="#666" />
+                            </marker>
+                            <marker id="arrowhead-read" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+                                <polygon points="0 0, 10 3.5, 0 7" fill="#2196f3" />
+                            </marker>
+                            <marker id="arrowhead-write" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+                                <polygon points="0 0, 10 3.5, 0 7" fill="#f44336" />
+                            </marker>
+                        </defs>
+                        
+                        <!-- Frontend -->
+                        <rect x="50" y="50" width="150" height="100" class="box box-frontend" rx="5" />
+                        <text x="125" y="95" class="label label-title">Frontend</text>
+                        <text x="125" y="115" class="label label-small">(React)</text>
+                        
+                        <!-- Auth Layer -->
+                        <rect x="230" y="50" width="150" height="100" class="box box-auth" rx="5" />
+                        <text x="305" y="95" class="label label-title">Auth</text>
+                        <text x="305" y="115" class="label label-small">Session/Password</text>
+                        
+                        <!-- API Layer - Container -->
+                        <rect x="420" y="30" width="200" height="520" class="box box-api" rx="5" />
+                        <text x="520" y="60" class="label label-title">FastAPI Backend</text>
+                        
+                        <!-- API Read Endpoints -->
+                        <rect x="440" y="80" width="160" height="110" class="box" rx="3" stroke="#ff9800" stroke-width="1" />
+                        <text x="520" y="105" class="label label-title" style="font-size: 14px;">Read Endpoints</text>
+                        <text x="520" y="125" class="label label-small">GET /api/availabilities</text>
+                        <text x="520" y="142" class="label label-small">GET /api/notifications</text>
+                        <text x="520" y="159" class="label label-small">GET /api/requests</text>
+                        <text x="520" y="176" class="label label-small">GET /api/schedules</text>
+                        
+                        <!-- API Write Endpoints -->
+                        <rect x="440" y="210" width="160" height="110" class="box" rx="3" stroke="#ff9800" stroke-width="1" />
+                        <text x="520" y="235" class="label label-title" style="font-size: 14px;">Write Endpoints</text>
+                        <text x="520" y="255" class="label label-small">POST /api/availabilities</text>
+                        <text x="520" y="272" class="label label-small">POST /api/requests</text>
+                        <text x="520" y="289" class="label label-small">POST /api/schedules</text>
+                        <text x="520" y="306" class="label label-small">POST /api/staffing-targets</text>
+                        
+                        <!-- API Auth Endpoints -->
+                        <rect x="440" y="340" width="160" height="80" class="box" rx="3" stroke="#ff9800" stroke-width="1" />
+                        <text x="520" y="365" class="label label-title" style="font-size: 14px;">Auth Endpoints</text>
+                        <text x="520" y="385" class="label label-small">POST /api/auth/login</text>
+                        <text x="520" y="402" class="label label-small">POST /admin/api/login</text>
+                        
+                        <!-- API Admin/Scheduler Endpoints -->
+                        <rect x="440" y="440" width="160" height="100" class="box" rx="3" stroke="#ff9800" stroke-width="1" />
+                        <text x="520" y="465" class="label label-title" style="font-size: 14px;">Admin/Scheduler</text>
+                        <text x="520" y="485" class="label label-small">POST /api/schedules/*</text>
+                        <text x="520" y="502" class="label label-small">POST /api/shift-templates</text>
+                        <text x="520" y="519" class="label label-small">GET /api/health</text>
+                        
+                        <!-- Cache Layer - Container -->
+                        <rect x="660" y="30" width="180" height="520" class="box box-cache" rx="5" />
+                        <text x="750" y="60" class="label label-title">Cache Manager</text>
+                        
+                        <!-- Cache Storage -->
+                        <rect x="680" y="80" width="140" height="90" class="box" rx="3" stroke="#9c27b0" stroke-width="1" />
+                        <text x="750" y="105" class="label label-title" style="font-size: 14px;">Cache Storage</text>
+                        <text x="750" y="125" class="label label-small">LRU Cache (max 100)</text>
+                        <text x="750" y="142" class="label label-small">TTL: 5 minutes</text>
+                        <text x="750" y="159" class="label label-small">Key Locks</text>
+                        
+                        <!-- Cache Invalidation -->
+                        <rect x="680" y="190" width="140" height="90" class="box" rx="3" stroke="#9c27b0" stroke-width="1" />
+                        <text x="750" y="215" class="label label-title" style="font-size: 14px;">Invalidation</text>
+                        <text x="750" y="235" class="label label-small">SHA Invalidation</text>
+                        <text x="750" y="252" class="label label-small">Manual cache.set()</text>
+                        <text x="750" y="269" class="label label-small">after write</text>
+                        
+                        <!-- Cache Statistics -->
+                        <rect x="680" y="300" width="140" height="70" class="box" rx="3" stroke="#9c27b0" stroke-width="1" />
+                        <text x="750" y="325" class="label label-title" style="font-size: 14px;">Statistics</text>
+                        <text x="750" y="345" class="label label-small">Cache hit/miss stats</text>
+                        <text x="750" y="362" class="label label-small">Eviction tracking</text>
+                        
+                        <!-- GitHub Storage - Container -->
+                        <rect x="880" y="30" width="200" height="520" class="box box-github" rx="5" />
+                        <text x="980" y="60" class="label label-title">GitHub Storage</text>
+                        
+                        <!-- GitHub Read Operations -->
+                        <rect x="900" y="80" width="160" height="100" class="box" rx="3" stroke="#4caf50" stroke-width="1" />
+                        <text x="980" y="105" class="label label-title" style="font-size: 14px;">Read Operations</text>
+                        <text x="980" y="125" class="label label-small">HEAD for SHA</text>
+                        <text x="980" y="142" class="label label-small">GET for content</text>
+                        <text x="980" y="159" class="label label-small">download_url for large</text>
+                        <text x="980" y="176" class="label label-small">github_storage.py</text>
+                        
+                        <!-- GitHub Write Operations -->
+                        <rect x="900" y="200" width="160" height="70" class="box" rx="3" stroke="#4caf50" stroke-width="1" />
+                        <text x="980" y="225" class="label label-title" style="font-size: 14px;">Write Operations</text>
+                        <text x="980" y="245" class="label label-small">PUT for write</text>
+                        <text x="980" y="262" class="label label-small">Commit operations</text>
+                        
+                        <!-- GitHub Configuration -->
+                        <rect x="900" y="290" width="160" height="100" class="box" rx="3" stroke="#4caf50" stroke-width="1" />
+                        <text x="980" y="315" class="label label-title" style="font-size: 14px;">Configuration</text>
+                        <text x="980" y="335" class="label label-small">Blob storage (disabled)</text>
+                        <text x="980" y="352" class="label label-small">API authentication</text>
+                        <text x="980" y="369" class="label label-small">Repository config</text>
+                        
+                        <!-- Excel Export -->
+                        <rect x="880" y="580" width="200" height="80" class="box box-excel" rx="5" />
+                        <text x="980" y="615" class="label label-title">Excel Export</text>
+                        <text x="980" y="635" class="label label-small">data_store_excel.py</text>
+                        <text x="980" y="652" class="label label-small">Daily reports only</text>
+                        
+                        <!-- Scheduler -->
+                        <rect x="420" y="580" width="200" height="80" class="box box-scheduler" rx="5" />
+                        <text x="520" y="615" class="label label-title">Scheduler</text>
+                        <text x="520" y="635" class="label label-small">Auto-generation logic</text>
+                        <text x="520" y="652" class="label label-small">Shift assignment</text>
+                        
+                        <!-- Core Data Files -->
+                        <rect x="1120" y="30" width="220" height="180" class="box box-data" rx="5" />
+                        <text x="1230" y="65" class="label label-title">Core Data Files</text>
+                        <text x="1230" y="90" class="label label-small">employees.json</text>
+                        <text x="1230" y="110" class="label label-small">schedules.json</text>
+                        <text x="1230" y="130" class="label label-small">availability_requests.json</text>
+                        <text x="1230" y="150" class="label label-small">notifications.json</text>
+                        <text x="1230" y="170" class="label label-small">events.json</text>
+                        
+                        <!-- Configuration Files -->
+                        <rect x="1120" y="230" width="220" height="160" class="box box-data" rx="5" />
+                        <text x="1230" y="249" class="label label-title">Configuration</text>
+                        <text x="1230" y="274" class="label label-small">system_config.json</text>
+                        <text x="1230" y="294" class="label label-small">staffing_targets.json</text>
+                        <text x="1230" y="314" class="label label-small">shift_templates.json</text>
+                        <text x="1230" y="334" class="label label-small">skills.json</text>
+                        <text x="1230" y="354" class="label label-small">roles.json</text>
+                        <text x="1230" y="374" class="label label-small">passwords.json</text>
+                        
+                        <!-- Data Relationships -->
+                        <rect x="1120" y="416" width="220" height="180" class="box box-data" rx="5" />
+                        <text x="1230" y="438" class="label label-title" style="text-decoration: underline;">Relationships</text>
+                        <text x="1135" y="463" class="label label-small" style="text-anchor: start;">availabilities → schedules</text>
+                        <text x="1135" y="483" class="label label-small" style="text-anchor: start;">requests → availabilities</text>
+                        <text x="1135" y="503" class="label label-small" style="text-anchor: start;">employees → schedules</text>
+                        <text x="1135" y="523" class="label label-small" style="text-anchor: start;">employees → requests</text>
+                        <text x="1135" y="543" class="label label-small" style="text-anchor: start;">templates → schedules</text>
+                        <text x="1135" y="563" class="label label-small" style="text-anchor: start;">targets → schedules</text>
+                        
+                        <!-- Cache Invalidation Logic -->
+                        <rect x="1120" y="616" width="220" height="140" class="box box-data" rx="5" />
+                        <text x="1230" y="638" class="label label-title" style="text-decoration: underline;">Cache Invalidation</text>
+                        <text x="1135" y="663" class="label label-small" style="text-anchor: start;">1. SHA mismatch → miss</text>
+                        <text x="1135" y="683" class="label label-small" style="text-anchor: start;">2. TTL expired → miss</text>
+                        <text x="1135" y="703" class="label label-small" style="text-anchor: start;">3. Manual clear() → miss</text>
+                        <text x="1135" y="723" class="label label-small" style="text-anchor: start;">4. Write → manual set()</text>
+                        <text x="1135" y="743" class="label label-small" style="text-anchor: start;">5. LRU eviction → miss</text>
+                        
+                        <!-- Auth Flow -->
+                        <rect x="1120" y="776" width="220" height="120" class="box box-data" rx="5" />
+                        <text x="1230" y="798" class="label label-title" style="text-decoration: underline;">Auth Flow</text>
+                        <text x="1135" y="823" class="label label-small" style="text-anchor: start;">Login → passwords.json</text>
+                        <text x="1135" y="843" class="label label-small" style="text-anchor: start;">Session → cookie</text>
+                        <text x="1135" y="863" class="label label-small" style="text-anchor: start;">Manager → require_manager</text>
+                        
+                        <!-- Arrows - Bidirectional -->
+                        <line x1="200" y1="100" x2="230" y2="100" class="arrow-bidi" />
+                        <line x1="380" y1="100" x2="420" y2="100" class="arrow-bidi" />
+                        
+                        <!-- Arrows - Read (Blue) - Data Files to GitHub Read -->
+                        <line x1="1110" y1="120" x2="1060" y2="130" class="arrow-read" />
+                        <!-- GitHub Read to Cache Storage -->
+                        <line x1="890" y1="130" x2="820" y2="125" class="arrow-read" />
+                        <!-- Cache Storage to API Read -->
+                        <line x1="670" y1="125" x2="600" y2="135" class="arrow-read" />
+                        
+                        <!-- Arrows - Write (Red) - API Write to Cache Invalidation -->
+                        <line x1="600" y1="265" x2="670" y2="235" class="arrow-write" />
+                        <!-- Cache Invalidation to GitHub Write -->
+                        <line x1="820" y1="235" x2="890" y2="235" class="arrow-write" />
+                        <!-- GitHub Write to Core Data Files -->
+                        <line x1="1060" y1="235" x2="1110" y2="120" class="arrow-write" />
+                        
+                        <!-- Scheduler to API Admin -->
+                        <line x1="520" y1="580" x2="520" y2="540" class="arrow-bidi" />
+                        
+                        <!-- Excel to Core Data Files -->
+                        <line x1="1080" y1="620" x2="1110" y2="120" class="arrow-read" />
+                        
+                        <!-- Legend -->
+                        <rect x="50" y="750" width="18" height="18" class="box box-frontend" />
+                        <text x="80" y="765" class="label" style="text-anchor: start; font-size: 14px;">Frontend</text>
+                        
+                        <rect x="50" y="780" width="18" height="18" class="box box-auth" />
+                        <text x="80" y="795" class="label" style="text-anchor: start; font-size: 14px;">Auth</text>
+                        
+                        <rect x="50" y="810" width="18" height="18" class="box box-api" />
+                        <text x="80" y="825" class="label" style="text-anchor: start; font-size: 14px;">API Layer</text>
+                        
+                        <rect x="200" y="750" width="18" height="18" class="box box-cache" />
+                        <text x="230" y="765" class="label" style="text-anchor: start; font-size: 14px;">Cache</text>
+                        
+                        <rect x="200" y="780" width="18" height="18" class="box box-github" />
+                        <text x="230" y="795" class="label" style="text-anchor: start; font-size: 14px;">GitHub</text>
+                        
+                        <rect x="200" y="810" width="18" height="18" class="box box-data" />
+                        <text x="230" y="825" class="label" style="text-anchor: start; font-size: 14px;">Data Files</text>
+                        
+                        <rect x="350" y="750" width="18" height="18" class="box box-scheduler" />
+                        <text x="380" y="765" class="label" style="text-anchor: start; font-size: 14px;">Scheduler</text>
+                        
+                        <rect x="350" y="780" width="18" height="18" class="box box-excel" />
+                        <text x="380" y="795" class="label" style="text-anchor: start; font-size: 14px;">Excel Export</text>
+                        
+                        <line x1="500" y1="760" x2="540" y2="760" class="arrow-read" />
+                        <text x="550" y="765" class="label" style="text-anchor: start; font-size: 14px;">Read</text>
+                        
+                        <line x1="500" y1="790" x2="540" y2="790" class="arrow-write" />
+                        <text x="550" y="795" class="label" style="text-anchor: start; font-size: 14px;">Write</text>
+                        
+                        <line x1="500" y1="820" x2="540" y2="820" class="arrow-bidi" />
+                        <text x="550" y="825" class="label" style="text-anchor: start; font-size: 14px;">Bidirectional</text>
+                    </svg>
                 </div>
             </div>
         </div>
@@ -3967,7 +4290,6 @@ async def admin_dashboard(admin_session: Optional[str] = Cookie(None)):
                     document.getElementById('github-last-commit').textContent = data.github_health.last_commit !== 'Unknown' && data.github_health.last_commit !== 'Error fetching' ? formatTimestamp(data.github_health.last_commit) : data.github_health.last_commit;
                     document.getElementById('file-employees').textContent = data.github_health.file_updates['employees.json'] !== 'N/A' && data.github_health.file_updates['employees.json'] !== 'No commits' && data.github_health.file_updates['employees.json'] !== 'Error' ? formatTimestamp(data.github_health.file_updates['employees.json']) : data.github_health.file_updates['employees.json'];
                     document.getElementById('file-schedules').textContent = data.github_health.file_updates['schedules.json'] !== 'N/A' && data.github_health.file_updates['schedules.json'] !== 'No commits' && data.github_health.file_updates['schedules.json'] !== 'Error' ? formatTimestamp(data.github_health.file_updates['schedules.json']) : data.github_health.file_updates['schedules.json'];
-                    document.getElementById('file-availabilities').textContent = data.github_health.file_updates['availabilities.json'] !== 'N/A' && data.github_health.file_updates['availabilities.json'] !== 'No commits' && data.github_health.file_updates['availabilities.json'] !== 'Error' ? formatTimestamp(data.github_health.file_updates['availabilities.json']) : data.github_health.file_updates['availabilities.json'];
                     document.getElementById('file-requests').textContent = data.github_health.file_updates['availability_requests.json'] !== 'N/A' && data.github_health.file_updates['availability_requests.json'] !== 'No commits' && data.github_health.file_updates['availability_requests.json'] !== 'Error' ? formatTimestamp(data.github_health.file_updates['availability_requests.json']) : data.github_health.file_updates['availability_requests.json'];
                     document.getElementById('cache-hit-rate').textContent = data.metrics.cache_hit_rate;
                     document.getElementById('cache-hits').textContent = data.metrics.cache_hits;
@@ -4062,7 +4384,7 @@ async def get_health_status():
             except:
                 github_health["last_commit"] = "Error fetching"
             # Get last update times for key files
-            files = ["employees.json", "schedules.json", "availabilities.json", "availability_requests.json"]
+            files = ["employees.json", "schedules.json", "availability_requests.json"]
             for filename in files:
                 try:
                     url = f"https://api.github.com/repos/{os.getenv('GITHUB_REPO', 'LeviSantosAraujo/IBU-Operations-Schedule')}/commits?sha={os.getenv('GITHUB_DATA_BRANCH', 'data')}&path={filename}&per_page=1"

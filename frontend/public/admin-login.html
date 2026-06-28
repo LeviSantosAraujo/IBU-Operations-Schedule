@@ -58,7 +58,8 @@
     </div>
 
     <script>
-        const API_URL = 'https://ibu-operations-schedule.vercel.app/api';
+        // Use local backend when running locally, production otherwise
+        const API_URL = window.location.hostname === 'localhost' ? '/api' : 'https://ibu-operations-schedule.vercel.app/api';
         
         document.getElementById('adminLoginForm').addEventListener('submit', async (e) => {
             e.preventDefault();

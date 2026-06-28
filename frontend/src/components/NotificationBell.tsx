@@ -133,10 +133,8 @@ export default function NotificationBell() {
     approveAvailabilityRequest(requestId, comment)
       .then(() => {
         loadNotifications()
-        // Wait for backend debounce (500ms) before refreshing
-        setTimeout(() => {
-          window.dispatchEvent(new CustomEvent('scheduleUpdate'))
-        }, 1000)
+        // Immediately refresh schedule to show approved locked shifts
+        window.dispatchEvent(new CustomEvent('scheduleUpdate'))
       })
       .catch((err) => {
         console.error('Error approving request:', err)

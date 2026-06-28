@@ -28,6 +28,12 @@ import threading
 from typing import Any, Optional, Dict
 from collections import OrderedDict
 from datetime import datetime, timedelta
+import flow_storage
+import contextvars
+
+# Context variables for flow tracking
+_flow_chain_id: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar('flow_chain_id', default=None)
+_flow_parent_id: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar('flow_parent_id', default=None)
 
 
 class CacheEntry:
@@ -99,29 +105,47 @@ class CacheManager:
         Returns:
             Cached value if valid, None otherwise
         """
+        # Track cache get operation
+        flow = flow_storage.get_flow_storage()
+        chain_id = _flow_chain_id.get()
+        parent_id = _flow_parent_id.get()
+        
+        if chain_id:
+            op = flow.add_operation(chain_id, "cache", f"GET {key}", parent_id)
+            if op:
+                _flow_parent_id.set(op.id)
+        
         with self.lock:
             entry = self.cache.get(key)
             
             if entry is None:
                 self.total_misses += 1
+                if chain_id and op:
+                    flow.complete_operation(chain_id, op.id, "miss", {"reason": "not_found"})
                 return None
             
             # Check if entry is expired
             if entry.is_expired(self.ttl_seconds):
                 self._remove(key)
                 self.total_misses += 1
+                if chain_id and op:
+                    flow.complete_operation(chain_id, op.id, "miss", {"reason": "expired"})
                 return None
             
             # Check if SHA changed (invalidation)
             if current_sha is not None and entry.sha != current_sha:
                 self._remove(key)
                 self.total_misses += 1
+                if chain_id and op:
+                    flow.complete_operation(chain_id, op.id, "miss", {"reason": "sha_mismatch"})
                 return None
             
             # Move to end (most recently used)
             self.cache.move_to_end(key)
             entry.hits += 1
             self.total_hits += 1
+            if chain_id and op:
+                flow.complete_operation(chain_id, op.id, "hit", {"hits": entry.hits})
             return entry.value
     
     def set(self, key: str, value: Any, sha: Optional[str] = None) -> None:

@@ -58,37 +58,6 @@ def delete_employee(employee_id: str) -> bool:
     return False
 
 
-# ============ Availability Operations ============
-
-def get_availabilities(week_start_date: Optional[date] = None, employee_id: Optional[str] = None) -> List[Availability]:
-    """Get availabilities from json_store as Pydantic models, with optional filtering."""
-    availabilities_dict = json_store.get_availabilities()
-    if week_start_date:
-        availabilities_dict = [a for a in availabilities_dict if a.get("week_start_date") == str(week_start_date)]
-    if employee_id:
-        availabilities_dict = [a for a in availabilities_dict if a.get("employee_id") == employee_id]
-    return [Availability(**a) for a in availabilities_dict]
-
-
-def get_availability_for_week(employee_id: str, week_start_date: date) -> Optional[Availability]:
-    """Get availability for specific employee and week."""
-    availabilities = get_availabilities(week_start_date, employee_id)
-    return availabilities[0] if availabilities else None
-
-
-def save_availability(availability: Availability) -> Availability:
-    """Save availability to json_store (upsert)."""
-    availabilities_dict = json_store.get_availabilities()
-    # Convert to dict
-    availability_dict = availability.model_dump()
-    # Remove existing if updating
-    availabilities_dict = [a for a in availabilities_dict if a.get("id") != availability.id]
-    # Add/update
-    availabilities_dict.append(availability_dict)
-    json_store.set_availabilities(availabilities_dict, user_id=availability.employee_id)
-    return availability
-
-
 # ============ Schedule Operations ============
 
 def get_all_schedules() -> List[WeeklySchedule]:

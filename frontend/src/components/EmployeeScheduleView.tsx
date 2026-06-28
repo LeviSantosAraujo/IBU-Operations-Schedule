@@ -418,10 +418,8 @@ export default function EmployeeScheduleView() {
                                 {dayRequests.map((req: any, idx: number) => {
                                   const status = req.status || ''
                                   const statusLabel = status === 'AvailabilityRequestStatus.APPROVED' || status === 'approved' ? '✅ Approved' :
-                                                   status === 'AvailabilityRequestStatus.REJECTED' || status === 'rejected' ? '❌ Rejected' :
                                                    status === 'AvailabilityRequestStatus.PENDING' || status === 'pending' ? '⏳ Pending' : ''
                                   const statusColor = status === 'AvailabilityRequestStatus.APPROVED' || status === 'approved' ? 'bg-green-100 text-green-700' :
-                                                   status === 'AvailabilityRequestStatus.REJECTED' || status === 'rejected' ? 'bg-red-100 text-red-700' :
                                                    status === 'AvailabilityRequestStatus.PENDING' || status === 'pending' ? 'bg-yellow-100 text-yellow-700' : ''
                                   return (
                                     <div key={req.id || idx} className={`text-xs font-medium p-1 rounded ${statusColor}`}>

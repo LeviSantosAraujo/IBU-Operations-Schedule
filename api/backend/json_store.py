@@ -27,6 +27,12 @@ import base64
 from typing import List, Dict, Any, Optional
 from datetime import date, datetime
 import github_storage
+import flow_storage
+import contextvars
+
+# Context variables for flow tracking
+_flow_chain_id: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar('flow_chain_id', default=None)
+_flow_parent_id: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar('flow_parent_id', default=None)
 
 GITHUB_AVAILABLE = github_storage.GITHUB_AVAILABLE
 _API_BASE = "https://api.github.com"
@@ -97,6 +103,16 @@ def _read_json_file(filename: str, current_sha: Optional[str] = None) -> Any:
     """Read a JSON file from GitHub with caching and SHA-based invalidation. Returns None if not found."""
     import cache_manager
     
+    # Track GitHub read operation
+    flow = flow_storage.get_flow_storage()
+    chain_id = _flow_chain_id.get()
+    parent_id = _flow_parent_id.get()
+    
+    if chain_id:
+        op = flow.add_operation(chain_id, "github", f"GET {filename}", parent_id)
+        if op:
+            _flow_parent_id.set(op.id)
+    
     cache = cache_manager.get_cache()
     cache_key = cache_manager.cache_key_for_file(filename)
     
@@ -114,6 +130,8 @@ def _read_json_file(filename: str, current_sha: Optional[str] = None) -> Any:
     cached_value = cache.get(cache_key, current_sha)
     if cached_value is not None:
         print(f"[JSON_STORE] Cache hit for {filename}")
+        if chain_id and op:
+            flow.complete_operation(chain_id, op.id, "success", {"cached": True})
         return cached_value
     
     # Cache miss - get per-key lock to prevent stampede
@@ -124,6 +142,8 @@ def _read_json_file(filename: str, current_sha: Optional[str] = None) -> Any:
         cached_value = cache.get(cache_key, current_sha)
         if cached_value is not None:
             print(f"[JSON_STORE] Cache hit after lock for {filename}")
+            if chain_id and op:
+                flow.complete_operation(chain_id, op.id, "success", {"cached": True})
             return cached_value
         
         # Still a miss - read from GitHub
@@ -141,10 +161,14 @@ def _read_json_file(filename: str, current_sha: Optional[str] = None) -> Any:
             
             if resp.status_code == 404:
                 print(f"[JSON_STORE] {filename} not found (first run)")
+                if chain_id and op:
+                    flow.complete_operation(chain_id, op.id, "error", {"status_code": 404})
                 return None
             
             if resp.status_code != 200:
                 print(f"[JSON_STORE] Failed to read {filename}: HTTP {resp.status_code}")
+                if chain_id and op:
+                    flow.complete_operation(chain_id, op.id, "error", {"status_code": resp.status_code})
                 return None
             
             data = resp.json()
@@ -160,6 +184,8 @@ def _read_json_file(filename: str, current_sha: Optional[str] = None) -> Any:
                 cache.set(cache_key, deserialized, sha)
                 print(f"[JSON_STORE] Cached {filename} with SHA {sha[:8] if sha else 'unknown'}")
                 
+                if chain_id and op:
+                    flow.complete_operation(chain_id, op.id, "success", {"cached": False, "sha": sha[:8] if sha else 'unknown'})
                 return deserialized
             
             # Large files (>1MB) come back without inline content; use download_url
@@ -175,11 +201,17 @@ def _read_json_file(filename: str, current_sha: Optional[str] = None) -> Any:
                     cache.set(cache_key, deserialized, sha)
                     print(f"[JSON_STORE] Cached {filename} with SHA {sha[:8] if sha else 'unknown'}")
                     
+                    if chain_id and op:
+                        flow.complete_operation(chain_id, op.id, "success", {"cached": False, "sha": sha[:8] if sha else 'unknown', "large_file": True})
                     return deserialized
                 else:
                     print(f"[JSON_STORE] Failed to download {filename}: HTTP {dl.status_code}")
+                    if chain_id and op:
+                        flow.complete_operation(chain_id, op.id, "error", {"status_code": dl.status_code})
             
             print(f"[JSON_STORE] No content in {filename}")
+            if chain_id and op:
+                flow.complete_operation(chain_id, op.id, "error", {"reason": "no_content"})
             return None
         except Exception as e:
             print(f"[JSON_STORE] Error reading {filename}: {e}")
@@ -227,7 +259,8 @@ def _execute_write(filename: str, data: Any, user_id: Optional[str] = None) -> b
         if resp.status_code in (200, 201):
             print(f"[JSON_STORE] {filename} written successfully")
             # Update cache with new data and new SHA instead of invalidating
-            new_sha = resp.json().get("sha")
+            response_data = resp.json()
+            new_sha = response_data.get("sha") or response_data.get("content", {}).get("sha")
             cache.set(cache_key, data, new_sha)
             return True
         
@@ -387,27 +420,6 @@ def set_system_config(config: Dict, user_id: Optional[str] = None, immediate: bo
     if result and user_id:
         import audit_logger
         audit_logger.log_write_operation("system_config", "update", None, user_id, {"keys": list(config.keys())})
-    return result
-
-
-def get_availabilities() -> List[Dict]:
-    """Get availabilities from availabilities.json."""
-    data = _read_json_file("availabilities.json")
-    return data if data else []
-
-
-def set_availabilities(availabilities: List[Dict], user_id: Optional[str] = None, immediate: bool = False) -> bool:
-    """Set availabilities in availabilities.json with audit logging.
-    
-    Args:
-        availabilities: List of availability dictionaries
-        user_id: Optional user ID for audit logging
-        immediate: If True, bypass debouncing and write immediately
-    """
-    result = _write_json_file("availabilities.json", availabilities, user_id=user_id, immediate=immediate)
-    if result and user_id:
-        import audit_logger
-        audit_logger.log_write_operation("availability", "update", None, user_id, {"count": len(availabilities)})
     return result
 
 

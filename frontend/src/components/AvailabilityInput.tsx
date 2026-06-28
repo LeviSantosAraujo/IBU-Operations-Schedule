@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import DatePicker from 'react-datepicker'
 import 'react-datepicker/dist/react-datepicker.css'
 import { format, addDays, startOfWeek } from 'date-fns'
-import { getEmployees, submitAvailability, getEmployeeAvailability } from '../api'
+import { getEmployees, createAvailabilityRequest, getMyAvailabilityRequests } from '../api'
 import { auth } from '../auth'
 import { Save, Check, Calendar } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
@@ -70,13 +70,29 @@ export default function AvailabilityInput({ initialDate }: AvailabilityInputProp
     if (!selectedEmployee || !weekStart) return
     const formattedDate = format(weekStart, 'yyyy-MM-dd')
     try {
-      const data = await getEmployeeAvailability(selectedEmployee, formattedDate)
+      const data = await getMyAvailabilityRequests()
+      const weekEnd = format(addDays(weekStart, 6), 'yyyy-MM-dd')
+      const weekRequests = data.filter((r: any) => 
+        r.start_date <= weekEnd && r.end_date >= formattedDate
+      )
+      
       const availMap: any = {}
       days.forEach(day => {
-        availMap[day] = data[day] || 'blank'
+        availMap[day] = 'blank'
       })
+      
+      weekRequests.forEach((req: any) => {
+        req.days_of_week.forEach((day: string) => {
+          if (req.request_type === 'day_off') {
+            availMap[day] = 'off'
+          } else {
+            availMap[day] = 'blank'
+          }
+        })
+      })
+      
       setAvailability(availMap)
-      setNotes(data.notes || '')
+      setNotes('')
     } catch (err) {
       // No existing availability, set defaults
       const defaultAvail: any = {}
@@ -104,21 +120,34 @@ export default function AvailabilityInput({ initialDate }: AvailabilityInputProp
     setError('')
     try {
       const formattedDate = format(weekStart, 'yyyy-MM-dd')
-      await submitAvailability({
-        employee_id: selectedEmployee,
-        week_start_date: formattedDate,
-        ...availability,
-        notes: notes
-      })
+      const weekEnd = format(addDays(weekStart, 6), 'yyyy-MM-dd')
+      
+      // Get enabled days (not blank or off)
+      const enabledDays = days.filter(day => availability[day] !== 'blank' && availability[day] !== 'off')
+      
+      if (enabledDays.length === 0) {
+        setError('Please select at least one day with availability')
+        setLoading(false)
+        return
+      }
+      
+      // Submit availability request for each enabled day
+      for (const day of enabledDays) {
+        await createAvailabilityRequest({
+          request_type: 'availability',
+          start_date: formattedDate,
+          end_date: weekEnd,
+          days_of_week: [day],
+          start_time: '09:00',
+          end_time: '17:00',
+          employee_comment: notes
+        })
+      }
+      
       setSaved(true)
       setTimeout(() => setSaved(false), 3000)
     } catch (err: any) {
-      // Check if error is about Excel not being configured
-      if (err.message && err.message.includes('Excel database not configured')) {
-        setError('The Excel database has not been set up yet. Please ask your manager to either upload an existing Excel file or create a new one.')
-      } else {
-        setError('Error saving availability. Please try again.')
-      }
+      setError('Error submitting availability request. Please try again.')
     } finally {
       setLoading(false)
     }

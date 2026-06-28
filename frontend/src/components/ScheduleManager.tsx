@@ -302,11 +302,8 @@ export default function ScheduleManager() {
     try {
       await approveAvailabilityRequest(requestId, comment)
       loadAvailabilityRequests()
-      loadSchedule()
-      // Wait for backend debounce (500ms) before refreshing
-      setTimeout(() => {
-        window.dispatchEvent(new CustomEvent('scheduleUpdate'))
-      }, 1000)
+      // Immediately refresh schedule to show approved locked shifts
+      await loadSchedule()
       setShowApprovalModal(false)
       setManagerComment('')
       setSelectedRequest(null)
@@ -502,12 +499,11 @@ export default function ScheduleManager() {
     if (!schedule) return
     try {
       setSaving(true)
-      await saveSchedule(schedule)
+      const savedSchedule = await saveSchedule(schedule)
+      setSchedule(savedSchedule)
+      setApprovedAvailabilities(savedSchedule.approved_availabilities || [])
+      setAvailabilityRequests(savedSchedule.availability_requests || [])
       setSaved(true)
-      // Wait for backend debounce (500ms) before refreshing
-      setTimeout(() => {
-        window.dispatchEvent(new CustomEvent('scheduleUpdate'))
-      }, 1000)
       setTimeout(() => setSaved(false), 3000)
     } catch (err) {
       alert('Error saving schedule')
@@ -539,11 +535,13 @@ export default function ScheduleManager() {
       const formattedDate = format(weekStart, 'yyyy-MM-dd')
       await clearSchedule(formattedDate)
       alert('Schedule cleared! Events and locations have been preserved.')
-      // Dispatch event after delay to ensure backend write completes
-      setTimeout(() => {
-        window.dispatchEvent(new CustomEvent('scheduleUpdate'))
-        setGlobalLoading(false)
-      }, 3000)
+      // Immediately update local state to only locked shifts
+      const lockedShifts = schedule.shifts.filter((s: Shift) => s.locked)
+      setSchedule({ ...schedule, shifts: lockedShifts, total_hours: recalculateHours(lockedShifts) })
+      // Then reload from backend to confirm
+      await new Promise(resolve => setTimeout(resolve, 2000))
+      await loadSchedule()
+      setGlobalLoading(false)
     } catch (err) {
       alert('Error clearing schedule')
       setGlobalLoading(false)
@@ -1414,14 +1412,17 @@ export default function ScheduleManager() {
                                 const avail = empDayAvailabilities[0]
                                 const requestType = avail?.request_type || 'availability'
                                 const isDayOff = requestType === 'day_off'
+                                const typeLabel = isDayOff ? 'Day Off' : 'Availability'
                                 const timeRange = avail?.start_time && avail?.end_time
-                                  ? `${avail.start_time} - ${avail.end_time}`
-                                  : 'All day'
-                                const displayLabel = isDayOff ? 'Day Off' : timeRange
+                                  ? `${formatTime12Hour(avail.start_time)} – ${formatTime12Hour(avail.end_time)}`
+                                  : ''
                                 return (
-                                  <div className="text-xs font-medium p-1 rounded bg-blue-100 text-blue-700 border border-blue-300">
-                                    <div>📅 {displayLabel}</div>
-                                    {avail?.employee_comment && <div className="text-[10px] opacity-70">{avail.employee_comment}</div>}
+                                  <div className={`rounded p-2 mb-1 text-xs border ${
+                                    isDayOff ? 'border-black bg-black text-white' : 'border-gray-400 bg-gray-200 text-gray-600'
+                                  }`}>
+                                    <div className="font-semibold">🔒 {typeLabel}</div>
+                                    {timeRange && <div className="font-medium">{timeRange}</div>}
+                                    {avail?.employee_comment && <div className="italic text-xs">{avail.employee_comment}</div>}
                                   </div>
                                 )
                               })()}
@@ -1432,18 +1433,12 @@ export default function ScheduleManager() {
                                 const isRejected = latestStatus === 'AvailabilityRequestStatus.REJECTED' || latestStatus === 'rejected'
                                 const isPending = latestStatus === 'AvailabilityRequestStatus.PENDING' || latestStatus === 'pending'
                                 const managerComment = latest?.manager_comment || ''
-                                
-                                // For approved: show "Approved" if no comment, otherwise show comment
-                                // For rejected: always show comment
-                                // For pending: show "Pending"
-                                let displayText = ''
-                                if (isApproved) {
-                                  displayText = managerComment || 'Approved'
-                                } else if (isRejected) {
-                                  displayText = managerComment || 'Rejected'
-                                } else if (isPending) {
-                                  displayText = 'Pending'
-                                }
+                                const requestType = latest?.request_type || 'availability'
+                                const isDayOff = requestType === 'day_off'
+                                const typeLabel = isDayOff ? 'Day Off' : 'Availability'
+                                const timeRange = !isDayOff && latest?.start_time && latest?.end_time
+                                  ? `${formatTime12Hour(latest.start_time)} – ${formatTime12Hour(latest.end_time)}`
+                                  : ''
                                 
                                 const statusColor = isApproved ? 'bg-green-100 text-green-700' :
                                                    isRejected ? 'bg-red-100 text-red-700' :
@@ -1451,7 +1446,10 @@ export default function ScheduleManager() {
                                 const count = empDayRequests.length
                                 return (
                                   <div className={`text-xs font-medium p-1 rounded ${statusColor}`}>
-                                    <div>{displayText}</div>
+                                    {isPending && <div>⏳ Pending {typeLabel}</div>}
+                                    {isApproved && <div>{managerComment || `Approved ${typeLabel}`}</div>}
+                                    {isRejected && <div>{managerComment || `Rejected ${typeLabel}`}</div>}
+                                    {timeRange && <div>{timeRange}</div>}
                                     {count > 1 && <div className="text-[10px] opacity-70">{count}x submitted</div>}
                                   </div>
                                 )
@@ -1557,22 +1555,22 @@ export default function ScheduleManager() {
                                 const isRejected = latestStatus === 'AvailabilityRequestStatus.REJECTED' || latestStatus === 'rejected'
                                 const isPending = latestStatus === 'AvailabilityRequestStatus.PENDING' || latestStatus === 'pending'
                                 const managerComment = latest?.manager_comment || ''
-                                
-                                let displayText = ''
-                                if (isApproved) {
-                                  displayText = managerComment || 'Approved'
-                                } else if (isRejected) {
-                                  displayText = managerComment || 'Rejected'
-                                } else if (isPending) {
-                                  displayText = 'Pending'
-                                }
+                                const requestType = latest?.request_type || 'availability'
+                                const isDayOff = requestType === 'day_off'
+                                const typeLabel = isDayOff ? 'Day Off' : 'Availability'
+                                const timeRange = !isDayOff && latest?.start_time && latest?.end_time
+                                  ? `${formatTime12Hour(latest.start_time)} – ${formatTime12Hour(latest.end_time)}`
+                                  : ''
                                 
                                 const statusColor = isApproved ? 'bg-green-100 text-green-700' :
                                                    isRejected ? 'bg-red-100 text-red-700' :
                                                    isPending ? 'bg-yellow-100 text-yellow-700' : ''
                                 return (
                                   <div className={`text-xs font-medium p-1 rounded ${statusColor}`}>
-                                    {displayText}
+                                    {isPending && <div>⏳ Pending {typeLabel}</div>}
+                                    {isApproved && <div>{managerComment || `Approved ${typeLabel}`}</div>}
+                                    {isRejected && <div>{managerComment || `Rejected ${typeLabel}`}</div>}
+                                    {timeRange && <div>{timeRange}</div>}
                                   </div>
                                 )
                               })()}
@@ -1580,13 +1578,17 @@ export default function ScheduleManager() {
                                 const avail = empDayAvailabilities[0]
                                 const requestType = avail?.request_type || 'availability'
                                 const isDayOff = requestType === 'day_off'
+                                const typeLabel = isDayOff ? 'Day Off' : 'Availability'
                                 const timeRange = avail?.start_time && avail?.end_time
-                                  ? `${avail.start_time} - ${avail.end_time}`
-                                  : 'All day'
-                                const displayLabel = isDayOff ? 'Day Off' : timeRange
+                                  ? `${formatTime12Hour(avail.start_time)} – ${formatTime12Hour(avail.end_time)}`
+                                  : ''
                                 return (
-                                  <div className="text-xs p-1 rounded bg-blue-50 text-blue-700">
-                                    📅 {displayLabel}
+                                  <div className={`rounded p-2 mb-1 text-xs border ${
+                                    isDayOff ? 'border-black bg-black text-white' : 'border-gray-400 bg-gray-200 text-gray-600'
+                                  }`}>
+                                    <div className="font-semibold">🔒 {typeLabel}</div>
+                                    {timeRange && <div className="font-medium">{timeRange}</div>}
+                                    {avail?.employee_comment && <div className="italic text-xs">{avail.employee_comment}</div>}
                                   </div>
                                 )
                               })()}

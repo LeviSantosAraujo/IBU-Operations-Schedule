@@ -100,23 +100,6 @@ export const updateManagerPassword = (employeeId: string, password: string) =>
 export const deleteEmployee = (id: string) => 
   api.delete(`/employees/${id}`).then(r => r.data)
 
-// Availability
-export const getAvailabilities = (weekStartDate?: string, employeeId?: string) => {
-  const params = new URLSearchParams()
-  if (weekStartDate) params.append('week_start_date', weekStartDate)
-  if (employeeId) params.append('employee_id', employeeId)
-  return api.get(`/availability?${params}`).then(r => r.data)
-}
-
-export const getEmployeeAvailability = (employeeId: string, weekStartDate: string) => 
-  api.get(`/availability/${employeeId}/${weekStartDate}`).then(r => r.data)
-
-export const submitAvailability = (data: any) => 
-  api.post('/availability', data).then(r => r.data)
-
-export const getAvailabilityColors = () => 
-  api.get('/availability/colors').then(r => r.data)
-
 // Schedules
 export const getSchedules = () => 
   api.get('/schedules').then(r => r.data)
