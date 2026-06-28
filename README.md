@@ -176,6 +176,37 @@ This ensures:
 - Removed wildcard CORS origin (only allows specific frontend domains)
 - Added rate limiting to auth endpoints (10 attempts per 5 minutes per IP)
 - Added ADMIN_SECRET_KEY to Vercel environment variables
+- Removed all diagnostic endpoints (security risk - exposed sensitive data without authentication)
+- Removed unprotected admin password reset endpoint
+
+### Security Posture
+**Implemented Security Measures:**
+- JWT-based authentication with stateless tokens (works with serverless)
+- Rate limiting on auth endpoints (10 attempts per 5 minutes per IP)
+- CORS restricted to specific frontend domains
+- Environment variables for all secrets (JWT_SECRET, ADMIN_SECRET_KEY, GITHUB_TOKEN)
+- Manager-only access controls for sensitive operations
+- Audit logging for all write operations
+
+**Known Limitations (Non-Critical for Internal Use):**
+- Password hashing uses SHA-256 truncated to 16 characters (not bcrypt)
+  - Impact: Acceptable for internal system with no sensitive data
+  - Recommendation: Upgrade to bcrypt if system becomes externally facing
+- Token blacklist is in-memory (lost on server restart)
+  - Impact: Limited token revocation capability
+  - Recommendation: Use Redis for distributed token blacklist
+- JWT tokens stored in localStorage (vulnerable to XSS)
+  - Impact: Acceptable for internal system with trusted users
+  - Recommendation: Use httpOnly cookies for external deployments
+- GitHub token stored in environment variables
+  - Impact: Standard practice, requires Vercel environment variable configuration
+  - Recommendation: Use fine-grained PAT with minimal permissions (Contents read/write only)
+
+**GitHub Security:**
+- Uses fine-grained Personal Access Token (PAT) with Contents read/write permissions
+- Token stored in Vercel environment variables (not in code)
+- Data stored on separate branch (data branch) to avoid triggering production redeploys
+- Optimistic locking with SHA caching prevents race conditions
 
 ### Locations
 - Ground Floor (GR) - 7:30 AM - 6:00 PM
