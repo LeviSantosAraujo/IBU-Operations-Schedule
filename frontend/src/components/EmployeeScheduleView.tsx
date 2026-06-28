@@ -2,12 +2,12 @@ import { useState, useEffect } from 'react'
 import DatePicker from 'react-datepicker'
 import 'react-datepicker/dist/react-datepicker.css'
 import { format, addDays, startOfWeek } from 'date-fns'
-import { getSchedule, getEmployees, getMyAvailabilityRequests } from '../api'
+import { getSchedule, getEmployees, getMyAvailabilityRequests, getEvents } from '../api'
 import { Calendar, ChevronLeft, ChevronRight, Clock, MapPin } from 'lucide-react'
 import { auth } from '../auth'
 
 const days = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']
-const locationColors: any = {
+const baseLocationColors: any = {
   'event': 'loc-event',
   'ground': 'loc-ground',
   'ground floor': 'loc-ground',
@@ -31,9 +31,8 @@ const locationColors: any = {
   'day_off': 'loc-day-off'
 }
 
-const locations = [
+const baseLocations = [
   { id: 'all', name: 'All Locations', dotColor: '' },
-  { id: 'event', name: 'Event', dotColor: '#F97316' },
   { id: 'ground floor', name: 'Ground Floor', dotColor: '#3B82F6' },
   { id: '2nd floor', name: '2nd Floor', dotColor: '#10B981' },
   { id: '6th floor', name: '6th Floor', dotColor: '#EAB308' },
@@ -70,13 +69,36 @@ export default function EmployeeScheduleView() {
   const [employees, setEmployees] = useState<any[]>([])
   const [selectedLocation, setSelectedLocation] = useState<string>('all')
   const [myAvailabilityRequests, setMyAvailabilityRequests] = useState<any[]>([])
+  const [events, setEvents] = useState<any[]>([])
 
   const user = auth.getUser()
+
+  // Dynamic locations - base locations + event locations
+  const locations = [
+    ...baseLocations,
+    ...events.map((e: any) => ({
+      id: e.name.toLowerCase().replace(/\s+/g, '_'),
+      name: e.name,
+      dotColor: '#F97316',
+      isEvent: true
+    }))
+  ]
+
+  // Dynamic location colors - base colors + event colors
+  const locationColors: any = {
+    ...baseLocationColors,
+    ...events.reduce((acc: any, e: any) => {
+      acc[e.name.toLowerCase().replace(/\s+/g, '_')] = 'loc-event'
+      acc[e.name] = 'loc-event'
+      return acc
+    }, {})
+  }
 
   useEffect(() => {
     loadEmployees()
     loadSchedule()
     loadMyAvailabilityRequests()
+    loadEvents()
   }, [weekStart])
 
   // Listen for schedule update events (e.g., from notification bell approvals)
@@ -134,6 +156,18 @@ export default function EmployeeScheduleView() {
     }
   }
 
+  const loadEvents = async () => {
+    try {
+      const data = await getEvents()
+      // Filter events for current week on frontend
+      const formattedDate = format(weekStart, 'yyyy-MM-dd')
+      const weekEvents = data.filter((e: any) => e.week_start_date === formattedDate)
+      setEvents(weekEvents)
+    } catch (err) {
+      console.error('Failed to load events:', err)
+    }
+  }
+
   const getWeekDates = () => {
     return days.map((_, index) => addDays(weekStart, index))
   }
@@ -158,18 +192,86 @@ export default function EmployeeScheduleView() {
   }
 
   const getShiftColorClass = (shift: Shift) => {
+    if (shift.locked) return ''
+    // For event shifts, use event name for color
+    if (shift.is_event && shift.event_name) {
+      const eventKey = shift.event_name.toLowerCase().replace(/\s+/g, '_')
+      return locationColors[eventKey] || locationColors[shift.event_name.toLowerCase()] || 'loc-event'
+    }
     const loc = shift.location || shift.floor || 'ground'
-    // For multi-location (e.g. "6th Floor, Call Center"), use the first one for color
     const firstLoc = loc.split(',')[0].toLowerCase().trim()
     return locationColors[firstLoc] || locationColors[loc.toLowerCase().trim()] || 'loc-ground'
   }
 
+  const isWfhShift = (shift: Shift) => {
+    const values = [shift.location, shift.floor, shift.job_type]
+      .filter(Boolean)
+      .flatMap((value) => String(value).split(','))
+      .map((value) => value.toLowerCase().trim().replace(/_/g, ' '))
+    return values.some((value) => value === 'wfh' || value === 'working from home' || value === 'working home')
+  }
+
   const isShiftHighlighted = (shift: Shift) => {
     if (selectedLocation === 'all') return true
-    if (!shift.location) return false
-    // Match if ANY of the comma-separated locations matches the selected one
-    const shiftLocs = shift.location.split(',').map(l => l.toLowerCase().trim())
-    return shiftLocs.includes(selectedLocation.toLowerCase())
+    if (selectedLocation === 'wfh' && isWfhShift(shift)) return true
+    // Check by location
+    if (shift.location) {
+      const shiftLocs = shift.location.split(',').map((l: string) => l.toLowerCase().trim())
+      if (shiftLocs.includes(selectedLocation.toLowerCase())) return true
+    }
+    // Check by call center role
+    if (selectedLocation === 'call center' && shift.is_call_center) {
+      return true
+    }
+    // Check by event name for event shifts
+    if (shift.is_event && shift.event_name && shift.event_name.toLowerCase().replace(/\s+/g, '_') === selectedLocation.toLowerCase()) {
+      return true
+    }
+    return false
+  }
+
+  const formatTime12Hour = (timeStr: string): string => {
+    if (!timeStr) return ''
+    
+    // Check if time already has AM/PM (e.g., "9:00 AM", "5:00 PM")
+    const match12Hour = timeStr.match(/(\d{1,2}):(\d{2})\s*(AM|PM|am|pm)/i)
+    if (match12Hour) {
+      const hour = match12Hour[1]
+      const minute = match12Hour[2]
+      const meridiem = match12Hour[3].toUpperCase()
+      return `${hour}:${minute} ${meridiem}`
+    }
+    
+    // Parse 24-hour HH:MM format
+    const [hourStr, minute] = timeStr.split(':')
+    const hour = parseInt(hourStr)
+    
+    if (isNaN(hour)) return timeStr
+    
+    const meridiem = hour >= 12 ? 'PM' : 'AM'
+    const hour12 = hour > 12 ? hour - 12 : (hour === 0 ? 12 : hour)
+    
+    return `${hour12}:${minute} ${meridiem}`
+  }
+
+  const formatAvailabilityLabel = (label: string | undefined) => {
+    if (!label) return 'Approved'
+    if (label === 'Day Off') return 'Day Off'
+    return label.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+  }
+
+  const deduplicateLockedShifts = (shifts: Shift[]) => {
+    const nonPending = shifts.filter(s => !(s.locked && s.id.startsWith('pending_')))
+    const pending = shifts.filter(s => s.locked && s.id.startsWith('pending_'))
+    const keptPending = pending.filter(p => {
+      return !nonPending.some(s =>
+        s.employee_id === p.employee_id &&
+        s.day_of_week === p.day_of_week &&
+        s.start_time === p.start_time &&
+        s.end_time === p.end_time
+      )
+    })
+    return [...nonPending, ...keptPending]
   }
 
   const weekDates = getWeekDates()
@@ -253,10 +355,7 @@ export default function EmployeeScheduleView() {
         {/* Focused Location Panel */}
         {schedule && selectedLocation !== 'all' && (() => {
           const locLabel = locations.find(l => l.id === selectedLocation)?.name || selectedLocation
-          const filteredShifts = schedule.shifts.filter((s: Shift) => {
-            if (!s.location) return false
-            return s.location.split(',').map((l: string) => l.toLowerCase().trim()).includes(selectedLocation.toLowerCase())
-          })
+          const filteredShifts = schedule.shifts.filter((s: Shift) => isShiftHighlighted(s))
           // Group by day
           const byDay: Record<string, Shift[]> = {}
           days.forEach(d => { byDay[d] = [] })
@@ -291,15 +390,15 @@ export default function EmployeeScheduleView() {
                                 : 'border-gray-400 bg-gray-200 text-gray-600'
                           }`}>
                             <div className="font-semibold">
-                              {shift.id.startsWith('pending_') ? '⏳ Pending' : '🔒'} {shift.locked_availability_type || 'Approved'}
+                              {shift.id.startsWith('pending_') ? '⏳ Pending' : '🔒'} {formatAvailabilityLabel(shift.locked_availability_type)}
                             </div>
-                            <div className="font-medium">{shift.start_time} – {shift.end_time}</div>
+                            <div className="font-medium">{formatTime12Hour(shift.start_time)} – {formatTime12Hour(shift.end_time)}</div>
                             {shift.comment && <div className="italic text-xs">{shift.comment}</div>}
                           </div>
                         ) : (
                           <div key={shift.id} className="bg-white bg-opacity-70 rounded p-1 mb-1 text-xs border border-white shadow-sm">
                             <div className="font-semibold">{emp?.name || shift.employee_id}</div>
-                            <div className="text-gray-600">{shift.start_time} – {shift.end_time}</div>
+                            <div className="text-gray-600">{formatTime12Hour(shift.start_time)} – {formatTime12Hour(shift.end_time)}</div>
                             {shift.comment && <div className="text-gray-500 italic">{shift.comment}</div>}
                           </div>
                         )
@@ -314,6 +413,7 @@ export default function EmployeeScheduleView() {
 
         {/* Main Schedule Grid */}
         {schedule ? (
+          <>
           <div className="bg-white rounded-lg shadow overflow-x-auto">
             <table className="w-full min-w-[1200px]">
               <thead>
@@ -342,7 +442,7 @@ export default function EmployeeScheduleView() {
                         {empHours.toFixed(1)}
                       </td>
                       {days.map(day => {
-                        const shifts = getShiftsForCell(emp.id, day)
+                        const shifts = deduplicateLockedShifts(getShiftsForCell(emp.id, day))
                         const isCurrentUser = user && emp.id === user.employee_id
                         // Get all requests for this day and sort by created_at descending (most recent first)
                         const dayRequests = isCurrentUser ? myAvailabilityRequests
@@ -385,9 +485,9 @@ export default function EmployeeScheduleView() {
                                   }`}
                                 >
                                   <div className="font-semibold">
-                                    {shift.id.startsWith('pending_') ? '⏳ Pending' : '🔒'} {shift.locked_availability_type || 'Approved'}
+                                    {shift.id.startsWith('pending_') ? '⏳ Pending' : '🔒'} {formatAvailabilityLabel(shift.locked_availability_type)}
                                   </div>
-                                  <div className="font-medium">{shift.start_time} – {shift.end_time}</div>
+                                  <div className="font-medium">{formatTime12Hour(shift.start_time)} – {formatTime12Hour(shift.end_time)}</div>
                                   {shift.comment && <div className="italic text-xs">{shift.comment}</div>}
                                 </div>
                                 ) : null
@@ -396,7 +496,7 @@ export default function EmployeeScheduleView() {
                                   key={shift.id}
                                   className={`shift-card p-2 rounded mb-1 text-xs border relative ${getShiftColorClass(shift)} ${!isShiftHighlighted(shift) ? 'opacity-30' : ''}`}
                                 >
-                                  <div className="font-medium">{shift.start_time} - {shift.end_time}</div>
+                                  <div className="font-medium">{formatTime12Hour(shift.start_time)} - {formatTime12Hour(shift.end_time)}</div>
                                   <div className="text-gray-700 flex items-center gap-1">
                                     <Clock className="w-3 h-3" />
                                     {shift.hours}h
@@ -405,6 +505,9 @@ export default function EmployeeScheduleView() {
                                     <div className="text-gray-700 flex items-center gap-1">
                                       <MapPin className="w-3 h-3" />
                                       {shift.location}
+                                      {shift.is_call_center && (
+                                        <span className="ml-1 px-1.5 py-0.5 bg-blue-100 text-blue-700 text-xs rounded font-medium">CC</span>
+                                      )}
                                     </div>
                                   )}
                                   {shift.comment && (
@@ -438,6 +541,115 @@ export default function EmployeeScheduleView() {
               </tbody>
             </table>
           </div>
+
+              {/* Mobile Card View */}
+              <div className="lg:hidden space-y-4">
+                {employees.map(emp => {
+                  const empHours = getEmployeeHours(emp.id)
+                  const isCurrentUser = user && emp.id === user.employee_id
+                  return (
+                    <div key={emp.id} className="bg-white rounded-lg shadow p-4">
+                      <div className="flex justify-between items-center mb-3">
+                        <div>
+                          <h3 className="font-semibold">{emp.name}</h3>
+                          <p className="text-xs text-gray-500">{emp.employee_type}</p>
+                        </div>
+                        <div className={`text-sm font-bold ${getHoursColorClass(emp, empHours)}`}>
+                          {empHours.toFixed(1)}h
+                        </div>
+                      </div>
+                      <div className="space-y-2">
+                        {days.map((day, i) => {
+                          const shifts = deduplicateLockedShifts(getShiftsForCell(emp.id, day))
+                          const empDayRequests = isCurrentUser ? myAvailabilityRequests
+                            .filter((r: any) => {
+                              if (r.employee_id !== emp.id) return false
+                              if (Array.isArray(r.days_of_week) && r.days_of_week.length > 0) {
+                                return r.days_of_week.some((d: string) => d.toLowerCase() === day)
+                              }
+                              if (r.day_of_week) {
+                                return r.day_of_week.toLowerCase() === day
+                              }
+                              return false
+                            })
+                            .sort((a: any, b: any) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime()) : []
+
+                          const hasShifts = shifts.length > 0
+                          const showRequests = empDayRequests.length > 0 && !hasShifts
+
+                          return (
+                            <div key={`${emp.id}-${day}`} className="border-b pb-2 last:border-0">
+                              <div className="text-xs font-semibold text-gray-600 mb-1">
+                                {day.slice(0, 3)} {format(weekDates[i], 'M/d')}
+                              </div>
+                              {shifts.map((shift: Shift) => (
+                                shift.locked ? (
+                                  isCurrentUser ? (
+                                  <div
+                                    key={shift.id}
+                                    className={`rounded p-2 mb-1 text-xs border ${
+                                      shift.id.startsWith('pending_') 
+                                        ? 'border-yellow-400 bg-yellow-100 text-yellow-800' 
+                                        : shift.location === 'day off' 
+                                          ? 'border-black bg-black text-white' 
+                                          : 'border-gray-400 bg-gray-200 text-gray-600'
+                                    }`}
+                                  >
+                                    <div className="font-semibold">
+                                      {shift.id.startsWith('pending_') ? '⏳ Pending' : '🔒'} {formatAvailabilityLabel(shift.locked_availability_type)}
+                                    </div>
+                                    <div className="font-medium">{formatTime12Hour(shift.start_time)} – {formatTime12Hour(shift.end_time)}</div>
+                                    {shift.comment && <div className="italic text-xs">{shift.comment}</div>}
+                                  </div>
+                                  ) : null
+                                ) : (
+                                  <div
+                                    key={shift.id}
+                                    className={`p-2 rounded mb-1 text-xs border ${getShiftColorClass(shift)}`}
+                                  >
+                                    <div className="font-medium">{formatTime12Hour(shift.start_time)} - {formatTime12Hour(shift.end_time)}</div>
+                                    <div className="text-gray-700 flex items-center gap-1">
+                                      <Clock className="w-3 h-3" />
+                                      {shift.hours}h
+                                    </div>
+                                    {shift.location && (
+                                      <div className="text-gray-700 flex items-center gap-1">
+                                        <MapPin className="w-3 h-3" />
+                                        {shift.location}
+                                        {shift.is_call_center && (
+                                          <span className="ml-1 px-1.5 py-0.5 bg-blue-100 text-blue-700 text-xs rounded font-medium">CC</span>
+                                        )}
+                                      </div>
+                                    )}
+                                  </div>
+                                )
+                              ))}
+                              {showRequests && (() => {
+                                const latest = empDayRequests[0]
+                                const latestStatus = latest?.status || ''
+                                const isApproved = latestStatus === 'AvailabilityRequestStatus.APPROVED' || latestStatus === 'approved'
+                                const isPending = latestStatus === 'AvailabilityRequestStatus.PENDING' || latestStatus === 'pending'
+                                const statusColor = isApproved ? 'bg-green-100 text-green-700' :
+                                                   isPending ? 'bg-yellow-100 text-yellow-700' : ''
+                                return (
+                                  <div className={`text-xs font-medium p-1 rounded ${statusColor}`}>
+                                    {isPending && <div>⏳ Pending</div>}
+                                    {isApproved && <div>✅ Approved</div>}
+                                  </div>
+                                )
+                              })()}
+                              {!hasShifts && !showRequests && (
+                                <div className="text-xs text-gray-300 italic">—</div>
+                              )}
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+          </>
         ) : (
           <div className="text-center py-12 bg-white rounded-lg shadow">
             <p className="text-gray-500">No schedule for this week yet.</p>
