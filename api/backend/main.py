@@ -609,7 +609,12 @@ async def download_excel():
     return StreamingResponse(
         buffer,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": "attachment; filename=IBU_Schedule.xlsx"}
+        headers={
+            "Content-Disposition": "attachment; filename=IBU_Schedule.xlsx",
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET",
+            "Access-Control-Allow-Headers": "*"
+        }
     )
 
 def format_time_range(start_time: str, end_time: str) -> str:
