@@ -501,16 +501,15 @@ async def download_excel():
     from openpyxl import Workbook
     from datetime import datetime, timedelta
 
+    # Get all schedules from GitHub JSON first
+    schedules = staging_store.get_schedules()
+    employees = staging_store.get_employees()
+    
     # Create Excel workbook
     wb = Workbook()
     
-    # Remove default sheet
-    if "Sheet" in wb.sheetnames:
-        wb.remove(wb["Sheet"])
-    
-    # Get all schedules from GitHub JSON
-    schedules = staging_store.get_schedules()
-    employees = staging_store.get_employees()
+    # Track if any sheets were created
+    sheets_created = False
     
     # Create employee lookup
     employee_map = {emp['id']: emp['name'] for emp in employees}
@@ -538,6 +537,7 @@ async def download_excel():
         
         # Create weekly sheet
         ws = wb.create_sheet(sheet_name)
+        sheets_created = True
         
         # Header row
         headers = ["Employee", "Mon", "", "Tue", "", "Wed", "", "Thu", "", "Fri", "", "Sat", "", "Sun", ""]
@@ -594,12 +594,16 @@ async def download_excel():
             
             ws.append(row)
     
-    # If no schedules, create empty workbook with just header
-    if not schedules:
+    # If no sheets were created from schedules, use the default sheet
+    if not sheets_created:
         ws = wb.active
         ws.title = "June 1-7"
         headers = ["Employee", "Mon", "", "Tue", "", "Wed", "", "Thu", "", "Fri", "", "Sat", "", "Sun", ""]
         ws.append(headers)
+    else:
+        # Remove the default "Sheet" since we created schedule sheets
+        if "Sheet" in wb.sheetnames:
+            wb.remove(wb["Sheet"])
     
     # Save to buffer
     buffer = io.BytesIO()
