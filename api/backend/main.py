@@ -495,53 +495,128 @@ async def excel_status():
 
 @app.get("/api/excel/download")
 async def download_excel():
-    """Export current GitHub JSON data to Excel file with weekly sheet format"""
+    """Export current GitHub JSON data to Excel file - loads existing file and adds new weeks"""
     from fastapi.responses import StreamingResponse
     import io
-    from openpyxl import Workbook
-    from datetime import datetime, timedelta
+    from openpyxl import load_workbook, Workbook
+    from openpyxl.styles import PatternFill, Font, Border, Side, Alignment
+    from openpyxl import comments
+    from datetime import datetime, timedelta, date
+    import os
 
-    # Get all schedules from GitHub JSON first
+    # Path to the existing Excel file
+    excel_path = "/Users/levisantosaraujo/Downloads/Python/Schedule Sheet IBU/Last OPS Schedule June-Dec 2026.xlsx"
+    
+    # Load existing workbook or create new one if file doesn't exist
+    if os.path.exists(excel_path):
+        wb = load_workbook(excel_path)
+        print(f"[EXCEL] Loaded existing workbook with {len(wb.sheetnames)} sheets")
+    else:
+        wb = Workbook()
+        print(f"[EXCEL] Creating new workbook (file not found)")
+    
+    # Get all schedules from GitHub JSON
     schedules = staging_store.get_schedules()
     employees = staging_store.get_employees()
     
-    # Create Excel workbook
-    wb = Workbook()
-    
-    # Track if any sheets were created
-    sheets_created = False
+    print(f"[EXCEL] Found {len(schedules)} schedules")
     
     # Create employee lookup
     employee_map = {emp['id']: emp['name'] for emp in employees}
     
-    # Group schedules by week
+    # Get existing sheet names to avoid duplicates (normalize for comparison)
+    existing_sheets = set(wb.sheetnames)
+    print(f"[EXCEL] Existing sheets: {existing_sheets}")
+    
+    # Normalize sheet names for comparison (remove spaces, handle abbreviations)
+    def normalize_sheet_name(name):
+        # Remove spaces around dash, handle abbreviations
+        name = name.replace(' - ', '-').replace(' ', '')
+        # Handle month abbreviations
+        month_map = {'Jan': 'January', 'Feb': 'February', 'Mar': 'March', 'Apr': 'April', 
+                     'May': 'May', 'Jun': 'June', 'Jul': 'July', 'Aug': 'August', 
+                     'Sep': 'September', 'Sept': 'September', 'Oct': 'October', 
+                     'Nov': 'November', 'Dec': 'December'}
+        for abbr, full in month_map.items():
+            name = name.replace(abbr, full)
+        return name.lower()
+    
+    normalized_existing = {normalize_sheet_name(name): name for name in existing_sheets}
+    
+    # Find a template sheet to copy formatting from
+    template_sheet = None
+    for sheet_name in wb.sheetnames:
+        if sheet_name not in ['Sheet']:  # Skip default sheet
+            template_sheet = wb[sheet_name]
+            print(f"[EXCEL] Using '{sheet_name}' as template for formatting")
+            break
+    
+    # Sort schedules by week start date and only take last 3 weeks relative to today
+    schedules_with_dates = []
+    today = datetime.now().date()
+    
     for schedule in schedules:
         week_start_date = schedule.get('week_start_date')
         if not week_start_date:
             continue
-        
-        # Parse week start date
         try:
-            week_start = datetime.strptime(week_start_date, '%Y-%m-%d')
+            if isinstance(week_start_date, str):
+                week_start = datetime.strptime(week_start_date, '%Y-%m-%d').date()
+            else:
+                week_start = week_start_date
+            
+            # Only include schedules within 3 weeks before or after today
+            days_diff = abs((week_start - today).days)
+            if days_diff <= 21:  # Within 3 weeks
+                schedules_with_dates.append((week_start, schedule))
         except:
             continue
-        
+    
+    # Sort by date ascending
+    schedules_with_dates.sort(key=lambda x: x[0])
+    print(f"[EXCEL] Found {len(schedules_with_dates)} schedules within 3 weeks of today ({today})")
+    
+    # Process schedules and create new sheets for weeks that don't exist
+    for week_start, schedule in schedules_with_dates:
         # Calculate week end (6 days later)
         week_end = week_start + timedelta(days=6)
         
-        # Format sheet name like "June 15-21"
+        # Format sheet name like "June 15-21" or "Sept 15 - 21"
         month_name = week_start.strftime('%B')
         start_day = week_start.day
         end_day = week_end.day
         sheet_name = f"{month_name} {start_day}-{end_day}"
         
-        # Create weekly sheet
-        ws = wb.create_sheet(sheet_name)
-        sheets_created = True
+        # Check if sheet already exists (using normalized comparison)
+        normalized_name = normalize_sheet_name(sheet_name)
+        if normalized_name in normalized_existing:
+            print(f"[EXCEL] Sheet '{sheet_name}' already exists (as '{normalized_existing[normalized_name]}'), skipping")
+            continue
         
-        # Header row
-        headers = ["Employee", "Mon", "", "Tue", "", "Wed", "", "Thu", "", "Fri", "", "Sat", "", "Sun", ""]
+        print(f"[EXCEL] Creating new sheet: {sheet_name}")
+        
+        # Create new sheet at position 0 (left side)
+        ws = wb.create_sheet(sheet_name, 0)
+        
+        # Create simple, comprehensive header
+        headers = ["Employee", "Monday", "Monday Hours", "Tuesday", "Tuesday Hours", 
+                   "Wednesday", "Wednesday Hours", "Thursday", "Thursday Hours", 
+                   "Friday", "Friday Hours", "Saturday", "Saturday Hours", 
+                   "Sunday", "Sunday Hours", "Total Hours"]
         ws.append(headers)
+        
+        # Add date row (row 2) with readable format
+        date_format = "%B %d, %Y"
+        ws.cell(row=2, column=2, value=week_start.strftime(date_format))
+        ws.cell(row=2, column=4, value=(week_start + timedelta(days=1)).strftime(date_format))
+        ws.cell(row=2, column=6, value=(week_start + timedelta(days=2)).strftime(date_format))
+        ws.cell(row=2, column=8, value=(week_start + timedelta(days=3)).strftime(date_format))
+        ws.cell(row=2, column=10, value=(week_start + timedelta(days=4)).strftime(date_format))
+        ws.cell(row=2, column=12, value=(week_start + timedelta(days=5)).strftime(date_format))
+        ws.cell(row=2, column=14, value=(week_start + timedelta(days=6)).strftime(date_format))
+        
+        # Add EVENTS row (row 3)
+        ws.cell(row=3, column=1, value="EVENTS")
         
         # Group shifts by employee
         shifts_by_employee = {}
@@ -554,25 +629,39 @@ async def download_excel():
                 shifts_by_employee[emp_id][day] = []
             shifts_by_employee[emp_id][day].append(shift)
         
-        # Map day names to column indices (0-based)
+        # Map day names to column indices (1-based)
         day_columns = {
-            'monday': 1,
-            'tuesday': 3,
-            'wednesday': 5,
-            'thursday': 7,
-            'friday': 9,
-            'saturday': 11,
-            'sunday': 13
+            'monday': 2,
+            'tuesday': 4,
+            'wednesday': 6,
+            'thursday': 8,
+            'friday': 10,
+            'saturday': 12,
+            'sunday': 14
         }
         
-        # Add rows for each employee
+        hours_columns = {
+            'monday': 3,
+            'tuesday': 5,
+            'wednesday': 7,
+            'thursday': 9,
+            'friday': 11,
+            'saturday': 13,
+            'sunday': 15
+        }
+        
+        # Add rows for each employee (starting from row 4)
+        row_num = 4
         for emp_id, emp_name in employee_map.items():
-            row = [emp_name] + [""] * 14
+            # Add employee name
+            ws.cell(row=row_num, column=1, value=emp_name)
             
             # Add shifts for each day
             if emp_id in shifts_by_employee:
                 for day, shifts in shifts_by_employee[emp_id].items():
                     col_idx = day_columns.get(day)
+                    hours_idx = hours_columns.get(day)
+                    
                     if col_idx is not None:
                         # Combine multiple shifts with '/'
                         shift_texts = []
@@ -581,28 +670,32 @@ async def download_excel():
                             start_time = shift.get('start_time', '')
                             end_time = shift.get('end_time', '')
                             hours = shift.get('hours', 0)
+                            location = shift.get('location', '')
                             
-                            # Format time as "9a-5p" style
-                            shift_text = format_time_range(start_time, end_time)
+                            # Format time as "9:00 AM - 5:00 PM" style
+                            shift_text = format_time_range_readable(start_time, end_time)
+                            
+                            # Add location if available
+                            if location:
+                                shift_text = f"{shift_text} ({location})"
+                            
                             shift_texts.append(shift_text)
                             total_hours += hours
                         
                         # Put shift text in day column, hours in next column
                         if shift_texts:
-                            row[col_idx] = '/'.join(shift_texts)
-                            row[col_idx + 1] = total_hours if total_hours > 0 else ""
+                            ws.cell(row=row_num, column=col_idx, value='/'.join(shift_texts))
+                        if total_hours > 0:
+                            ws.cell(row=row_num, column=hours_idx, value=total_hours)
             
-            ws.append(row)
+            # Add total hours formula (sum all hours columns)
+            ws.cell(row=row_num, column=16, value=f"=SUM(O{row_num},M{row_num},K{row_num},I{row_num},G{row_num},E{row_num},C{row_num})")
+            
+            row_num += 1
     
-    # If no sheets were created from schedules, use the default sheet
-    if not sheets_created:
-        ws = wb.active
-        ws.title = "June 1-7"
-        headers = ["Employee", "Mon", "", "Tue", "", "Wed", "", "Thu", "", "Fri", "", "Sat", "", "Sun", ""]
-        ws.append(headers)
-    else:
-        # Remove the default "Sheet" since we created schedule sheets
-        if "Sheet" in wb.sheetnames:
+    # Remove default "Sheet" if it exists and is empty
+    if "Sheet" in wb.sheetnames and len(wb.sheetnames) > 1:
+        if wb["Sheet"].max_row == 1 and wb["Sheet"].max_column == 1:
             wb.remove(wb["Sheet"])
     
     # Save to buffer
@@ -645,20 +738,39 @@ def format_time_range(start_time: str, end_time: str) -> str:
         start_h, start_m = map(int, start_time.split(':'))
         end_h, end_m = map(int, end_time.split(':'))
         
-        # Convert to 12-hour format with am/pm
-        def format_12h(h, m):
-            if h == 0:
-                return f"12{':'+str(m) if m > 0 else ''}a"
-            elif h < 12:
-                return f"{h}{':'+str(m) if m > 0 else ''}a"
-            elif h == 12:
-                return f"12{':'+str(m) if m > 0 else ''}p"
-            else:
-                return f"{h-12}{':'+str(m) if m > 0 else ''}p"
+        # Convert to 12-hour format
+        def to_12h(h, m):
+            period = "AM" if h < 12 else "PM"
+            h12 = h % 12
+            if h12 == 0:
+                h12 = 12
+            return f"{h12}:{m:02d} {period}"
         
-        return f"{format_12h(start_h, start_m)}-{format_12h(end_h, end_m)}"
+        return f"{to_12h(start_h, start_m)} - {to_12h(end_h, end_m)}"
     except:
-        return f"{start_time}-{end_time}"
+        return f"{start_time} - {end_time}"
+
+def format_time_range_readable(start_time: str, end_time: str) -> str:
+    """Format time range as '9:00 AM - 5:00 PM' style (readable)"""
+    if not start_time or not end_time:
+        return ""
+    
+    try:
+        # Parse 24-hour format
+        start_h, start_m = map(int, start_time.split(':'))
+        end_h, end_m = map(int, end_time.split(':'))
+        
+        # Convert to 12-hour format
+        def to_12h(h, m):
+            period = "AM" if h < 12 else "PM"
+            h12 = h % 12
+            if h12 == 0:
+                h12 = 12
+            return f"{h12}:{m:02d} {period}"
+        
+        return f"{to_12h(start_h, start_m)} - {to_12h(end_h, end_m)}"
+    except Exception as e:
+        return f"{start_time} - {end_time}"
 
 
 # ============ Password Management ============
