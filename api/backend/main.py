@@ -606,16 +606,30 @@ async def download_excel():
     wb.save(buffer)
     buffer.seek(0)
     
-    return StreamingResponse(
+    response = StreamingResponse(
         buffer,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={
-            "Content-Disposition": "attachment; filename=IBU_Schedule.xlsx",
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Methods": "GET",
-            "Access-Control-Allow-Headers": "*"
+            "Content-Disposition": "attachment; filename=IBU_Schedule.xlsx"
         }
     )
+    
+    # Manually set CORS headers on response object
+    response.headers["Access-Control-Allow-Origin"] = "*"
+    response.headers["Access-Control-Allow-Methods"] = "GET, OPTIONS"
+    response.headers["Access-Control-Allow-Headers"] = "*"
+    
+    return response
+
+@app.options("/api/excel/download")
+async def download_excel_options():
+    """Handle OPTIONS preflight request for CORS"""
+    from fastapi.responses import Response
+    response = Response()
+    response.headers["Access-Control-Allow-Origin"] = "*"
+    response.headers["Access-Control-Allow-Methods"] = "GET, OPTIONS"
+    response.headers["Access-Control-Allow-Headers"] = "*"
+    return response
 
 def format_time_range(start_time: str, end_time: str) -> str:
     """Format time range as '9a-5p' style"""
